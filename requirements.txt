@@ -1,0 +1,12 @@
+utm
+PyYAML
+folium
+numpy
+pandas
+Pillow
+streamlit
+statsmodels
+matplotlib
+plotly
+scipy
+streamlit-folium
