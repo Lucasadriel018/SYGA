@@ -1,7 +1,7 @@
 folium==0.20.0
 lasio==0.32
-matplotlib==3.9.0
-numpy==2.1.0
+matplotlib==3.8.4
+numpy==1.26.4
 pandas==2.2.0
 pdfplumber==0.10.2
 Pillow==12.1.0
