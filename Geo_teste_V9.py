@@ -4951,8 +4951,14 @@ def geo_page():
 
                                         with col2:
                                             # Gatilho do botão: ao clicar, todos os checkboxes desta coluna iniciam marcados
-                                            smooth_all = st.button("Suavizar todas as curvas", key="smooth_all",
-                                                                   use_container_width=True, type='primary')
+                                            smooth_all = False
+                                            if st.button("Suavizar todas as curvas", key="smooth_all",
+                                                                   use_container_width=True, type='primary'):
+                                                smooth_all = True
+                                            if st.session_state.plot_all_o:
+                                                smooth_all = False
+
+
 
                                             # with st.container(border=True):
                                             #     st.checkbox("Gradiente de Sobrecarga",
