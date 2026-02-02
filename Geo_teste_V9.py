@@ -18,7 +18,6 @@ from streamlit_folium import st_folium
 from scipy.interpolate import griddata, Rbf
 from scipy.ndimage import gaussian_filter1d
 import matplotlib.patheffects as path_effects
-
 from statsmodels.nonparametric.smoothers_lowess import lowess
 
 #  Configurações da página web
@@ -2707,15 +2706,19 @@ def geo_page():
                                 </div>
                                 <div style='position: absolute; top: -197px; left: 200px;
                                             padding: 10px; border-radius: 5px;'>
-                                    <strong>Nível freático: </strong> {st.session_state.nf:.2f} m <br>
+                                    <strong>Nível freático: </strong> {st.session_state.es:.2f} m <br>
                                 </div>
                                 <div style='position: absolute; top: -170px; left: 200px;
                                             padding: 10px; border-radius: 5px;'>
                                     <strong>Air gap: </strong> {st.session_state.rtkb:.2f} m <br>
                                 </div>
+                                <div style='position: absolute; top: -140px; left: 200px;
+                                            padding: 10px; border-radius: 5px;'>
+                                    <strong>Solo <br>
+                                </div>
                                 <div style='position: absolute; top: -90px; left: 200px;
                                             padding: 10px; border-radius: 5px;'>
-                                    <strong>Nível freático: </strong> {st.session_state.es:.2f} m <br>
+                                    <strong>Elevação do solo: </strong> {st.session_state.es - st.session_state.rtkb:.2f} m <br>
                                 </div>
                                 <div style='position: absolute; top: -43px; left: 200px;
                                             padding: 10px; border-radius: 5px;'>
@@ -4055,6 +4058,11 @@ def geo_page():
                                 plt.subplots_adjust(wspace=0.3)
 
                                 st.pyplot(st.session_state.fig2)
+
+                else:
+                    st.error('Preencha corretamente a aba "Gradiente de Sobrecarga"', icon="🚨")
+            else:
+                st.error('Por favor, insira um documento!', icon="🚨")
 
         # Ver Dataframes
         with tb[2]:
