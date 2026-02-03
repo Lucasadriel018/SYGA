@@ -4951,19 +4951,16 @@ def geo_page():
 
                                         with col2:
                                             # Gatilho do botão: ao clicar, todos os checkboxes desta coluna iniciam marcados
-                                            smooth_all = False
-                                            if st.button("Suavizar todas as curvas", key="smooth_all",
-                                                                   use_container_width=True, type='primary'):
-                                                smooth_all = True
-                                            if st.session_state.plot_all_o:
-                                                smooth_all = False
+                                            if st.button("Suavizar todas as curvas", key="smooth_all", use_container_width=True, type='primary'):
+                                                st.session_state.suav_max_inf = True
+                                                st.session_state.suav_min_sup = True
+                                                st.session_state.suav_cia = True
+                                                st.session_state.suav_cib = True
+                                                st.session_state.suav_tsa = True
+                                                st.session_state.suav_tsb = True
+                                                st.session_state.suav_csa = True
+                                                st.session_state.suav_csb = True
 
-
-
-                                            # with st.container(border=True):
-                                            #     st.checkbox("Gradiente de Sobrecarga",
-                                            #                 value=False,
-                                            #                 key='gs')
                                             with st.container(border=True):
                                                 st.write('##### Janela Operacional Suavizada')
                                                 st.checkbox("Suavizar Limite Inferior da Janela Operacional",
@@ -4976,31 +4973,25 @@ def geo_page():
                                             with st.container(border=True):
                                                 st.write('##### Limites Inferiores Suavizados')
                                                 st.checkbox("Suavizar Comp Inferior σθA",
-                                                            value=True if smooth_all else st.session_state.get("suav_cia",
-                                                                                                               False),
+                                                            value=False,
                                                             key='suav_cia')
                                                 st.checkbox("Suavizar Comp Inferior σθB",
-                                                            value=True if smooth_all else st.session_state.get("suav_cib",
-                                                                                                               False),
+                                                            value=False,
                                                             key='suav_cib')
 
                                             with st.container(border=True):
                                                 st.write('##### Limites Superiores Suavizados')
                                                 st.checkbox("Suavizar Tração Superior σθA",
-                                                            value=True if smooth_all else st.session_state.get("suav_tsa",
-                                                                                                               False),
+                                                            value=False,
                                                             key='suav_tsa')
                                                 st.checkbox("Suavizar Tração Superior σθB",
-                                                            value=True if smooth_all else st.session_state.get("suav_tsb",
-                                                                                                               False),
+                                                            value=False,
                                                             key='suav_tsb')
                                                 st.checkbox("Suavizar Comp Superior σθA",
-                                                            value=True if smooth_all else st.session_state.get("suav_csa",
-                                                                                                               False),
+                                                            value=False,
                                                             key='suav_csa')
                                                 st.checkbox("Suavizar Comp Superior σθB",
-                                                            value=True if smooth_all else st.session_state.get("suav_csb",
-                                                                                                               False),
+                                                            value=False,
                                                             key='suav_csb')
 
                                             with st.container(border=True):
