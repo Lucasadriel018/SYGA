@@ -14,7 +14,7 @@ Requests==2.32.5
 scipy==1.14.0
 selenium==4.40.0
 statsmodels==0.14.4
-streamlit
+streamlit==1.47.0
 streamlit_folium==0.25.0
 streamlit_js_eval==0.1.7
 streamlit_option_menu==0.3.6
