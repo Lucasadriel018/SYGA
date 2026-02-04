@@ -1500,122 +1500,6 @@ def geo_page():
                 st.text_input('Datum', key='datum')
                 st.text_area('Objetivo do Poço', max_chars=None, key='comments')
 
-        with c2:
-            with st.container(border=True):
-                # Função para calcular distância geodésica (em metros) entre dois pontos lat/lon
-                def haversine(lat1, lon1, lat2, lon2):
-                    R = 6371000
-                    phi1 = math.radians(lat1)
-                    phi2 = math.radians(lat2)
-                    dphi = math.radians(lat2 - lat1)
-                    dlambda = math.radians(lon2 - lon1)
-                    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
-                    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
-                    return R * c
-
-                # --- CARREGAR POÇOS DO YAML ---
-                with open("pocos.yaml", "r", encoding="utf-8") as f:
-                    dados_yaml = yaml.safe_load(f)
-
-                pocos = dados_yaml['pocos']
-
-                # --- INPUT MANUAL DO POÇO BASE ---
-                st.markdown("### Coordenadas do Poço")
-                st.number_input("Zona UTM", min_value=1, max_value=60, value=25, key='zona')
-                st.radio("Hemisfério", ("Norte", "Sul"), index=1, key='hem')
-                st.number_input("Coordenada Leste (Easting)", min_value=100000.0, max_value=900000.0, value=201781.78,
-                                format="%.2f", key='easting')
-                st.number_input("Coordenada Norte (Northing)", min_value=0.0, max_value=10000000.0, value=8932304.27,
-                                format="%.2f", key='northing')
-                st.number_input("Raio de busca (km)", min_value=0.1, value=0.1, format="%.2f", key='raio')
-
-                lat_base, lon_base = utm.to_latlon(
-                    st.session_state.easting,
-                    st.session_state.northing,
-                    st.session_state.zona,
-                    northern=(st.session_state.hem == "Norte")
-                )
-
-                # --- CRIA MAPA COM POÇO BASE E CÍRCULO ---
-                m = folium.Map(
-                    location=[lat_base, lon_base],
-                    zoom_start=13,
-                    tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
-                    attr='Esri'
-                )
-
-                folium.Marker(
-                    [lat_base, lon_base],
-                    popup=st.session_state.poco if st.session_state.poco else "Poço",
-                    icon=folium.CustomIcon('poço.png', icon_size=(30, 30))
-                ).add_to(m)
-
-                folium.Circle(
-                    location=[lat_base, lon_base],
-                    radius=st.session_state.raio * 1000,
-                    color='green',
-                    fill=True,
-                    fill_opacity=0.2,
-                    popup=f"Raio: {st.session_state.raio:.2f} km"
-                ).add_to(m)
-
-                try:
-                    # --- FILTRAR POÇOS COM BASE NA PROFUNDIDADE ---
-                    if uploaded_file:
-                        st.session_state.profundidade_maxima = max(df['Profundidade'])
-                except Exception as e:
-                    pass
-
-                profundidade_maxima = st.session_state.get('profundidade_maxima', None)
-
-                if profundidade_maxima is not None:
-                    pocos_filtrados = [
-                        poco for poco in pocos
-                        if poco.get("profundidade_vertical_m") is not None and
-                           poco["profundidade_vertical_m"] <= profundidade_maxima
-                    ]
-                else:
-                    pocos_filtrados = pocos
-
-                # --- PLOTAR POÇOS E CALCULAR DISTÂNCIAS ---
-                dados_pontos = []
-                for poco in pocos_filtrados:
-                    e = poco['coordenadas']['easting']
-                    n = poco['coordenadas']['northing']
-                    lat_p, lon_p = utm.to_latlon(e, n, poco['zona_utm'], northern=(st.session_state.hem == "Norte"))
-                    dist = haversine(lat_base, lon_base, lat_p, lon_p)
-                    dentro_do_raio = dist <= (st.session_state.raio * 1000)
-
-                    cor = 'green' if dentro_do_raio else 'red'
-                    popup_text = f"{poco['nome']}<br>Distância: {dist / 1000:.2f} km"
-                    # popup_text = f"{poco['nome']}<br>E: {e:.2f}, N: {n:.2f}<br>Distância: {dist / 1000:.2f} km"
-
-                    folium.Marker(
-                        location=[lat_p, lon_p],
-                        popup=folium.Popup(popup_text, max_width=300),
-                        icon=folium.Icon(color=cor, icon='map-marker')
-                    ).add_to(m)
-
-                    dados_pontos.append({
-                        "Nome": poco['nome'],
-                        "Easting": e,
-                        "Northing": n,
-                        "Distância (km)": round(dist / 1000, 2),
-                        "Dentro do Raio": "Sim" if dentro_do_raio else "Não",
-                        "Profundidade Medida (m)": poco.get("profundidade_medida_m", None),
-                        "Profundidade Vertical (m)": poco.get("profundidade_vertical_m", None),
-                        "Peso Eq. (lb/gal)": poco.get("peso_eq_lb_gal", None)
-                    })
-
-                # --- MOSTRAR MAPA ---
-                st_folium(m, width=800, height=400)
-
-                # --- TABELA DE PONTOS DENTRO DO RAIO ---
-                df_resultado = pd.DataFrame(dados_pontos)
-                df_dentro = df_resultado[df_resultado["Dentro do Raio"] == "Sim"].sort_values(
-                    by="Distância (km)").reset_index(drop=True)
-                df_dentro_exibir = df_dentro.drop(columns=["Dentro do Raio"])
-
         with c3:
             container = st.container(border=True)
             with container:
@@ -1679,6 +1563,120 @@ def geo_page():
 
                     except Exception as e:
                         st.error(f"Erro ao processar o arquivo: {e}")
+
+        with c2:
+            with st.container(border=True):
+                # Função para calcular distância geodésica (em metros) entre dois pontos lat/lon
+                def haversine(lat1, lon1, lat2, lon2):
+                    R = 6371000
+                    phi1 = math.radians(lat1)
+                    phi2 = math.radians(lat2)
+                    dphi = math.radians(lat2 - lat1)
+                    dlambda = math.radians(lon2 - lon1)
+                    a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
+                    c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
+                    return R * c
+
+                # --- CARREGAR POÇOS DO YAML ---
+                with open("pocos.yaml", "r", encoding="utf-8") as f:
+                    dados_yaml = yaml.safe_load(f)
+
+                pocos = dados_yaml['pocos']
+
+                # --- INPUT MANUAL DO POÇO BASE ---
+                st.markdown("### Coordenadas do Poço")
+                st.number_input("Zona UTM", min_value=1, max_value=60, value=25, key='zona')
+                st.radio("Hemisfério", ("Norte", "Sul"), index=1, key='hem')
+                st.number_input("Coordenada Leste (Easting)", min_value=100000.0, max_value=900000.0, value=201781.78,
+                                format="%.2f", key='easting')
+                st.number_input("Coordenada Norte (Northing)", min_value=0.0, max_value=10000000.0, value=8932304.27,
+                                format="%.2f", key='northing')
+                st.number_input("Raio de busca (km)", min_value=0.1, value=0.1, format="%.2f", key='raio')
+
+                lat_base, lon_base = utm.to_latlon(
+                    st.session_state.easting,
+                    st.session_state.northing,
+                    st.session_state.zona,
+                    northern=(st.session_state.hem == "Norte")
+                )
+
+                # --- CRIA MAPA COM POÇO BASE E CÍRCULO ---
+                m = folium.Map(
+                    location=[lat_base, lon_base],
+                    zoom_start=13,
+                    tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
+                    attr='Esri'
+                )
+
+                folium.Marker(
+                    [lat_base, lon_base],
+                    popup=st.session_state.poco if st.session_state.poco else "Poço",
+                    icon=folium.CustomIcon('poço.png', icon_size=(30, 30))
+                ).add_to(m)
+
+                folium.Circle(
+                    location=[lat_base, lon_base],
+                    radius=st.session_state.raio * 1000,
+                    color='green',
+                    fill=True,
+                    fill_opacity=0.2,
+                    popup=f"Raio: {st.session_state.raio:.2f} km"
+                ).add_to(m)
+
+                if uploaded_file:
+                    st.session_state.profundidade_maxima = max(df['Profundidade'])
+
+                profundidade_maxima = st.session_state.get('profundidade_maxima', None)
+
+                if profundidade_maxima is not None:
+                    pocos_filtrados = [
+                        poco for poco in pocos
+                        if poco.get("profundidade_vertical_m") is not None and
+                           poco["profundidade_vertical_m"] <= profundidade_maxima
+                    ]
+                else:
+                    pocos_filtrados = pocos
+
+                # --- PLOTAR POÇOS E CALCULAR DISTÂNCIAS ---
+                dados_pontos = []
+                for poco in pocos_filtrados:
+                    e = poco['coordenadas']['easting']
+                    n = poco['coordenadas']['northing']
+                    lat_p, lon_p = utm.to_latlon(e, n, poco['zona_utm'], northern=(st.session_state.hem == "Norte"))
+                    dist = haversine(lat_base, lon_base, lat_p, lon_p)
+                    dentro_do_raio = dist <= (st.session_state.raio * 1000)
+
+                    cor = 'green' if dentro_do_raio else 'red'
+                    popup_text = f"{poco['nome']}<br>Distância: {dist / 1000:.2f} km"
+                    # popup_text = f"{poco['nome']}<br>E: {e:.2f}, N: {n:.2f}<br>Distância: {dist / 1000:.2f} km"
+
+                    folium.Marker(
+                        location=[lat_p, lon_p],
+                        popup=folium.Popup(popup_text, max_width=300),
+                        icon=folium.Icon(color=cor, icon='map-marker')
+                    ).add_to(m)
+
+                    dados_pontos.append({
+                        "Nome": poco['nome'],
+                        "Easting": e,
+                        "Northing": n,
+                        "Distância (km)": round(dist / 1000, 2),
+                        "Dentro do Raio": "Sim" if dentro_do_raio else "Não",
+                        "Profundidade Medida (m)": poco.get("profundidade_medida_m", None),
+                        "Profundidade Vertical (m)": poco.get("profundidade_vertical_m", None),
+                        "Peso Eq. (lb/gal)": poco.get("peso_eq_lb_gal", None)
+                    })
+
+                # --- MOSTRAR MAPA ---
+                st_folium(m, width=800, height=400)
+
+                # --- TABELA DE PONTOS DENTRO DO RAIO ---
+                df_resultado = pd.DataFrame(dados_pontos)
+                df_dentro = df_resultado[df_resultado["Dentro do Raio"] == "Sim"].sort_values(
+                    by="Distância (km)").reset_index(drop=True)
+                df_dentro_exibir = df_dentro.drop(columns=["Dentro do Raio"])
+
+
 
     # Coluna Litológica
     with tabs[1]:
