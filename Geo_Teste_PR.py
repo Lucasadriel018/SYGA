@@ -3561,7 +3561,7 @@ def gerar_relatorio_pdf():
             if label2 == "País:":
                 codigo_pais = paises.get(str(valor2))
                 if codigo_pais:
-                    flag_path = f"Flag/{codigo_pais}.png"
+                    flag_path = f"flag/{codigo_pais}.png"
                     try:
                         flag_x = txt_x + c.stringWidth(str(valor2), "Helvetica", 10) + 8
                         flag_y = texto_y - 2
@@ -8746,25 +8746,25 @@ def geo_page():
                                     "jo": True,
                                     "suav_max_inf": True,
                                     "suav_min_sup": True,
-                                    "ijo": True,
-                                    "sjo": True,
+                                    "ijo": False,
+                                    "sjo": False,
                                     "li": False,
                                     "ls": False,
-                                    "show_pp": True,
-                                    "gs": True,
-                                    "ti": True,
-                                    "cia": True,
-                                    "cib": True,
-                                    "tsa": True,
-                                    "tsb": True,
-                                    "csa": True,
-                                    "csb": True,
-                                    "suav_cia": True,
-                                    "suav_cib": True,
-                                    "suav_tsa": True,
-                                    "suav_tsb": True,
-                                    "suav_csa": True,
-                                    "suav_csb": True,
+                                    "show_pp": False,
+                                    "gs": False,
+                                    "ti": False,
+                                    "cia": False,
+                                    "cib": False,
+                                    "tsa": False,
+                                    "tsb": False,
+                                    "csa": False,
+                                    "csb": False,
+                                    "suav_cia": False,
+                                    "suav_cib": False,
+                                    "suav_tsa": False,
+                                    "suav_tsb": False,
+                                    "suav_csa": False,
+                                    "suav_csb": False,
                                 }
 
                                 PLOT_ALL_TRUE = {
@@ -11233,7 +11233,7 @@ def geo_page():
 
                                 # PONTO
                                 if pd.isna(md_f):
-                                    tvd_i, hd_i = _interp_em_md(df_traj, md_i)
+                                    tvd_i, hd_i = _interp_em_tvd(df_traj, md_i)
                                     rows.append({
                                         "Tipo": "Ponto",
                                         "MD Inicial": md_i,
@@ -11252,8 +11252,8 @@ def geo_page():
                                     md_f = float(md_f)
                                     md_a, md_b = (md_i, md_f) if md_f >= md_i else (md_f, md_i)
 
-                                    tvd_a, hd_a = _interp_em_md(df_traj, md_a)
-                                    tvd_b, hd_b = _interp_em_md(df_traj, md_b)
+                                    tvd_a, hd_a = _interp_em_tvd(df_traj, md_a)
+                                    tvd_b, hd_b = _interp_em_tvd(df_traj, md_b)
 
                                     rows.append({
                                         "Tipo": "Trecho",
@@ -11365,7 +11365,7 @@ def geo_page():
                             for _, r in df_trechos.iterrows():
                                 try:
                                     md_ini = float(r["MD Inicial"])
-                                    tvd_ini, hd_ini = _interp_em_md(df_traj, md_ini)
+                                    tvd_ini, hd_ini = _interp_em_tvd(df_traj, md_ini)
 
                                     tmarkers.append({
                                         "Evento": r["Evento"],
