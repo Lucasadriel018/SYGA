@@ -2111,16 +2111,18 @@ def _ler_inicio_do_xlsm(wb) -> dict:
 
 
 def _ler_peso_fluido_do_xlsm(wb) -> pd.DataFrame:
-    if "Geopressões" in wb.sheetnames:
+    if "Fluido" in wb.sheetnames:
+        ws = wb["Fluido"]
+    elif "Geopressões" in wb.sheetnames:
         ws = wb["Geopressões"]
     elif "Geopressoes" in wb.sheetnames:
         ws = wb["Geopressoes"]
     else:
-        raise ValueError("A aba 'Geopressões' não existe no arquivo.")
+        raise ValueError("A aba 'Fluido' não existe no arquivo.")
 
     h_md = ws["B5"].value
-    h_wp = ws["F5"].value
-    h_we = ws["G5"].value
+    h_wp = ws["C5"].value
+    h_we = ws["D5"].value
 
     def _norm(x):
         return str(x).strip().lower() if x is not None else ""
@@ -2128,18 +2130,18 @@ def _ler_peso_fluido_do_xlsm(wb) -> pd.DataFrame:
     if "prof" not in _norm(h_md):
         raise ValueError(f"Header inesperado em B5: {h_md}")
     if "planej" not in _norm(h_wp):
-        raise ValueError(f"Header inesperado em F5: {h_wp}")
+        raise ValueError(f"Header inesperado em C5: {h_wp}")
     if "execut" not in _norm(h_we):
-        raise ValueError(f"Header inesperado em G5: {h_we}")
+        raise ValueError(f"Header inesperado em D5: {h_we}")
 
     rows = []
     vazio_seguidos = 0
 
-    for md, _, _, _, wp, we in ws.iter_rows(
+    for md, wp, we in ws.iter_rows(
         min_row=6,
         max_row=min(ws.max_row, 10000),
-        min_col=2,
-        max_col=7,
+        min_col=2,   # B
+        max_col=4,   # D
         values_only=True
     ):
         if md in (None, ""):
@@ -2152,7 +2154,7 @@ def _ler_peso_fluido_do_xlsm(wb) -> pd.DataFrame:
         rows.append((md, wp, we))
 
     if not rows:
-        raise ValueError("Não encontrei dados de peso do fluido em B6/F6/G6...")
+        raise ValueError("Não encontrei dados de peso do fluido em B6/C6/D6...")
 
     df = pd.DataFrame(
         rows,
@@ -2167,7 +2169,7 @@ def _ler_peso_fluido_do_xlsm(wb) -> pd.DataFrame:
     df = df.dropna(subset=["Profundidade (m)"]).sort_values("Profundidade (m)").reset_index(drop=True)
 
     if df.empty:
-        raise ValueError("Não encontrei dados válidos de peso do fluido em B6/F6/G6...")
+        raise ValueError("Não encontrei dados válidos de peso do fluido em B6/C6/D6...")
 
     return df
 
