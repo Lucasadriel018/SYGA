@@ -2444,15 +2444,15 @@ def desenhar_mapa_folium_no_pdf(c, mapa_folium, left, right, top, bottom):
 
     img = ImageReader(BytesIO(png_data))
 
-    c.drawImage(
-        img,
-        left,
-        bottom,
-        width=largura,
-        height=altura,
-        preserveAspectRatio=True,
-        mask='auto'
-    )
+    # c.drawImage(
+    #     img,
+    #     left,
+    #     bottom,
+    #     width=largura,
+    #     height=altura,
+    #     preserveAspectRatio=True,
+    #     mask='auto'
+    # )
 
 
 def desenhar_tabela_segmentos(c, left_margin, right_margin, y_top, titulo, segs, col_balanco_label):
