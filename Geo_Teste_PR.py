@@ -54,7 +54,7 @@ st.set_page_config(**PAGE_CONFIG)
 st.image(img_cab, width=1500)
 st.markdown(
     "<div style='text-align: left; font-size: 16px; color: gray;'>"
-    "Desenvolvido por - Adriel Lucas 2026"
+    "Desenvolvido por: Adriel Lucas - 2026"
     "</div>",
     unsafe_allow_html=True
 )
