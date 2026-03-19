@@ -2438,12 +2438,6 @@ def desenhar_mapa_folium_no_pdf(c, mapa_folium, left, right, top, bottom):
         png_data = mapa_folium._to_png(2)
     except Exception as e:
         raise RuntimeError(
-            "Falha ao converter o mapa Folium para PNG.\n"
-            "Verifique se:\n"
-            "1) o pacote selenium está instalado;\n"
-            "2) o Firefox está instalado;\n"
-            "3) o geckodriver está disponível;\n"
-            "4) o ambiente permite execução headless.\n"
             f"Erro original: {type(e).__name__}: {e}"
         ) from e
 
