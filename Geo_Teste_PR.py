@@ -2430,6 +2430,7 @@ def _draw_centered_text(c, x_center, y, text, font_name="Helvetica", font_size=9
 
 
 def desenhar_mapa_folium_no_pdf(c, mapa_folium, left, right, top, bottom):
+    mapa_folium.save('filename.png')
     if mapa_folium is None:
         raise ValueError("Mapa Folium não informado.")
 
@@ -2440,7 +2441,7 @@ def desenhar_mapa_folium_no_pdf(c, mapa_folium, left, right, top, bottom):
         raise ValueError("Área inválida para desenhar o mapa.")
 
     try:
-        png_data = mapa_folium._to_png(5)
+        png_data = mapa_folium._to_png(2)
     except Exception as e:
         raise RuntimeError(
             "Falha ao converter o mapa Folium para PNG. "
@@ -5821,6 +5822,7 @@ def geo_page():
                 m = folium.Map(
                     location=[lat_base, lon_base],
                     zoom_start=17,
+                    zoom_control=False,
                     attributionControl=False,
                     tiles='https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}',
                     attr='Esri'
@@ -5888,7 +5890,7 @@ def geo_page():
                 # --- MOSTRAR MAPA ---
                 st.session_state["mapa_folium_pdf"] = m
                 st_folium(m, use_container_width=True, height=400)
-
+                m.save('filename.png')
                 # --- TABELA DE PONTOS DENTRO DO RAIO ---
                 df_resultado = pd.DataFrame(dados_pontos)
                 df_dentro = df_resultado[df_resultado["Dentro do Raio"] == "Sim"].sort_values(
