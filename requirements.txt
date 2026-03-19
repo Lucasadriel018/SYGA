@@ -21,3 +21,5 @@ streamlit_option_menu==0.3.6
 streamlit_pdf_viewer==0.0.14
 utm==0.7.0
 openpyxl
+pycountry==24.6.1
+
