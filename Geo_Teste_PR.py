@@ -2440,7 +2440,7 @@ def desenhar_mapa_folium_no_pdf(c, mapa_folium, left, right, top, bottom):
         raise ValueError("Área inválida para desenhar o mapa.")
 
     try:
-        png_data = mapa_folium._to_png(2)
+        png_data = mapa_folium._to_png(5)
     except Exception as e:
         raise RuntimeError(
             "Falha ao converter o mapa Folium para PNG. "
