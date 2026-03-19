@@ -2433,7 +2433,15 @@ def desenhar_mapa_folium_no_pdf(c, mapa_folium, left, right, top, bottom):
     if largura <= 0 or altura <= 0:
         raise ValueError("Área inválida para desenhar o mapa.")
 
-    png_data = mapa_folium._to_png(2)   # antes: 5
+    try:
+        png_data = mapa_folium._to_png(2)
+    except Exception as e:
+        raise RuntimeError(
+            "Falha ao converter o mapa Folium para PNG. "
+            "O método _to_png depende de Selenium + Firefox headless + GeckoDriver. "
+            f"Erro original: {e}"
+        )
+
     img = ImageReader(BytesIO(png_data))
 
     c.drawImage(
