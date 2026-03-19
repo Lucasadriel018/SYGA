@@ -5,6 +5,7 @@ import utm
 import yaml
 import math
 import folium
+import selenium
 import pycountry
 import numpy as np
 import pandas as pd
@@ -2437,22 +2438,26 @@ def desenhar_mapa_folium_no_pdf(c, mapa_folium, left, right, top, bottom):
         png_data = mapa_folium._to_png(2)
     except Exception as e:
         raise RuntimeError(
-            "Falha ao converter o mapa Folium para PNG. "
-            "O método _to_png depende de Selenium + Firefox headless + GeckoDriver. "
-            f"Erro original: {e}"
-        )
+            "Falha ao converter o mapa Folium para PNG.\n"
+            "Verifique se:\n"
+            "1) o pacote selenium está instalado;\n"
+            "2) o Firefox está instalado;\n"
+            "3) o geckodriver está disponível;\n"
+            "4) o ambiente permite execução headless.\n"
+            f"Erro original: {type(e).__name__}: {e}"
+        ) from e
 
     img = ImageReader(BytesIO(png_data))
 
-    # c.drawImage(
-    #     img,
-    #     left,
-    #     bottom,
-    #     width=largura,
-    #     height=altura,
-    #     preserveAspectRatio=True,
-    #     mask='auto'
-    # )
+    c.drawImage(
+        img,
+        left,
+        bottom,
+        width=largura,
+        height=altura,
+        preserveAspectRatio=True,
+        mask='auto'
+    )
 
 
 def desenhar_tabela_segmentos(c, left_margin, right_margin, y_top, titulo, segs, col_balanco_label):
