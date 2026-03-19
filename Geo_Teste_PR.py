@@ -3408,7 +3408,7 @@ def gerar_relatorio_pdf():
             c.drawString(
                 map_left,
                 map_top - 15,
-                f"Não foi possível inserir o mapa: {e}"
+                f"{e}"
             )
     else:
         c.setFont("Helvetica", 10)
