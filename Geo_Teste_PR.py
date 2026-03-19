@@ -5,7 +5,6 @@ import utm
 import yaml
 import math
 import folium
-import selenium
 import pycountry
 import numpy as np
 import pandas as pd
@@ -53,6 +52,12 @@ PAGE_CONFIG = {"page_title": "SYGA",
                }
 st.set_page_config(**PAGE_CONFIG)
 st.image(img_cab, width=1500)
+st.markdown(
+    "<div style='text-align: left; font-size: 16px; color: gray;'>"
+    "Desenvolvido por - Adriel Lucas 2026"
+    "</div>",
+    unsafe_allow_html=True
+)
 
 if "pdf_bytes" not in st.session_state:
     st.session_state.pdf_bytes = None
@@ -2438,8 +2443,10 @@ def desenhar_mapa_folium_no_pdf(c, mapa_folium, left, right, top, bottom):
         png_data = mapa_folium._to_png(2)
     except Exception as e:
         raise RuntimeError(
-            f"Erro original: {type(e).__name__}: {e}"
-        ) from e
+            "Falha ao converter o mapa Folium para PNG. "
+            "O método _to_png depende de Selenium + Firefox headless + GeckoDriver. "
+            f"Erro original: {e}"
+        )
 
     img = ImageReader(BytesIO(png_data))
 
@@ -3408,7 +3415,7 @@ def gerar_relatorio_pdf():
             c.drawString(
                 map_left,
                 map_top - 15,
-                f"{e}"
+                f"Não foi possível inserir o mapa: {e}"
             )
     else:
         c.setFont("Helvetica", 10)
