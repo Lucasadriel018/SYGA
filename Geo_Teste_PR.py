@@ -54,7 +54,7 @@ st.set_page_config(**PAGE_CONFIG)
 st.image(img_cab, width=1500)
 st.markdown(
     "<div style='text-align: left; font-size: 16px; color: gray;'>"
-    "Desenvolvido por: Adriel Lucas - 2026"
+    "Desenvolvido por: Adriel Oliveira - 2026"
     "</div>",
     unsafe_allow_html=True
 )
@@ -7388,7 +7388,7 @@ def geo_page():
                                     st.checkbox('Suavizar Pressão de Poros', key="spp", value=True)
                                     st.checkbox('Suavizar Sônico', key="suav_s", value=False)
                                 with colu2:
-                                    st.checkbox('Sobrecarga', key="grafpp", value=False)
+                                    st.checkbox('Sobrecarga', key="grafpp", value=True)
                                     st.checkbox('Suavizar Raio Gama', key="s_gr", value=False)
                                     st.session_state.ss = True
 
@@ -8652,10 +8652,12 @@ def geo_page():
             with tabss[0]:
                 if uploaded_file:
                     if st.session_state.rtkb != 0:
+                        if "fs" not in st.session_state:
+                            st.session_state.fs = 0.2
+
                         if all(value != 0 for value in [st.session_state.rtkb]) and all(
                                 value != 0 for value in [st.session_state.gn,
                                                          st.session_state.anormal, st.session_state.expoente]):
-                        # try:
                             tb = st.tabs(
                                 ['Critério de Falha - Mohr Coulomb', 'Visualização 3D das Tensões', 'Configurações',
                                  'Dados Calculados'])
@@ -8700,8 +8702,8 @@ def geo_page():
                                             if st.button("Resetar direções das tensões in situ", key="resd",
                                                          use_container_width=True, type='primary'):
                                                 st.session_state.direct = False
-                                                dir_H = 301
-                                                dir_h = 31
+                                                dir_H = 51
+                                                dir_h = 141
                                         if "direct" not in st.session_state:
                                             st.session_state.direct = False
                                         if st.session_state.direct:
@@ -8715,8 +8717,8 @@ def geo_page():
                                             dir_h = df_pp['Direção SH'] + 90
 
                                         else:
-                                            dir_H = 301
-                                            dir_h = 31
+                                            dir_H = 51
+                                            dir_h = 141
 
                                         with coluna1:
                                             st.button(
@@ -8735,8 +8737,8 @@ def geo_page():
                                                     type="primary"
                                             ):
                                                 st.session_state.rel_hor = False
-                                                st.session_state.SH = 0.61
-                                                st.session_state.Sh = 0.6
+                                                st.session_state.SH = 0.7
+                                                st.session_state.Sh = 0.65
 
                                                 if "rel_hor_df" in st.session_state:
                                                     del st.session_state.rel_hor_df
@@ -8754,8 +8756,8 @@ def geo_page():
                                     "jo": True,
                                     "suav_max_inf": True,
                                     "suav_min_sup": True,
-                                    "ijo": False,
-                                    "sjo": False,
+                                    "ijo": True,
+                                    "sjo": True,
                                     "li": False,
                                     "ls": False,
                                     "show_pp": False,
@@ -9071,7 +9073,7 @@ def geo_page():
                                                 with col1:
                                                     st.number_input('Ângulo de fricção (Φ)', key='phi', value=30)
                                                     st.number_input('Limite de falha por tração', key='lft', value=0, disabled=True)
-                                                    st.number_input('Profundidade (m)', key='m', value=600.00, format="%.2f")
+                                                    st.number_input('Profundidade (m)', key='m', value=700.00, format="%.2f")
                                                     st.number_input('Peso do fluido (lb/gal)', key='ppg', value=9.,
                                                                     format="%.2f", step=0.5)
                                                 st.selectbox('Método de cálculo do UCS', ['Lacy', 'Mechpro'], key='ucs', index=1)
@@ -9282,8 +9284,8 @@ def geo_page():
                                                 r1 = rel_sh * df_tvp['Gradiente de Sobrecarga (lb/gal)']
                                                 r2 = rel_shmin * df_tvp['Gradiente de Sobrecarga (lb/gal)']
                                             else:
-                                                r1 = 0.61 * df_tvp['Gradiente de Sobrecarga (lb/gal)']
-                                                r2 = 0.6 * df_tvp['Gradiente de Sobrecarga (lb/gal)']
+                                                r1 = 0.7 * df_tvp['Gradiente de Sobrecarga (lb/gal)']
+                                                r2 = 0.65 * df_tvp['Gradiente de Sobrecarga (lb/gal)']
 
                                             # Inserindo a coluna no DataFrame
                                             df_tvp.insert(
@@ -10309,17 +10311,16 @@ def geo_page():
                                         if criterio_disponivel(df_tvp):
                                             with colu3:
                                                 df_tvp['Max Inferior'] = df_tvp[
-                                                    ['Tração Inferior', 'Comp Inferior σθA',
-                                                     'Comp Inferior σθB']].max(
-                                                    axis=1)
+                                                    ['Tração Inferior', 'Comp Inferior σθA', 'Comp Inferior σθB']
+                                                ].max(axis=1)
+
                                                 df_tvp['Min Superior'] = df_tvp[
                                                     ['Tração Superior (σθA)', 'Tração Superior (σθB)',
-                                                     'Comp Superior σθA', 'Comp Superior σθB']].min(axis=1)
+                                                     'Comp Superior σθA', 'Comp Superior σθB']
+                                                ].min(axis=1)
 
-                                                linha = \
-                                                df_tvp.loc[st.session_state.y == profundidade_proxima].iloc[0]
-                                                max_inferior = linha['Max Inferior']
-                                                min_superior = linha['Min Superior']
+                                                max_inferior = df_tvp['Max Inferior'].max()
+                                                min_superior = df_tvp['Min Superior'].min()
 
                                                 st.markdown(
                                                     f"""
@@ -10337,7 +10338,7 @@ def geo_page():
                                                                 text-align: center;
                                                             ">
                                                                 Janela Op.<br>
-                                                                <span style="color: red;">{max_inferior:.2f}</span> &lt; ρ &lt; <span style="color: red;">{min_superior:.2f}</span>
+                                                                <span style="color: red;">{max_inferior + st.session_state.fs:.2f}</span> &lt; ρ &lt; <span style="color: red;">{min_superior - st.session_state.fs:.2f}</span>
                                                             </div>
                                                         </div>
                                                         """,
@@ -10442,37 +10443,191 @@ def geo_page():
                                                         linestyle='-', linewidth=2,
                                                         label="Limite Superior da Janela Operacional")
 
-                                            if 'fs' not in st.session_state:
-                                                st.session_state.fs = 0.5
+                                            colunas_texto = [
+                                                'Profundidade (m)',
+                                                'Gradiente de Sobrecarga (lb/gal)',
+                                                'SH (lb/gal)',
+                                                'Sh (lb/gal)',
+                                                'Direção SH',
+                                                'Direção Sh'
+                                            ]
 
+                                            def ajustar_angulo_360(ang):
+                                                if pd.isna(ang):
+                                                    return ang
+                                                while ang > 360:
+                                                    ang -= 360
+                                                return ang
+
+                                            if all(col in df_tvp.columns for col in colunas_texto):
+                                                try:
+                                                    # Sempre usa a profundidade_proxima
+                                                    idx_tensoes = (df_tvp[
+                                                                       'Profundidade (m)'] - profundidade_proxima).abs().idxmin()
+                                                    linha_t = df_tvp.loc[idx_tensoes]
+
+                                                    sv = linha_t['Gradiente de Sobrecarga (lb/gal)']
+                                                    dir_shmax = ajustar_angulo_360(linha_t['Direção SH'])
+                                                    dir_shmin = ajustar_angulo_360(linha_t['Direção Sh'])
+
+                                                    # Captura azimute final do poço, se existir
+                                                    azimute_poco = np.nan
+                                                    if 'Azi' in df_tvp.columns and pd.notna(linha_t.get('Azi', np.nan)):
+                                                        azimute_poco = ajustar_angulo_360(linha_t['Azi'])
+                                                    elif 'Azimute' in df_tvp.columns and pd.notna(
+                                                            linha_t.get('Azimute', np.nan)):
+                                                        azimute_poco = ajustar_angulo_360(linha_t['Azimute'])
+                                                    elif 'Azimuth' in df_tvp.columns and pd.notna(
+                                                            linha_t.get('Azimuth', np.nan)):
+                                                        azimute_poco = ajustar_angulo_360(linha_t['Azimuth'])
+
+                                                    if pd.notna(sv) and sv != 0:
+                                                        if 'SH% Sobrecarga' in df_tvp.columns and pd.notna(
+                                                                linha_t.get('SH% Sobrecarga', np.nan)):
+                                                            rel_shmax = linha_t['SH% Sobrecarga']
+                                                        else:
+                                                            rel_shmax = linha_t['SH (lb/gal)'] / sv
+
+                                                        if 'Sh% Sobrecarga' in df_tvp.columns and pd.notna(
+                                                                linha_t.get('Sh% Sobrecarga', np.nan)):
+                                                            rel_shmin = linha_t['Sh% Sobrecarga']
+                                                        else:
+                                                            rel_shmin = linha_t['Sh (lb/gal)'] / sv
+
+                                                        texto_tensoes = (
+                                                            f"SH = {rel_shmax:.2f}·σv | Dir. SH = {dir_shmax:.1f}°\n"
+                                                            f"Sh = {rel_shmin:.2f}·σv | Dir. Sh = {dir_shmin:.1f}°"
+                                                        )
+
+                                                        if pd.notna(azimute_poco):
+                                                            texto_tensoes += f"\nAzimute final do poço = {azimute_poco:.1f}°"
+
+                                                        ax.text(
+                                                            0.98, 0.99,
+                                                            texto_tensoes,
+                                                            transform=ax.transAxes,
+                                                            fontsize=9,
+                                                            verticalalignment='top',
+                                                            horizontalalignment='right',
+                                                            bbox=dict(
+                                                                boxstyle='round',
+                                                                facecolor='white',
+                                                                alpha=0.85,
+                                                                edgecolor='black'
+                                                            ),
+                                                            zorder=20
+                                                        )
+                                                except Exception:
+                                                    pass
+
+                                            # Limites da Janela Operacional
+                                            x_max_inf = np.asarray(
+                                                df_suav['Max Inferior'] if st.session_state.suav_max_inf else df_tvp[
+                                                    'Max Inferior'],
+                                                dtype=float
+                                            )
+                                            x_min_sup = np.asarray(
+                                                df_suav['Min Superior'] if st.session_state.suav_min_sup else df_tvp[
+                                                    'Min Superior'],
+                                                dtype=float
+                                            )
+
+                                            y_vals = np.asarray(st.session_state.y, dtype=float)
+
+                                            # FS inferior com sua lógica:
                                             if st.session_state.ijo:
-                                                ax.plot(x_max_inf + st.session_state.fs, st.session_state.y,
-                                                        color='gold',
-                                                        linestyle='--',
-                                                        linewidth=2, label="FS Inferior da Janela Operacional")
+                                                x_fs_base_inf = x_max_inf + float(st.session_state.fs)
 
+                                                valor_inicial = x_max_inf[0]
+                                                tol = 1e-6
+                                                idx_crescimento = np.where(x_max_inf > valor_inicial + tol)[0]
+
+                                                if len(idx_crescimento) > 0:
+                                                    idx_inicio = idx_crescimento[0]
+                                                    valor_maximo = np.nanmax(x_fs_base_inf)
+
+                                                    x_fs_inf = x_fs_base_inf.copy()
+                                                    x_fs_inf[idx_inicio:] = valor_maximo
+                                                else:
+                                                    x_fs_inf = x_fs_base_inf.copy()
+
+                                                ax.plot(
+                                                    x_fs_inf,
+                                                    y_vals,
+                                                    color='gold',
+                                                    linestyle='--',
+                                                    linewidth=2,
+                                                    label="FS Inferior da Janela Operacional"
+                                                )
+                                            else:
+                                                x_fs_inf = x_max_inf.copy()
+
+                                            # FS superior
                                             if st.session_state.sjo:
-                                                ax.plot(x_min_sup - st.session_state.fs, st.session_state.y,
-                                                        color='tomato',
-                                                        linestyle='--',
-                                                        linewidth=2, label="FS Superior da Janela Operacional")
+                                                x_fs_sup = x_min_sup - float(st.session_state.fs)
 
-                                            if st.session_state.ijo and st.session_state.sjo:
-                                                ax.fill_betweenx(st.session_state.y,
-                                                                 x_max_inf + st.session_state.fs,
-                                                                 x_min_sup - st.session_state.fs,
-                                                                 where=(x_min_sup > x_max_inf),
-                                                                 color='lightgreen',
-                                                                 alpha=0.2,
-                                                                 label='Janela Operacional', interpolate=True)
-                                            if not st.session_state.ijo and not st.session_state.sjo:
-                                                if st.session_state.jo:
-                                                    ax.fill_betweenx(st.session_state.y, x_max_inf, x_min_sup,
-                                                                     where=(x_min_sup > x_max_inf),
-                                                                     color='lightgreen',
-                                                                     alpha=0.2,
-                                                                     label='Janela Operacional',
-                                                                     interpolate=True)
+                                                ax.plot(
+                                                    x_fs_sup,
+                                                    y_vals,
+                                                    color='tomato',
+                                                    linestyle='--',
+                                                    linewidth=2,
+                                                    label="FS Superior da Janela Operacional"
+                                                )
+                                            else:
+                                                x_fs_sup = x_min_sup.copy()
+
+                                            # Janela útil (verde)
+                                            mascara_janela = x_fs_sup > x_fs_inf
+                                            if np.any(mascara_janela):
+                                                ax.fill_betweenx(
+                                                    y_vals,
+                                                    x_fs_inf,
+                                                    x_fs_sup,
+                                                    where=mascara_janela,
+                                                    interpolate=True,
+                                                    color='lightgreen',
+                                                    alpha=0.25,
+                                                    label='Janela Operacional'
+                                                )
+
+                                            # Faixa consumida pelo FS inferior (vermelho)
+                                            if st.session_state.ijo:
+                                                mascara_inf = x_fs_inf > x_max_inf
+                                                if np.any(mascara_inf):
+                                                    ax.fill_betweenx(
+                                                        y_vals,
+                                                        x_max_inf,
+                                                        x_fs_inf,
+                                                        where=mascara_inf,
+                                                        interpolate=True,
+                                                        color='lightcoral',
+                                                        alpha=0.25,
+                                                    )
+
+                                            # Faixa consumida pelo FS superior (vermelho)
+                                            if st.session_state.sjo:
+                                                mascara_sup = x_min_sup > x_fs_sup
+                                                if np.any(mascara_sup):
+                                                    ax.fill_betweenx(
+                                                        y_vals,
+                                                        x_fs_sup,
+                                                        x_min_sup,
+                                                        where=mascara_sup,
+                                                        interpolate=True,
+                                                        color='lightcoral',
+                                                        alpha=0.25,
+                                                    )
+
+                                            # if not st.session_state.ijo and not st.session_state.sjo:
+                                            #     if st.session_state.jo:
+                                            #         ax.fill_betweenx(st.session_state.y, x_max_inf, x_min_sup,
+                                            #                          where=(x_min_sup > x_max_inf),
+                                            #                          color='lightgreen',
+                                            #                          alpha=0.2,
+                                            #                          label='Janela Operacional',
+                                            #                          interpolate=True)
+
 
                                             # Apenas limite inferior
                                             if st.session_state.li and not st.session_state.jo:
@@ -10849,14 +11004,14 @@ def geo_page():
                                                     )
                                                     st.number_input(
                                                         "Passo do eixo Y",
-                                                        value=200,
+                                                        value=50,
                                                         step=50,
                                                         key="y_step_tvp"
                                                     )
 
                                                     st.number_input(
                                                         "Fator de Segurança da Janela Operacional",
-                                                        value=0.5,
+                                                        value=0.2,
                                                         step=0.1,
                                                         key='fs',
                                                         help=(
@@ -10875,13 +11030,13 @@ def geo_page():
                                                     )
 
                                                 with st.expander("Configurações da Legenda", expanded=False):
-                                                    st.checkbox('Exibir Legendas', key='leg', value=False)
+                                                    st.checkbox('Exibir Legendas', key='leg', value=True)
                                                     if st.session_state.leg:
                                                         legendas_pt = {
+                                                            "Inferior direito": "lower right",
                                                             "Melhor posição": "best",
                                                             "Superior direito": "upper right",
                                                             "Superior esquerdo": "upper left",
-                                                            "Inferior direito": "lower right",
                                                             "Inferior esquerdo": "lower left",
                                                             "Direita": "right",
                                                             "Centro esquerdo": "center left",
@@ -10948,8 +11103,6 @@ def geo_page():
                             # VIZUALIZAÇÃO 3D DAS TENSÕES
                             with tb[1]:
                                 if criterio_disponivel(df_tvp):
-                                    if "fs" not in st.session_state:
-                                        st.session_state.fs = 0.5
                                     colun1, colun2, colun3 = st.columns(3)
                                     with colun1:
                                         todos_parametros = ["σr", "σθ", "σa", "Dir. Tensões principais",
