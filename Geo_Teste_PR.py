@@ -8737,8 +8737,8 @@ def geo_page():
                                                     type="primary"
                                             ):
                                                 st.session_state.rel_hor = False
-                                                st.session_state.SH = 0.7
-                                                st.session_state.Sh = 0.65
+                                                st.session_state.SH = 0.61
+                                                st.session_state.Sh = 0.6
 
                                                 if "rel_hor_df" in st.session_state:
                                                     del st.session_state.rel_hor_df
@@ -9284,8 +9284,8 @@ def geo_page():
                                                 r1 = rel_sh * df_tvp['Gradiente de Sobrecarga (lb/gal)']
                                                 r2 = rel_shmin * df_tvp['Gradiente de Sobrecarga (lb/gal)']
                                             else:
-                                                r1 = 0.7 * df_tvp['Gradiente de Sobrecarga (lb/gal)']
-                                                r2 = 0.65 * df_tvp['Gradiente de Sobrecarga (lb/gal)']
+                                                r1 = 0.61 * df_tvp['Gradiente de Sobrecarga (lb/gal)']
+                                                r2 = 0.6 * df_tvp['Gradiente de Sobrecarga (lb/gal)']
 
                                             # Inserindo a coluna no DataFrame
                                             df_tvp.insert(
