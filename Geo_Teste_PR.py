@@ -11010,7 +11010,7 @@ def geo_page():
 
                                                     st.number_input(
                                                         "Fator de Segurança da Janela Operacional",
-                                                        value=0.2,
+                                                        value=0.5,
                                                         step=0.1,
                                                         key='fs',
                                                         help=(
