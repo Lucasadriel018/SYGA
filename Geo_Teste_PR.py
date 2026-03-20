@@ -8653,7 +8653,7 @@ def geo_page():
                 if uploaded_file:
                     if st.session_state.rtkb != 0:
                         if "fs" not in st.session_state:
-                            st.session_state.fs = 0.2
+                            st.session_state.fs = 0.5
 
                         if all(value != 0 for value in [st.session_state.rtkb]) and all(
                                 value != 0 for value in [st.session_state.gn,
@@ -10627,7 +10627,6 @@ def geo_page():
                                             #                          alpha=0.2,
                                             #                          label='Janela Operacional',
                                             #                          interpolate=True)
-
 
                                             # Apenas limite inferior
                                             if st.session_state.li and not st.session_state.jo:
