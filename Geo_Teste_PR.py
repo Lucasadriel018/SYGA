@@ -10536,20 +10536,11 @@ def geo_page():
 
                                             # FS inferior com sua lógica:
                                             if st.session_state.ijo:
-                                                x_fs_base_inf = x_max_inf + float(st.session_state.fs)
+                                                x_fs_base_inf = np.asarray(x_max_inf, dtype=float) + float(
+                                                    st.session_state.fs)
 
-                                                valor_inicial = x_max_inf[0]
-                                                tol = 1e-6
-                                                idx_crescimento = np.where(x_max_inf > valor_inicial + tol)[0]
-
-                                                if len(idx_crescimento) > 0:
-                                                    idx_inicio = idx_crescimento[0]
-                                                    valor_maximo = np.nanmax(x_fs_base_inf)
-
-                                                    x_fs_inf = x_fs_base_inf.copy()
-                                                    x_fs_inf[idx_inicio:] = valor_maximo
-                                                else:
-                                                    x_fs_inf = x_fs_base_inf.copy()
+                                                # Se o próximo for menor que o atual, repete o atual
+                                                x_fs_inf = np.maximum.accumulate(x_fs_base_inf)
 
                                                 ax.plot(
                                                     x_fs_inf,
@@ -10560,11 +10551,12 @@ def geo_page():
                                                     label="FS Inferior da Janela Operacional"
                                                 )
                                             else:
-                                                x_fs_inf = x_max_inf.copy()
+                                                x_fs_inf = np.asarray(x_max_inf, dtype=float).copy()
 
                                             # FS superior
                                             if st.session_state.sjo:
-                                                x_fs_sup = x_min_sup - float(st.session_state.fs)
+                                                x_fs_sup = np.asarray(x_min_sup, dtype=float) - float(
+                                                    st.session_state.fs)
 
                                                 ax.plot(
                                                     x_fs_sup,
@@ -10575,7 +10567,7 @@ def geo_page():
                                                     label="FS Superior da Janela Operacional"
                                                 )
                                             else:
-                                                x_fs_sup = x_min_sup.copy()
+                                                x_fs_sup = np.asarray(x_min_sup, dtype=float).copy()
 
                                             # Janela útil (verde)
                                             mascara_janela = x_fs_sup > x_fs_inf
