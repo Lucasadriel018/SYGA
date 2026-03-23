@@ -6647,7 +6647,7 @@ def geo_page():
 
     # Gradiente de Pressão de Poros
     with tabs[3]:
-        tb = st.tabs(['Gradiente de Pressão de Poros', 'Kick Tolerance', 'Tabela de Dados Calculados'])
+        tb = st.tabs(['Gradiente de Pressão de Poros', 'Tabela de Dados Calculados'])
         with tb[0]:
             if uploaded_file:
                 if st.session_state.rtkb != 0:
