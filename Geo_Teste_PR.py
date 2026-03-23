@@ -7292,18 +7292,21 @@ def geo_page():
                                         # Calcula a pressão de baixo para cima dentro de cada camada permeável
                                         mask_perm = df_pp["Formação"] == "Formação Permeável"
 
-                                        df_pp.loc[mask_perm, 'Pressão Boyance (BA = TF)'] = (
+                                        resultado_boyance_ba_tf = (
                                             df_pp.loc[mask_perm]
-                                            .groupby(id_camada)
+                                            .groupby(id_camada[mask_perm], group_keys=False)
                                             .apply(
-                                                lambda g: (
-                                                        g['Pressão Boyance (BA = TF)']
-                                                        .iloc[-1]
-                                                        - incremento.loc[g.index][::-1].cumsum()[::-1]
-                                                )
+                                                lambda g: g['Pressão Boyance (BA = TF)'].iloc[0] + incremento.loc[
+                                                    g.index].cumsum()
                                             )
-                                            .values
                                         )
+
+                                        if isinstance(resultado_boyance_ba_tf.index, pd.MultiIndex):
+                                            resultado_boyance_ba_tf = resultado_boyance_ba_tf.reset_index(level=0,
+                                                                                                          drop=True)
+
+                                        df_pp.loc[
+                                            resultado_boyance_ba_tf.index, 'Pressão Boyance (BA = TF)'] = resultado_boyance_ba_tf
 
                                         # Garante ordenação por profundidade
                                         df_pp = df_pp.sort_values("Profundidade (m)").reset_index(drop=True)
