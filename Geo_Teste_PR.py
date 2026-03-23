@@ -7227,15 +7227,17 @@ def geo_page():
                                         # Soma acumulada linha a linha dentro de cada camada permeável
                                         mask_perm = df_pp["Formação"] == "Formação Permeável"
 
-                                        df_pp.loc[mask_perm, 'Pressão Boyance (TA = BF)'] = (
+                                        serie_ta_bf = (
                                             df_pp.loc[mask_perm]
-                                            .groupby(id_camada)
+                                            .groupby(id_camada[mask_perm], group_keys=False)
                                             .apply(
                                                 lambda g: g['Pressão Boyance (TA = BF)'].iloc[0] + incremento.loc[
                                                     g.index].cumsum()
                                             )
-                                            .values
                                         )
+
+                                        serie_ta_bf = serie_ta_bf.sort_index()
+                                        df_pp.loc[serie_ta_bf.index, 'Pressão Boyance (TA = BF)'] = serie_ta_bf
 
                                         # Calcula a boyance normalmente
                                         boyance_calc = np.where(
@@ -7283,18 +7285,19 @@ def geo_page():
                                         # Calcula a pressão de baixo para cima dentro de cada camada permeável
                                         mask_perm = df_pp["Formação"] == "Formação Permeável"
 
-                                        df_pp.loc[mask_perm, 'Pressão Boyance (BA = TF)'] = (
+                                        serie_ba_tf = (
                                             df_pp.loc[mask_perm]
-                                            .groupby(id_camada)
+                                            .groupby(id_camada[mask_perm], group_keys=False)
                                             .apply(
                                                 lambda g: (
-                                                        g['Pressão Boyance (BA = TF)']
-                                                        .iloc[-1]
+                                                        g['Pressão Boyance (BA = TF)'].iloc[-1]
                                                         - incremento.loc[g.index][::-1].cumsum()[::-1]
                                                 )
                                             )
-                                            .values
                                         )
+
+                                        serie_ba_tf = serie_ba_tf.sort_index()
+                                        df_pp.loc[serie_ba_tf.index, 'Pressão Boyance (BA = TF)'] = serie_ba_tf
 
                                         # Garante ordenação por profundidade
                                         df_pp = df_pp.sort_values("Profundidade (m)").reset_index(drop=True)
