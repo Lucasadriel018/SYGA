@@ -4544,24 +4544,15 @@ def gerar_relatorio_pdf():
 
     # >>>>>>>>>>>>>> TUDO AGORA USA df_suav <<<<<<<<<<<<<<
     df_suav = st.session_state.get("df_suav", None)
+    df_tvp = st.session_state.get("df_tvp", None)
 
     ppg_val = st.session_state.get("ppg", None)
     ppg_txt = f"{ppg_val:.2f} lb/gal" if ppg_val is not None else "Não informado"
 
-    prof_analisada = st.session_state.get("profundidade_proxima", None)
+    prof_analisada = st.session_state.get("m", None)
 
     if isinstance(prof_analisada, pd.Series):
-        if not prof_analisada.empty:
-            prof_analisada = float(prof_analisada.iloc[0])
-        else:
-            prof_analisada = None
-
-    if prof_analisada is None:
-        y_val = st.session_state.get("y", None)
-        if isinstance(y_val, pd.Series):
-            prof_analisada = float(y_val.iloc[0]) if not y_val.empty else None
-        else:
-            prof_analisada = y_val
+        prof_analisada = float(prof_analisada.iloc[0]) if not prof_analisada.empty else None
 
     prof_analisada_txt = (
         f"{float(prof_analisada):.2f} m"
@@ -4775,21 +4766,29 @@ def gerar_relatorio_pdf():
     status_txt = "Poço instável"
     status_color = (1, 0, 0)  # vermelho
 
-    if row_s is not None:
-        max_inf = row_s.get("Max Inferior", None)
-        min_sup = row_s.get("Min Superior", None)
+    fs_val = st.session_state.get("fs", 0)
 
-        if pd.notna(max_inf) and pd.notna(min_sup):
-            janela_txt = f"{float(max_inf):.2f} < ρ < {float(min_sup):.2f} lb/gal"
+    if isinstance(df_suav, pd.DataFrame) and not df_suav.empty:
+        if "Max Inferior" in df_suav.columns and "Min Superior" in df_suav.columns:
+            max_inf = df_tvp["Max Inferior"].max()
+            min_sup = df_tvp["Min Superior"].min()
 
-            if ppg_val is not None and pd.notna(ppg_val):
-                if float(max_inf) < float(ppg_val) < float(min_sup):
-                    status_txt = "Poço estável"
-                    status_color = (0, 0.6, 0)  # verde
-                elif _aprox(ppg_val, max_inf):
-                    falha_txt = _classificar_falha_no_limite(row_s, ppg_val, "inferior")
-                elif _aprox(ppg_val, min_sup):
-                    falha_txt = _classificar_falha_no_limite(row_s, ppg_val, "superior")
+            if pd.notna(max_inf) and pd.notna(min_sup):
+                lim_inf = float(max_inf) + float(fs_val)
+                lim_sup = float(min_sup) - float(fs_val)
+
+                janela_txt = f"{lim_inf:.2f} < ρ < {lim_sup:.2f} lb/gal"
+
+                if ppg_val is not None and pd.notna(ppg_val):
+                    if lim_inf < float(ppg_val) < lim_sup:
+                        status_txt = "Poço estável"
+                        status_color = (0, 0.6, 0)  # verde
+                    elif _aprox(ppg_val, lim_inf):
+                        if row_s is not None:
+                            falha_txt = _classificar_falha_no_limite(row_s, ppg_val, "inferior")
+                    elif _aprox(ppg_val, lim_sup):
+                        if row_s is not None:
+                            falha_txt = _classificar_falha_no_limite(row_s, ppg_val, "superior")
 
     linhas_esq = [
         ("Profundidade analisada:", prof_analisada_txt),
@@ -5811,66 +5810,66 @@ def geo_page():
                 pocos = dados_yaml['pocos']
 
                 st.markdown("### Coordenadas do Poço")
-                # with st.expander(f'Coordenadas da cabeça do poço {st.session_state.poco}', expanded=True):
-                # --- INPUT MANUAL DO POÇO BASE ---
-                st.number_input("Zona UTM", min_value=1, max_value=60, value=24, key='zona')
-                st.radio("Hemisfério", ("Norte", "Sul"), index=1, key='hem')
-                st.number_input("Coordenada Leste (Easting)", min_value=100000.0, max_value=900000.0, value=569886.5,
-                                format="%.2f", key='easting')
-                st.number_input("Coordenada Norte (Northing)", min_value=0.0, max_value=10000000.0, value=8571669.07,
-                                format="%.2f", key='northing')
-                st.number_input("Raio de busca (km)", min_value=0.1, value=0.1, format="%.2f", key='raio')
+                with st.expander(f'Coordenadas da cabeça do poço {st.session_state.poco}', expanded=True):
+                    # --- INPUT MANUAL DO POÇO BASE ---
+                    st.number_input("Zona UTM", min_value=1, max_value=60, value=24, key='zona')
+                    st.radio("Hemisfério", ("Norte", "Sul"), index=1, key='hem')
+                    st.number_input("Coordenada Leste (Easting)", min_value=100000.0, max_value=900000.0, value=569886.5,
+                                    format="%.2f", key='easting')
+                    st.number_input("Coordenada Norte (Northing)", min_value=0.0, max_value=10000000.0, value=8571669.07,
+                                    format="%.2f", key='northing')
+                    st.number_input("Raio de busca (km)", min_value=0.1, value=0.1, format="%.2f", key='raio')
 
-                # with st.expander("Inserir poços vizinhos", expanded=False):
-                #     if "pocos_adicionais" not in st.session_state:
-                #         st.session_state.pocos_adicionais = []
-                #
-                #     nome_poco_add = st.text_input(
-                #         "Nome do poço vizinho",
-                #         key="nome_poco_add"
-                #     )
-                #
-                #     easting_poco_add = st.number_input(
-                #         "Easting do poço vizinho",
-                #         min_value=100000.0,
-                #         max_value=900000.0,
-                #         value=100000.0,
-                #         format="%.2f",
-                #         key="easting_poco_add"
-                #     )
-                #
-                #     northing_poco_add = st.number_input(
-                #         "Northing do poço vizinho",
-                #         min_value=0.0,
-                #         max_value=10000000.0,
-                #         value=0.0,
-                #         format="%.2f",
-                #         key="northing_poco_add"
-                #     )
-                #
-                #     col_add, col_limpar = st.columns(2)
-                #
-                #     with col_add:
-                #         if st.button("Adicionar poço vizinho", use_container_width=True, type='primary'):
-                #             nome_limpo = nome_poco_add.strip()
-                #
-                #             if nome_limpo:
-                #                 st.session_state.pocos_adicionais.append({
-                #                     "nome": nome_limpo,
-                #                     "easting": float(easting_poco_add),
-                #                     "northing": float(northing_poco_add)
-                #                 })
-                #             else:
-                #                 st.warning("Informe o nome do poço.")
-                #
-                #     with col_limpar:
-                #         if st.button("Limpar poços vizinhos", use_container_width=True, type='primary'):
-                #             st.session_state.pocos_adicionais = []
-                #
-                #     if st.session_state.pocos_adicionais:
-                #         st.markdown("**Poços vizinhos adicionados:**")
-                #         df_pocos_add = pd.DataFrame(st.session_state.pocos_adicionais)
-                #         st.dataframe(df_pocos_add, use_container_width=True, hide_index=True)
+                with st.expander("Inserir poços vizinhos", expanded=False):
+                    if "pocos_adicionais" not in st.session_state:
+                        st.session_state.pocos_adicionais = []
+
+                    nome_poco_add = st.text_input(
+                        "Nome do poço vizinho",
+                        key="nome_poco_add"
+                    )
+
+                    easting_poco_add = st.number_input(
+                        "Easting do poço vizinho",
+                        min_value=100000.0,
+                        max_value=900000.0,
+                        value=100000.0,
+                        format="%.2f",
+                        key="easting_poco_add"
+                    )
+
+                    northing_poco_add = st.number_input(
+                        "Northing do poço vizinho",
+                        min_value=0.0,
+                        max_value=10000000.0,
+                        value=0.0,
+                        format="%.2f",
+                        key="northing_poco_add"
+                    )
+
+                    col_add, col_limpar = st.columns(2)
+
+                    with col_add:
+                        if st.button("Adicionar poço vizinho", use_container_width=True, type='primary'):
+                            nome_limpo = nome_poco_add.strip()
+
+                            if nome_limpo:
+                                st.session_state.pocos_adicionais.append({
+                                    "nome": nome_limpo,
+                                    "easting": float(easting_poco_add),
+                                    "northing": float(northing_poco_add)
+                                })
+                            else:
+                                st.warning("Informe o nome do poço.")
+
+                    with col_limpar:
+                        if st.button("Limpar poços vizinhos", use_container_width=True, type='primary'):
+                            st.session_state.pocos_adicionais = []
+
+                    if st.session_state.pocos_adicionais:
+                        st.markdown("**Poços vizinhos adicionados:**")
+                        df_pocos_add = pd.DataFrame(st.session_state.pocos_adicionais)
+                        st.dataframe(df_pocos_add, use_container_width=True, hide_index=True)
 
                 lat_base, lon_base = utm.to_latlon(
                     st.session_state.easting,
@@ -5924,26 +5923,26 @@ def geo_page():
                 # --- ADICIONAR POÇOS MANUAIS INFORMADOS PELO USUÁRIO ---
                 pocos_manuais = []
 
-                # if st.session_state.pocos_adicionais:
-                #     for row in st.session_state.pocos_adicionais:
-                #         nome = row.get("nome")
-                #         e = row.get("easting")
-                #         n = row.get("northing")
-                #
-                #         if not nome or e is None or n is None:
-                #             continue
-                #
-                #         pocos_manuais.append({
-                #             "nome": str(nome),
-                #             "zona_utm": st.session_state.zona,
-                #             "coordenadas": {
-                #                 "easting": float(e),
-                #                 "northing": float(n)
-                #             },
-                #             "origem": "manual",
-                #             "profundidade_vertical_m": None,
-                #             "peso_eq_lb_gal": None
-                #         })
+                if st.session_state.pocos_adicionais:
+                    for row in st.session_state.pocos_adicionais:
+                        nome = row.get("nome")
+                        e = row.get("easting")
+                        n = row.get("northing")
+
+                        if not nome or e is None or n is None:
+                            continue
+
+                        pocos_manuais.append({
+                            "nome": str(nome),
+                            "zona_utm": st.session_state.zona,
+                            "coordenadas": {
+                                "easting": float(e),
+                                "northing": float(n)
+                            },
+                            "origem": "manual",
+                            "profundidade_vertical_m": None,
+                            "peso_eq_lb_gal": None
+                        })
 
                 # Junta os poços do YAML com os poços inseridos manualmente
                 pocos_para_plotar = []
@@ -6944,7 +6943,7 @@ def geo_page():
                                 if st.session_state.mgpp == 'Subcompactação':
                                     with st.expander("Informações Gerais", expanded=True):
                                         st.number_input('Expoente de Eaton', step=1.0, format='%f', key='expoente', value = 3.0)
-                                        st.number_input('Profundidade de início da zona anormal', step=100.0,format='%f', key='anormal', value=400.0)
+                                        st.number_input('Profundidade da zona normal', step=100.0,format='%f', key='anormal', value=400.0)
                                         st.number_input('Gradiente Normal', step=1.0, format='%f', key='gn', value=8.5)
 
                                     for i in range(st.session_state.n_trending):
