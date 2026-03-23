@@ -5811,7 +5811,7 @@ def geo_page():
                 pocos = dados_yaml['pocos']
 
                 st.markdown("### Coordenadas do Poço")
-                with st.expander(f'Coordenadas da cabeça do poço {st.session_state.poco}'):
+                with st.expander(f'Coordenadas da cabeça do poço {st.session_state.poco}', expanded=True):
                     # --- INPUT MANUAL DO POÇO BASE ---
                     st.number_input("Zona UTM", min_value=1, max_value=60, value=24, key='zona')
                     st.radio("Hemisfério", ("Norte", "Sul"), index=1, key='hem')
@@ -5821,56 +5821,56 @@ def geo_page():
                                     format="%.2f", key='northing')
                     st.number_input("Raio de busca (km)", min_value=0.1, value=0.1, format="%.2f", key='raio')
 
-                with st.expander("Inserir poços vizinhos", expanded=False):
-                    if "pocos_adicionais" not in st.session_state:
-                        st.session_state.pocos_adicionais = []
-
-                    nome_poco_add = st.text_input(
-                        "Nome do poço vizinho",
-                        key="nome_poco_add"
-                    )
-
-                    easting_poco_add = st.number_input(
-                        "Easting do poço vizinho",
-                        min_value=100000.0,
-                        max_value=900000.0,
-                        value=100000.0,
-                        format="%.2f",
-                        key="easting_poco_add"
-                    )
-
-                    northing_poco_add = st.number_input(
-                        "Northing do poço vizinho",
-                        min_value=0.0,
-                        max_value=10000000.0,
-                        value=0.0,
-                        format="%.2f",
-                        key="northing_poco_add"
-                    )
-
-                    col_add, col_limpar = st.columns(2)
-
-                    with col_add:
-                        if st.button("Adicionar poço vizinho", use_container_width=True, type='primary'):
-                            nome_limpo = nome_poco_add.strip()
-
-                            if nome_limpo:
-                                st.session_state.pocos_adicionais.append({
-                                    "nome": nome_limpo,
-                                    "easting": float(easting_poco_add),
-                                    "northing": float(northing_poco_add)
-                                })
-                            else:
-                                st.warning("Informe o nome do poço.")
-
-                    with col_limpar:
-                        if st.button("Limpar poços vizinhos", use_container_width=True, type='primary'):
-                            st.session_state.pocos_adicionais = []
-
-                    if st.session_state.pocos_adicionais:
-                        st.markdown("**Poços vizinhos adicionados:**")
-                        df_pocos_add = pd.DataFrame(st.session_state.pocos_adicionais)
-                        st.dataframe(df_pocos_add, use_container_width=True, hide_index=True)
+                # with st.expander("Inserir poços vizinhos", expanded=False):
+                #     if "pocos_adicionais" not in st.session_state:
+                #         st.session_state.pocos_adicionais = []
+                # 
+                #     nome_poco_add = st.text_input(
+                #         "Nome do poço vizinho",
+                #         key="nome_poco_add"
+                #     )
+                # 
+                #     easting_poco_add = st.number_input(
+                #         "Easting do poço vizinho",
+                #         min_value=100000.0,
+                #         max_value=900000.0,
+                #         value=100000.0,
+                #         format="%.2f",
+                #         key="easting_poco_add"
+                #     )
+                # 
+                #     northing_poco_add = st.number_input(
+                #         "Northing do poço vizinho",
+                #         min_value=0.0,
+                #         max_value=10000000.0,
+                #         value=0.0,
+                #         format="%.2f",
+                #         key="northing_poco_add"
+                #     )
+                # 
+                #     col_add, col_limpar = st.columns(2)
+                # 
+                #     with col_add:
+                #         if st.button("Adicionar poço vizinho", use_container_width=True, type='primary'):
+                #             nome_limpo = nome_poco_add.strip()
+                # 
+                #             if nome_limpo:
+                #                 st.session_state.pocos_adicionais.append({
+                #                     "nome": nome_limpo,
+                #                     "easting": float(easting_poco_add),
+                #                     "northing": float(northing_poco_add)
+                #                 })
+                #             else:
+                #                 st.warning("Informe o nome do poço.")
+                # 
+                #     with col_limpar:
+                #         if st.button("Limpar poços vizinhos", use_container_width=True, type='primary'):
+                #             st.session_state.pocos_adicionais = []
+                # 
+                #     if st.session_state.pocos_adicionais:
+                #         st.markdown("**Poços vizinhos adicionados:**")
+                #         df_pocos_add = pd.DataFrame(st.session_state.pocos_adicionais)
+                #         st.dataframe(df_pocos_add, use_container_width=True, hide_index=True)
 
                 lat_base, lon_base = utm.to_latlon(
                     st.session_state.easting,
