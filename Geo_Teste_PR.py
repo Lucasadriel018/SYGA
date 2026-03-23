@@ -5603,7 +5603,7 @@ def geo_page():
     # Carregar Dados
     with tabs[0]:
         c1, c2, c3 = st.columns((1, 1, 1))
-        with c3:
+        with c1:
             container = st.container(border=True)
             with container:
                 st.markdown("### Upload de Arquivo Excel")
@@ -5761,7 +5761,7 @@ def geo_page():
                     except Exception as e:
                         st.warning(f"Não foi possível ler as fases do Excel: {e}")
 
-        with c1:
+        with c2:
             container = st.container(border=True)  # Criando um container com borda
             with container:
                 st.markdown('#### Informações básicas do poço')
@@ -5778,7 +5778,7 @@ def geo_page():
                 codigo_pais = paises.get(st.session_state.country_name)
                 flag_path = f"Flag/{codigo_pais}.png" if codigo_pais else None
 
-                st.text_input('Nome da Companhia', max_chars=None, key='company_name', type="default", value="Petroreconcavo")
+                st.text_input('Nome da Companhia', max_chars=None, key='company_name', type="default")
                 st.text_input('Nome do Campo', max_chars=None, key='field_name', type="default")
 
                 col1, col2 = st.columns((1, 0.5))
@@ -5791,7 +5791,7 @@ def geo_page():
                 st.text_input('Datum', key='datum', value='RTKB')
                 st.text_area('Objetivo do Poço', max_chars=None, key='comments')
 
-        with c2:
+        with c3:
             with st.container(border=True):
                 # Função para calcular distância geodésica (em metros) entre dois pontos lat/lon
                 def haversine(lat1, lon1, lat2, lon2):
@@ -5810,15 +5810,67 @@ def geo_page():
 
                 pocos = dados_yaml['pocos']
 
-                # --- INPUT MANUAL DO POÇO BASE ---
                 st.markdown("### Coordenadas do Poço")
-                st.number_input("Zona UTM", min_value=1, max_value=60, value=24, key='zona')
-                st.radio("Hemisfério", ("Norte", "Sul"), index=1, key='hem')
-                st.number_input("Coordenada Leste (Easting)", min_value=100000.0, max_value=900000.0, value=569886.5,
-                                format="%.2f", key='easting')
-                st.number_input("Coordenada Norte (Northing)", min_value=0.0, max_value=10000000.0, value=8571669.07,
-                                format="%.2f", key='northing')
-                st.number_input("Raio de busca (km)", min_value=0.1, value=0.1, format="%.2f", key='raio')
+                with st.expander(f'Coordenadas da cabeça do poço {st.session_state.poco}'):
+                    # --- INPUT MANUAL DO POÇO BASE ---
+                    st.number_input("Zona UTM", min_value=1, max_value=60, value=24, key='zona')
+                    st.radio("Hemisfério", ("Norte", "Sul"), index=1, key='hem')
+                    st.number_input("Coordenada Leste (Easting)", min_value=100000.0, max_value=900000.0, value=569886.5,
+                                    format="%.2f", key='easting')
+                    st.number_input("Coordenada Norte (Northing)", min_value=0.0, max_value=10000000.0, value=8571669.07,
+                                    format="%.2f", key='northing')
+                    st.number_input("Raio de busca (km)", min_value=0.1, value=0.1, format="%.2f", key='raio')
+
+                with st.expander("Inserir poços vizinhos", expanded=False):
+                    if "pocos_adicionais" not in st.session_state:
+                        st.session_state.pocos_adicionais = []
+
+                    nome_poco_add = st.text_input(
+                        "Nome do poço vizinho",
+                        key="nome_poco_add"
+                    )
+
+                    easting_poco_add = st.number_input(
+                        "Easting do poço vizinho",
+                        min_value=100000.0,
+                        max_value=900000.0,
+                        value=100000.0,
+                        format="%.2f",
+                        key="easting_poco_add"
+                    )
+
+                    northing_poco_add = st.number_input(
+                        "Northing do poço vizinho",
+                        min_value=0.0,
+                        max_value=10000000.0,
+                        value=0.0,
+                        format="%.2f",
+                        key="northing_poco_add"
+                    )
+
+                    col_add, col_limpar = st.columns(2)
+
+                    with col_add:
+                        if st.button("Adicionar poço vizinho", use_container_width=True, type='primary'):
+                            nome_limpo = nome_poco_add.strip()
+
+                            if nome_limpo:
+                                st.session_state.pocos_adicionais.append({
+                                    "nome": nome_limpo,
+                                    "easting": float(easting_poco_add),
+                                    "northing": float(northing_poco_add)
+                                })
+                            else:
+                                st.warning("Informe o nome do poço.")
+
+                    with col_limpar:
+                        if st.button("Limpar poços vizinhos", use_container_width=True, type='primary'):
+                            st.session_state.pocos_adicionais = []
+
+                    if st.session_state.pocos_adicionais:
+                        st.markdown("**Poços vizinhos adicionados:**")
+                        df_pocos_add = pd.DataFrame(st.session_state.pocos_adicionais)
+                        st.dataframe(df_pocos_add, use_container_width=True, hide_index=True)
 
                 lat_base, lon_base = utm.to_latlon(
                     st.session_state.easting,
@@ -5866,32 +5918,69 @@ def geo_page():
                 else:
                     pocos_filtrados = pocos
 
+                # --- ADICIONAR POÇOS MANUAIS INFORMADOS PELO USUÁRIO ---
+                pocos_manuais = []
+
+                # --- ADICIONAR POÇOS MANUAIS INFORMADOS PELO USUÁRIO ---
+                pocos_manuais = []
+
+                if st.session_state.pocos_adicionais:
+                    for row in st.session_state.pocos_adicionais:
+                        nome = row.get("nome")
+                        e = row.get("easting")
+                        n = row.get("northing")
+
+                        if not nome or e is None or n is None:
+                            continue
+
+                        pocos_manuais.append({
+                            "nome": str(nome),
+                            "zona_utm": st.session_state.zona,
+                            "coordenadas": {
+                                "easting": float(e),
+                                "northing": float(n)
+                            },
+                            "origem": "manual",
+                            "profundidade_vertical_m": None,
+                            "peso_eq_lb_gal": None
+                        })
+
+                # Junta os poços do YAML com os poços inseridos manualmente
+                pocos_para_plotar = []
+
+                for poco in pocos_filtrados:
+                    poco_plot = poco.copy()
+                    poco_plot["origem"] = "yaml"
+                    pocos_para_plotar.append(poco_plot)
+
+                pocos_para_plotar.extend(pocos_manuais)
+
                 # --- PLOTAR POÇOS E CALCULAR DISTÂNCIAS ---
                 dados_pontos = []
-                for poco in pocos_filtrados:
+                for poco in pocos_para_plotar:
                     e = poco['coordenadas']['easting']
                     n = poco['coordenadas']['northing']
                     lat_p, lon_p = utm.to_latlon(e, n, poco['zona_utm'], northern=(st.session_state.hem == "Norte"))
                     dist = haversine(lat_base, lon_base, lat_p, lon_p)
                     dentro_do_raio = dist <= (st.session_state.raio * 1000)
+                    cor = 'blue'
+                    icone = 'map-marker'
 
-                    cor = 'green' if dentro_do_raio else 'red'
                     popup_text = f"{poco['nome']}<br>Distância: {dist / 1000:.2f} km"
-                    # popup_text = f"{poco['nome']}<br>E: {e:.2f}, N: {n:.2f}<br>Distância: {dist / 1000:.2f} km"
 
                     folium.Marker(
                         location=[lat_p, lon_p],
                         popup=folium.Popup(popup_text, max_width=300),
-                        icon=folium.Icon(color=cor, icon='map-marker')
+                        icon=folium.Icon(color=cor, icon=icone)
                     ).add_to(m)
 
                     dados_pontos.append({
                         "Nome": poco['nome'],
+                        "Origem": poco.get("origem", "yaml"),
                         "Easting": e,
                         "Northing": n,
                         "Distância (km)": round(dist / 1000, 2),
                         "Dentro do Raio": "Sim" if dentro_do_raio else "Não",
-                        "Profundidade Medida (m)": poco.get("profundidade_medida_m", None),
                         "Profundidade Vertical (m)": poco.get("profundidade_vertical_m", None),
                         "Peso Eq. (lb/gal)": poco.get("peso_eq_lb_gal", None)
                     })
@@ -8800,8 +8889,8 @@ def geo_page():
                                     "tsb": True,
                                     "csa": True,
                                     "csb": True,
-                                    "ijo": False,
-                                    "sjo": False,
+                                    "ijo": True,
+                                    "sjo": True,
                                 }
 
                                 SMOOTH_ALL_TRUE = {
@@ -9998,28 +10087,75 @@ def geo_page():
                                                     showlegend=True
                                                 ))
 
-                                                def intersecao_circulo_reta(centro, raio, m, x0, y0):
+                                                def projecao_ponto_na_reta(px, py, m, x0, y0):
+                                                    # reta: y = m(x - x0) + y0
+                                                    # forma geral: mx - y + (y0 - m*x0) = 0
+                                                    a = m
+                                                    b = -1
+                                                    c = y0 - m * x0
+
+                                                    denom = a * a + b * b
+                                                    x_proj = px - a * (a * px + b * py + c) / denom
+                                                    y_proj = py - b * (a * px + b * py + c) / denom
+                                                    return x_proj, y_proj
+
+                                                def intersecao_circulo_reta(centro, raio, m, x0, y0, tol=1e-9):
+                                                    xc, yc = centro
+
+                                                    # reta parametrizada:
+                                                    # x = x0 + t
+                                                    # y = y0 + m*t
+
                                                     a = 1 + m ** 2
-                                                    b = -2 * centro + 2 * m * (y0 - m * x0)
-                                                    c = centro ** 2 + (y0 - m * x0) ** 2 - raio ** 2
+                                                    b = 2 * ((x0 - xc) + m * (y0 - yc))
+                                                    c = (x0 - xc) ** 2 + (y0 - yc) ** 2 - raio ** 2
+
                                                     delta = b ** 2 - 4 * a * c
-                                                    if delta < 0:
-                                                        return None
-                                                    raiz_delta = np.sqrt(delta)
-                                                    x1 = (-b + raiz_delta) / (2 * a)
-                                                    x2 = (-b - raiz_delta) / (2 * a)
-                                                    return [(x1, m * (x1 - x0) + y0), (x2, m * (x2 - x0) + y0)]
+
+                                                    if delta < -tol:
+                                                        return []
+
+                                                    if abs(delta) <= tol:
+                                                        t = -b / (2 * a)
+                                                        x = x0 + t
+                                                        y = y0 + m * t
+                                                        return [(x, y)]
+
+                                                    sqrt_delta = math.sqrt(delta)
+
+                                                    t1 = (-b + sqrt_delta) / (2 * a)
+                                                    t2 = (-b - sqrt_delta) / (2 * a)
+
+                                                    p1 = (x0 + t1, y0 + m * t1)
+                                                    p2 = (x0 + t2, y0 + m * t2)
+
+                                                    return [p1, p2]
 
                                                 # Parâmetros da reta
                                                 m = np.tan(np.radians(st.session_state.phi))
                                                 x0, y0 = x_compressao_inicio, y_compressao_inicio
 
                                                 # Interseções com A e B (pega o ponto de maior x se existir)
-                                                for nome, centro, raio in [('A', centro_A, raio_A),
-                                                                           ('B', centro_B, raio_B)]:
+                                                st.session_state.pop('xa', None)
+                                                st.session_state.pop('ya', None)
+                                                st.session_state.pop('xb', None)
+                                                st.session_state.pop('yb', None)
+
+                                                for nome, centro_x, raio in [('A', centro_A, raio_A),
+                                                                             ('B', centro_B, raio_B)]:
+                                                    centro = (centro_x, 0.0)
+
                                                     pontos = intersecao_circulo_reta(centro, raio, m, x0, y0)
+
                                                     if pontos:
-                                                        x, y = max(pontos, key=lambda p: p[0])
+                                                        xc, yc = centro
+                                                        xproj, yproj = projecao_ponto_na_reta(xc, yc, m, x0, y0)
+
+                                                        x, y = min(
+                                                            pontos,
+                                                            key=lambda p: (p[0] - xproj) ** 2 + (p[1] - yproj) ** 2
+                                                        )
+
                                                         st.session_state[f'x{nome.lower()}'] = x
                                                         st.session_state[f'y{nome.lower()}'] = y
 
