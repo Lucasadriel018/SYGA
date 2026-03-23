@@ -7227,15 +7227,24 @@ def geo_page():
                                         # Soma acumulada linha a linha dentro de cada camada permeável
                                         mask_perm = df_pp["Formação"] == "Formação Permeável"
 
-                                        df_pp.loc[mask_perm, 'Pressão Boyance (TA = BF)'] = (
+                                        # Soma acumulada linha a linha dentro de cada camada permeável
+                                        mask_perm = df_pp["Formação"] == "Formação Permeável"
+
+                                        resultado_boyance_ta_bf = (
                                             df_pp.loc[mask_perm]
-                                            .groupby(id_camada)
+                                            .groupby(id_camada[mask_perm], group_keys=False)
                                             .apply(
                                                 lambda g: g['Pressão Boyance (TA = BF)'].iloc[0] + incremento.loc[
                                                     g.index].cumsum()
                                             )
-                                            .values
                                         )
+
+                                        if isinstance(resultado_boyance_ta_bf.index, pd.MultiIndex):
+                                            resultado_boyance_ta_bf = resultado_boyance_ta_bf.reset_index(level=0,
+                                                                                                          drop=True)
+
+                                        df_pp.loc[
+                                            resultado_boyance_ta_bf.index, 'Pressão Boyance (TA = BF)'] = resultado_boyance_ta_bf
 
                                         # Calcula a boyance normalmente
                                         boyance_calc = np.where(
