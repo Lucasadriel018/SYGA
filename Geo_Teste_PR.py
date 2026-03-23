@@ -54,7 +54,7 @@ st.set_page_config(**PAGE_CONFIG)
 st.image(img_cab, width=1500)
 st.markdown(
     "<div style='text-align: left; font-size: 16px; color: gray;'>"
-    "Desenvolvido por: Adriel Oliveira - 2026"
+    "Desenvolvido por: Adriel Oliveira - 2025"
     "</div>",
     unsafe_allow_html=True
 )
@@ -5805,9 +5805,9 @@ def geo_page():
                 st.markdown("### Coordenadas do Poço")
                 st.number_input("Zona UTM", min_value=1, max_value=60, value=24, key='zona')
                 st.radio("Hemisfério", ("Norte", "Sul"), index=1, key='hem')
-                st.number_input("Coordenada Leste (Easting)", min_value=100000.0, max_value=900000.0, value=201781.78,
+                st.number_input("Coordenada Leste (Easting)", min_value=100000.0, max_value=900000.0, value=569886.5,
                                 format="%.2f", key='easting')
-                st.number_input("Coordenada Norte (Northing)", min_value=0.0, max_value=10000000.0, value=8942304.27,
+                st.number_input("Coordenada Norte (Northing)", min_value=0.0, max_value=10000000.0, value=8571669.07,
                                 format="%.2f", key='northing')
                 st.number_input("Raio de busca (km)", min_value=0.1, value=0.1, format="%.2f", key='raio')
 
@@ -8641,12 +8641,10 @@ def geo_page():
                 # Ver Dataframes
                 with tb[1]:
                     if uploaded_file:
-                        adriel = True
-                        if adriel == True:
-                            if all(value != 0 for value in [st.session_state.rtkb]):
-                                if all(value != 0 for value in
-                                       [st.session_state.gn, st.session_state.anormal, st.session_state.expoente]):
-                                    st.dataframe(df_f, use_container_width=True, hide_index=True)
+                        if all(value != 0 for value in [st.session_state.rtkb]):
+                            if all(value != 0 for value in
+                                   [st.session_state.gn, st.session_state.anormal, st.session_state.expoente]):
+                                st.dataframe(df_f, use_container_width=True, hide_index=True)
 
             # Tensões em Volta do Poço
             with tabss[0]:
@@ -10610,15 +10608,6 @@ def geo_page():
                                                         color='lightcoral',
                                                         alpha=0.25,
                                                     )
-
-                                            # if not st.session_state.ijo and not st.session_state.sjo:
-                                            #     if st.session_state.jo:
-                                            #         ax.fill_betweenx(st.session_state.y, x_max_inf, x_min_sup,
-                                            #                          where=(x_min_sup > x_max_inf),
-                                            #                          color='lightgreen',
-                                            #                          alpha=0.2,
-                                            #                          label='Janela Operacional',
-                                            #                          interpolate=True)
 
                                             # Apenas limite inferior
                                             if st.session_state.li and not st.session_state.jo:
