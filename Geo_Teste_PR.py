@@ -7296,8 +7296,9 @@ def geo_page():
                                             df_pp.loc[mask_perm]
                                             .groupby(id_camada[mask_perm], group_keys=False)
                                             .apply(
-                                                lambda g: g['Pressão Boyance (BA = TF)'].iloc[0] + incremento.loc[
-                                                    g.index].cumsum()
+                                                lambda g: g['Pressão Boyance (BA = TF)'].iloc[0]
+                                                          + incremento.loc[g.index].fillna(0).cumsum()
+                                                          - incremento.loc[g.index].fillna(0).iloc[0]
                                             )
                                         )
 
