@@ -7227,20 +7227,15 @@ def geo_page():
                                         # Soma acumulada linha a linha dentro de cada camada permeável
                                         mask_perm = df_pp["Formação"] == "Formação Permeável"
 
-                                        # Soma acumulada linha a linha dentro de cada camada permeável
-                                        mask_perm = df_pp["Formação"] == "Formação Permeável"
-
-                                        resultado_boyance_ta_bf = (
+                                        df_pp.loc[mask_perm, 'Pressão Boyance (TA = BF)'] = (
                                             df_pp.loc[mask_perm]
-                                            .groupby(id_camada[mask_perm], group_keys=False)
-                                            .apply(lambda g: g['Pressão Boyance (TA = BF)'].iloc[0] + incremento.loc[
-                                                g.index].cumsum())
+                                            .groupby(id_camada)
+                                            .apply(
+                                                lambda g: g['Pressão Boyance (TA = BF)'].iloc[0] + incremento.loc[
+                                                    g.index].cumsum()
+                                            )
+                                            .values
                                         )
-
-                                        resultado_boyance_ta_bf = pd.Series(resultado_boyance_ta_bf)
-                                        resultado_boyance_ta_bf.index = df_pp.loc[mask_perm].index
-
-                                        df_pp.loc[mask_perm, 'Pressão Boyance (TA = BF)'] = resultado_boyance_ta_bf
 
                                         # Calcula a boyance normalmente
                                         boyance_calc = np.where(
@@ -7288,22 +7283,18 @@ def geo_page():
                                         # Calcula a pressão de baixo para cima dentro de cada camada permeável
                                         mask_perm = df_pp["Formação"] == "Formação Permeável"
 
-                                        resultado_boyance_ba_tf = (
+                                        df_pp.loc[mask_perm, 'Pressão Boyance (BA = TF)'] = (
                                             df_pp.loc[mask_perm]
-                                            .groupby(id_camada[mask_perm], group_keys=False)
+                                            .groupby(id_camada)
                                             .apply(
-                                                lambda g: g['Pressão Boyance (BA = TF)'].iloc[0]
-                                                          + incremento.loc[g.index].fillna(0).cumsum()
-                                                          - incremento.loc[g.index].fillna(0).iloc[0]
+                                                lambda g: (
+                                                        g['Pressão Boyance (BA = TF)']
+                                                        .iloc[-1]
+                                                        - incremento.loc[g.index][::-1].cumsum()[::-1]
+                                                )
                                             )
+                                            .values
                                         )
-
-                                        if isinstance(resultado_boyance_ba_tf.index, pd.MultiIndex):
-                                            resultado_boyance_ba_tf = resultado_boyance_ba_tf.reset_index(level=0,
-                                                                                                          drop=True)
-
-                                        df_pp.loc[
-                                            resultado_boyance_ba_tf.index, 'Pressão Boyance (BA = TF)'] = resultado_boyance_ba_tf
 
                                         # Garante ordenação por profundidade
                                         df_pp = df_pp.sort_values("Profundidade (m)").reset_index(drop=True)
