@@ -3159,7 +3159,7 @@ def _subtrechos_por_falha_cmp(df_cmp_fase, segs, lado, tol_prof=1e-9):
 
 
 def gerar_relatorio_pdf():
-    hora_now = datetime.now() + timedelta(hours=0)
+    hora_now = datetime.now() + timedelta(hours=-3)
     pdf_buffer = io.BytesIO()
     c = canvas.Canvas(pdf_buffer, pagesize=letter)
 
