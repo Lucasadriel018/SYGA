@@ -5831,7 +5831,7 @@ def geo_page():
                 folium.Marker(
                     [lat_base, lon_base],
                     popup=st.session_state.poco if st.session_state.poco else "Poço",
-                    icon=folium.CustomIcon('poço.png', icon_size=(30, 30))
+                    icon=folium.CustomIcon('rig_t.png', icon_size=(30, 30))
                 ).add_to(m)
 
                 folium.Circle(
