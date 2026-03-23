@@ -6660,7 +6660,7 @@ def geo_page():
                             st.session_state.fpp = 0.01
                         with st.container(border=True):
                             st.segmented_control("***Mecanismo Gerador de Pressão de Poros***", ['Subcompactação','Transferência Lateral'],
-                                                 selection_mode="single",default='Subcompactação', key='mgpp', width="stretch")
+                                                 selection_mode="single",default='Subcompactação', key='mgpp', width="stretch", disabled=True)
                             if st.session_state.onshore:
                                 profundidade = st.session_state.ext_df['Profundidade em relação a mesa rotativa (m)']
                                 densidade = st.session_state.ext_df['Densidade (g/cm³)']
@@ -7923,7 +7923,7 @@ def geo_page():
                 st.error('Por favor, insira um documento!', icon="🚨")
 
         # Ver Dataframes
-        with tb[2]:
+        with tb[1]:
             if uploaded_file:
                 try:
                     st.dataframe(df_pp, use_container_width=True, hide_index=True)
