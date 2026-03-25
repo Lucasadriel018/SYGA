@@ -60,14 +60,14 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-hide_st_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            </style>
-            """
-st.markdown(hide_st_style, unsafe_allow_html=True)
+# hide_st_style = """
+#             <style>
+#             #MainMenu {visibility: hidden;}
+#             footer {visibility: hidden;}
+#             header {visibility: hidden;}
+#             </style>
+#             """
+# st.markdown(hide_st_style, unsafe_allow_html=True)
 
 if "pdf_bytes" not in st.session_state:
     st.session_state.pdf_bytes = None
@@ -9925,28 +9925,44 @@ def geo_page():
                                                         )
 
                                             with colu2:
-                                                st.markdown(
-                                                    f"""
-                                                    <div style="
-                                                        display: flex;
-                                                        justify-content: center;
-                                                        margin-top: 0px;
-                                                    ">
-                                                        <div style="
-                                                            color: black;
-                                                            font-weight: bold;
-                                                            border: 2px solid black;
-                                                            border-radius: 10px;
-                                                            padding: 0px 0px;
-                                                            text-align: center;
-                                                        ">
-                                                            Peso do Fluido<br>
-                                                            <span style="color: red;">{st.session_state.ppg:.2f}</span> lb/gal
-                                                        </div>
-                                                    </div>
-                                                    """,
-                                                    unsafe_allow_html=True
+                                                titulo_peso = (
+                                                    "Peso do Fluido Escolhido"
+                                                    if opcao_tracao == "Peso de Fluido Escolhido"
+                                                    else f"Peso que gera a falha por {opcao_tracao.lower()}"
                                                 )
+
+                                                with colu2:
+                                                    titulo_peso = (
+                                                        "Peso do Fluido:"
+                                                        if opcao_tracao == "Peso de Fluido Escolhido"
+                                                        else f"Falha por {opcao_tracao.lower()}"
+                                                    )
+
+                                                    st.markdown(
+                                                        f"""
+                                                        <div style="
+                                                            display: flex;
+                                                            justify-content: center;
+                                                            margin-top: 0px;
+                                                        ">
+                                                            <div style="
+                                                                color: black;
+                                                                font-weight: bold;
+                                                                border: 2px solid black;
+                                                                border-radius: 10px;
+                                                                padding: 6px 10px;
+                                                                text-align: center;
+                                                                line-height: 1.2;
+                                                                font-size: 13px;
+                                                                min-width: 240px;
+                                                            ">
+                                                                {titulo_peso}<br>
+                                                                <span style="color: red; font-size: 16px;">{float(peso_fluido):.2f}</span> lb/gal
+                                                            </div>
+                                                        </div>
+                                                        """,
+                                                        unsafe_allow_html=True
+                                                    )
 
                                             centro_A = (sr_ef + sta_ef) / 2
                                             raio_A = abs(sta_ef - sr_ef) / 2
