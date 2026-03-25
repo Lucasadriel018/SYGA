@@ -52,7 +52,7 @@ PAGE_CONFIG = {"page_title": "SYGA",
                "initial_sidebar_state": "auto",
                }
 st.set_page_config(**PAGE_CONFIG)
-st.image(img_cab, width=1500)
+st.image(img_cab, width=2000)
 st.markdown(
     "<div style='text-align: left; font-size: 16px; color: gray;'>"
     "Developed by Adriel Oliveira - 2025"
