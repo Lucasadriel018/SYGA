@@ -9954,7 +9954,7 @@ def geo_page():
                                                                 text-align: center;
                                                                 line-height: 1.2;
                                                                 font-size: 13px;
-                                                                min-width: 200px;
+                                                                min-width: 180px;
                                                             ">
                                                                 {titulo_peso}<br>
                                                                 <span style="color: red; font-size: 16px;">{float(peso_fluido):.2f}</span> lb/gal
