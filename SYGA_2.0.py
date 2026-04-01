@@ -59,14 +59,14 @@ st.markdown(
     unsafe_allow_html=True
 )
 
-hide_st_style = """
-            <style>
-            #MainMenu {visibility: hidden;}
-            footer {visibility: hidden;}
-            header {visibility: hidden;}
-            </style>
-            """
-st.markdown(hide_st_style, unsafe_allow_html=True)
+# hide_st_style = """
+#             <style>
+#             #MainMenu {visibility: hidden;}
+#             footer {visibility: hidden;}
+#             header {visibility: hidden;}
+#             </style>
+#             """
+# st.markdown(hide_st_style, unsafe_allow_html=True)
 
 if "pdf_bytes" not in st.session_state:
     st.session_state.pdf_bytes = None
@@ -5594,11 +5594,11 @@ def gerar_relatorio_pdf():
 def geo_page():
     st.title('Syngular Geopressure Analysis - SYGA')
 
-    # tabs = st.tabs(['Entrada de Dados', 'Coluna litológica', 'Gradiente de Sobrecarga',
-    #                 'Gradiente de Pressão de Poros', 'Estabilidade de Poço', 'Assentamento de Sapatas',
-    #                 'Anotações', 'Relatório', 'Informações Sobre o SYGA' ])
     tabs = st.tabs(['Entrada de Dados', 'Coluna litológica', 'Gradiente de Sobrecarga',
-                    'Gradiente de Pressão de Poros', 'Estabilidade de Poço', 'Anotações', 'Relatório', 'Informações Sobre o SYGA'])
+                    'Gradiente de Pressão de Poros', 'Estabilidade de Poço', 'Assentamento de Sapatas',
+                    'Anotações', 'Relatório', 'Informações Sobre o SYGA' ])
+    # tabs = st.tabs(['Entrada de Dados', 'Coluna litológica', 'Gradiente de Sobrecarga',
+    #                 'Gradiente de Pressão de Poros', 'Estabilidade de Poço', 'Anotações', 'Relatório', 'Informações Sobre o SYGA'])
 
     # Carregar Dados
     with tabs[0]:
@@ -7694,7 +7694,6 @@ def geo_page():
                                 zorder=0
                             )
 
-                            # plt.subplots_adjust(wspace=0.45)
                             # Exibe o gráfico no Streamlit
                             st.pyplot(st.session_state.fig_pp)
 
@@ -11327,51 +11326,965 @@ def geo_page():
             else:
                 st.error('Por favor, insira um documento!', icon="🚨")
 
-    # # Critério de Assentamento de Sapatas
-    # with tabs[5]:
-    #     if uploaded_file:
-    #         if "df_suav" in st.session_state:
-    #             col1, col2, col3 = st.columns(3)
-    #
-    #             with col1:
-    #                 with st.container(border=True):
-    #                     st.markdown("Dados")
-    #                     st.number_input('Sapata do revestimento condutor', step=1.0, format='%.2f', key='prc', min_value=0.0,
-    #                                     value=df["Profundidade"].iloc[0])
-    #                     st.number_input('Profundidade final do poço', step=1.0, format='%.2f', key='pf',
-    #                                     min_value=0.0, value=df["Profundidade"].iloc[-1])
-    #                     st.number_input('Altura máxima do kick', step=1.0, format='%.2f', key='hk',
-    #                                     min_value=0.0, value=150.)
-    #                     st.number_input('Densidade do kick', step=.5, format='%.2f', key='dk',
-    #                                     min_value=0.0, value=2.)
-    #                     st.number_input('Margem de segurança', step=.1, format='%.2f', key='ms',
-    #                                     min_value=0.0, value=.5)
-    #
-    #             with col2:
-    #                 with st.container(border=True):
-    #                     df_sapata = pd.DataFrame({
-    #                         "Profundidade (m)": df_suav["Profundidade (m)"],
-    #                         "Gradiente de Pressão de Poros (lb/gal)": df_suav["Gradiente de Pressão de Poros (lb/gal)"],
-    #                         "FS Inferior (lb/gal)": x_fs_inf,
-    #                         "FS Superior (lb/gal)": x_fs_sup,
-    #                         "Gradiente de Fratura (lb/gal)": df_suav[
-    #                             ["Tração Superior (σθA)", "Tração Superior (σθB)"]
-    #                         ].min(axis=1)
-    #                     })
-    #
-    #                     st.dataframe(df_sapata, use_container_width=True, hide_index=True)
-    #
-    #             with col3:
-    #                 with st.container(border=True):
-    #                     st.markdown("### Janela Operacional")
-    #                     fig_jo = st.session_state.get("fig_jo", None)
-    #                     st.pyplot(fig_jo, use_container_width=True)
-    #
-    #         else:
-    #             st.error('Gere a Janela Operacional na aba "Estabilidade de Poço"', icon="🚨")
+    # Critério de Assentamento de Sapatas
+    with tabs[5]:
+        if uploaded_file:
+            if "df_suav" in st.session_state:
+                col1, col2 = st.columns((2,1))
+
+                with col1:
+                    with st.container(border=True):
+                        st.markdown("### Critério de Assentamento de Sapatas - Kick Tolerance")
+                        with st.expander("Dados", expanded=True):
+                            # =========================================================
+                            # Inicialização: primeira carga automática
+                            # =========================================================
+                            if "params_sapata_aplicados" not in st.session_state:
+                                st.session_state.params_sapata_aplicados = {
+                                    "prc": 50.0,
+                                    "prs": 500.0,
+                                    "odrc": '20"',
+                                    "odrs": '13 3/8"',
+                                    "pf": float(df["Profundidade"].iloc[-1]),
+                                    "hk": float(round((df["Profundidade"].iloc[-1] / 3.0) / 50.0) * 50.0),
+                                    "vk": 10.0,
+                                    "dk": 2.0,
+                                    "ms": 0.2,
+                                    "msf": 0.0
+                                }
+
+                            p = st.session_state.params_sapata_aplicados
+
+                            # =========================================================
+                            # Formulário: alterações só são aplicadas ao clicar no botão
+                            # =========================================================
+                            with st.form("form_dados_sapata", clear_on_submit=False):
+                                c1, c2 = st.columns(2)
+
+                                with c1:
+                                    prc_in = st.number_input(
+                                        'Sapata do revestimento condutor',
+                                        step=10.0,
+                                        format='%.2f',
+                                        min_value=0.0,
+                                        value=float(p["prc"])
+                                    )
+                                    prs_in = st.number_input(
+                                        'Sapata do revestimento de superfície',
+                                        step=100.0,
+                                        format='%.2f',
+                                        min_value=0.0,
+                                        value=float(p["prs"])
+                                    )
+
+                                with c2:
+                                    op_od = ['20"', '13 3/8"', '9 5/8"']
+
+                                    odrc_in = st.selectbox(
+                                        'OD do revestimento condutor',
+                                        op_od,
+                                        index=op_od.index(p["odrc"]) if p["odrc"] in op_od else 0
+                                    )
+
+                                    odrs_in = st.selectbox(
+                                        'OD do revestimento de superfície',
+                                        op_od,
+                                        index=op_od.index(p["odrs"]) if p["odrs"] in op_od else 1
+                                    )
+
+                                pf_in = st.number_input(
+                                    'Profundidade final do poço',
+                                    step=100.0,
+                                    format='%.2f',
+                                    min_value=0.0,
+                                    value=float(p["pf"])
+                                )
+
+                                hk_in = st.number_input(
+                                    'Comprimento máximo de poço aberto',
+                                    step=100.0,
+                                    format='%.2f',
+                                    min_value=0.0,
+                                    value=float(p["hk"])
+                                )
+
+                                vk_in = st.number_input(
+                                    'Volume do kick',
+                                    step=10.0,
+                                    format='%.2f',
+                                    min_value=0.0,
+                                    value=float(p["vk"])
+                                )
+
+                                dk_in = st.number_input(
+                                    'Densidade do kick',
+                                    step=0.5,
+                                    format='%.2f',
+                                    min_value=0.0,
+                                    value=float(p["dk"])
+                                )
+
+                                ms_in = st.number_input(
+                                    'Margem de segurança do Gradiente de Pressão de Poros',
+                                    step=0.1,
+                                    format='%.2f',
+                                    min_value=0.0,
+                                    value=float(p["ms"])
+                                )
+
+                                msf_in = st.number_input(
+                                    'Margem de segurança do Gradente de Fratura',
+                                    step=0.1,
+                                    format='%.2f',
+                                    min_value=0.0,
+                                    value=float(p["msf"])
+                                )
+
+                                aplicar_dados_sapata = st.form_submit_button(
+                                    "Definir profundidade das sapatas",
+                                    use_container_width=True,
+                                    type="primary"
+                                )
+
+                            # =========================================================
+                            # Só atualiza os parâmetros aplicados quando clicar no botão
+                            # =========================================================
+                            if aplicar_dados_sapata:
+                                st.session_state.params_sapata_aplicados = {
+                                    "prc": float(prc_in),
+                                    "prs": float(prs_in),
+                                    "odrc": odrc_in,
+                                    "odrs": odrs_in,
+                                    "pf": float(pf_in),
+                                    "hk": float(hk_in),
+                                    "vk": float(vk_in),
+                                    "dk": float(dk_in),
+                                    "ms": float(ms_in),
+                                    "msf": float(msf_in)
+                                }
+                                st.success("Parâmetros aplicados com sucesso.")
+
+                            # =========================================================
+                            # Variáveis efetivamente usadas nos cálculos
+                            # =========================================================
+                            params = st.session_state.params_sapata_aplicados
+
+                            prc = params["prc"]
+                            prs = params["prs"]
+                            odrc = params["odrc"]
+                            odrs = params["odrs"]
+                            pf = params["pf"]
+                            hk = params["hk"]
+                            vk = params["vk"]
+                            dk = params["dk"]
+                            ms = params["ms"]
+                            msf = params["msf"]
+
+                        with st.expander("BHA", expanded=True):
+                            # Diâmetro do poço
+                            diametro_poco_pol = 12.25
+                            diametro_poco_m = diametro_poco_pol * 0.0254
+
+                            def calcular_bha(df_base, diametro_poco_m):
+                                df_bha = pd.DataFrame(df_base).copy()
+
+                                for col in ["Elemento do BHA", "OD (pol)", "Comprimento (m)"]:
+                                    if col not in df_bha.columns:
+                                        if col == "Elemento do BHA":
+                                            df_bha[col] = ""
+                                        else:
+                                            df_bha[col] = 0.0
+
+                                df_bha["Elemento do BHA"] = df_bha["Elemento do BHA"].astype(str).fillna("")
+                                df_bha["OD (pol)"] = pd.to_numeric(df_bha["OD (pol)"], errors="coerce").fillna(0.0)
+                                df_bha["Comprimento (m)"] = pd.to_numeric(
+                                    df_bha["Comprimento (m)"], errors="coerce"
+                                ).fillna(0.0)
+
+                                df_bha = df_bha.dropna(
+                                    subset=["Elemento do BHA", "OD (pol)", "Comprimento (m)"],
+                                    how="all"
+                                ).copy()
+
+                                df_bha["Elemento do BHA"] = df_bha["Elemento do BHA"].fillna("")
+                                df_bha["OD (pol)"] = df_bha["OD (pol)"].fillna(0.0)
+                                df_bha["Comprimento (m)"] = df_bha["Comprimento (m)"].fillna(0.0)
+
+                                df_bha["OD (m)"] = df_bha["OD (pol)"] * 0.0254
+                                df_bha["Comprimento Acumulado (m)"] = df_bha["Comprimento (m)"].cumsum()
+
+                                df_bha["Cap. Anular (m3/m)"] = (math.pi / 4) * (
+                                        diametro_poco_m ** 2 - df_bha["OD (m)"] ** 2
+                                )
+                                df_bha["Cap. Anular (m3/m)"] = df_bha["Cap. Anular (m3/m)"].clip(lower=0)
+
+                                df_bha["Vol. (m3)"] = df_bha["Cap. Anular (m3/m)"] * df_bha["Comprimento (m)"]
+                                df_bha["Vol. Acum. (m3)"] = df_bha["Vol. (m3)"].cumsum()
+                                df_bha["Vol. Acum. (bbl)"] = df_bha["Vol. Acum. (m3)"] * 6.28981
+
+                                df_bha["Início do Trecho (m)"] = (
+                                        df_bha["Comprimento Acumulado (m)"] - df_bha["Comprimento (m)"]
+                                )
+                                df_bha["Fim do Trecho (m)"] = df_bha["Comprimento Acumulado (m)"]
+
+                                return df_bha[
+                                    [
+                                        "Elemento do BHA",
+                                        "OD (pol)",
+                                        "OD (m)",
+                                        "Comprimento (m)",
+                                        "Comprimento Acumulado (m)",
+                                        "Início do Trecho (m)",
+                                        "Fim do Trecho (m)",
+                                        "Cap. Anular (m3/m)",
+                                        "Vol. (m3)",
+                                        "Vol. Acum. (m3)",
+                                        "Vol. Acum. (bbl)"
+                                    ]
+                                ]
+
+                            # =========================================================
+                            # BHA padrão base
+                            # Por enquanto todos os BHAs usarão esta mesma composição
+                            # =========================================================
+                            bha_base_padrao = pd.DataFrame({
+                                "Elemento do BHA": [
+                                    "Broca", "MF", "NMDC", "Telescope", "NMDC", "UBHO",
+                                    "DC", "XO", "DC", "HWDP", "Jar", "HWDP"
+                                ],
+                                "OD (pol)": [
+                                    12.25, 9.625, 8.00, 8.375, 8.00, 7.875,
+                                    8.00, 8.00, 6.75, 5.00, 6.50, 5.00
+                                ],
+                                "Comprimento (m)": [
+                                    0.32, 10.55, 5.66, 8.55, 9.22, 0.62,
+                                    18.00, 1.10, 35.91, 54.83, 9.50, 81.98
+                                ]
+                            })
+
+                            # =========================================================
+                            # Catálogo de BHAs
+                            # Por enquanto todos iguais; depois você altera cada um
+                            # =========================================================
+                            bha_opcoes = {
+                                '17 1/2"': bha_base_padrao.copy(),
+                                '12 1/4"': bha_base_padrao.copy(),
+                                '8 1/2"': bha_base_padrao.copy(),
+                                '6 1/8"': bha_base_padrao.copy(),
+                            }
+
+                            if "bha_escolhido" not in st.session_state:
+                                st.session_state.bha_escolhido = '12 1/4"'
+
+                            # =========================================================
+                            # Seleção do BHA
+                            # =========================================================
+                            coluna1, coluna2 = st.columns(2)
+                            with coluna1:
+                                st.markdown(
+                                    """
+                                    <div style="margin-top: 32px;">
+                                        <h5 style="margin-bottom: 0;">
+                                            BHA para a perfuração da fase após o revestimento de superfície
+                                        </h5>
+                                    </div>
+                                    """,
+                                    unsafe_allow_html=True
+                                )
+
+                            st.markdown(
+                                """
+                                <style>
+                                div[role="radiogroup"] {
+                                    gap: 0.4rem;
+                                    justify-content: center;
+                                    flex-wrap: nowrap !important;
+                                }
+
+                                div[role="radiogroup"] > label {
+                                    background: transparent !important;
+                                    padding: 6px 10px;
+                                    border-radius: 8px;
+                                    border: 1.3px solid black !important;
+                                    min-width: 110px;
+                                    min-height: 36px;
+                                    justify-content: center;
+                                    display: flex !important;
+                                    align-items: center;
+                                    white-space: nowrap !important;
+                                }
+
+                                div[role="radiogroup"] > label p {
+                                    font-size: 15px !important;
+                                    font-weight: 600 !important;
+                                    margin: 0 !important;
+                                    color: black !important;
+                                    white-space: nowrap !important;
+                                }
+                                </style>
+                                """,
+                                unsafe_allow_html=True
+                            )
+
+                            with coluna2:
+                                with st.container(border=True):
+                                    opcoes_bha = ['17 1/2"', '12 1/4"', '8 1/2"', '6 1/8"']
+                                    bha_selecionado = st.radio(
+                                        "Selecione o BHA",
+                                        options=opcoes_bha,
+                                        index=opcoes_bha.index(st.session_state.bha_escolhido)
+                                        if st.session_state.bha_escolhido in opcoes_bha else 1,
+                                        horizontal=True,
+                                        key="bha_escolhido"
+                                    )
+
+                            # BHA padrão usado nos cálculos
+                            df_bha_padrao = bha_opcoes[bha_selecionado].copy()
+
+                            # Chaves separadas por BHA para preservar edições independentes
+                            chave_edit = f"df_bha_edit_{bha_selecionado}"
+                            chave_final = f"df_bha_final_{bha_selecionado}"
+
+                            if chave_edit not in st.session_state:
+                                st.session_state[chave_edit] = df_bha_padrao.copy()
+
+                            if chave_final not in st.session_state or st.session_state[chave_final].empty:
+                                st.session_state[chave_final] = calcular_bha(df_bha_padrao, diametro_poco_m)
+
+                            df_bha_editado = st.data_editor(
+                                st.session_state[chave_edit],
+                                use_container_width=True,
+                                hide_index=True,
+                                num_rows="dynamic",
+                                key=f"bha_editor_{bha_selecionado}",
+                                column_config={
+                                    "Elemento do BHA": st.column_config.TextColumn("Elemento do BHA"),
+                                    "OD (pol)": st.column_config.NumberColumn("OD (pol)", format="%.2f"),
+                                    "Comprimento (m)": st.column_config.NumberColumn("Comprimento (m)", format="%.2f"),
+                                }
+                            )
+
+                            col_bt1, col_bt2 = st.columns(2)
+
+                            with col_bt1:
+                                enviar_bha = st.button(
+                                    "Enviar BHA",
+                                    use_container_width=True,
+                                    type="primary",
+                                    key=f"bt_enviar_bha_{bha_selecionado}"
+                                )
+
+                            with col_bt2:
+                                restaurar_bha = st.button(
+                                    "Restaurar BHA padrão",
+                                    use_container_width=True,
+                                    key=f"bt_restaurar_bha_{bha_selecionado}"
+                                )
+
+                            if restaurar_bha:
+                                st.session_state[chave_edit] = df_bha_padrao.copy()
+                                st.session_state[chave_final] = calcular_bha(df_bha_padrao, diametro_poco_m)
+                                st.rerun()
+
+                            if enviar_bha:
+                                st.session_state[chave_edit] = df_bha_editado.copy()
+                                st.session_state[chave_final] = calcular_bha(df_bha_editado, diametro_poco_m)
+
+                            # Referência geral para o restante do código
+                            st.session_state.df_bha_edit = st.session_state[chave_edit].copy()
+                            st.session_state.df_bha_final = st.session_state[chave_final].copy()
+
+                            df_kick = st.session_state.get("df_bha_final", pd.DataFrame()).copy()
+
+                            if df_kick.empty or "Comprimento (m)" not in df_kick.columns:
+                                df_kick = calcular_bha(df_bha_padrao, diametro_poco_m)
+                                st.session_state.df_bha_final = df_kick.copy()
+
+                            for col in [
+                                "Comprimento (m)",
+                                "Comprimento Acumulado (m)",
+                                "Início do Trecho (m)",
+                                "Fim do Trecho (m)",
+                                "Cap. Anular (m3/m)",
+                                "Vol. (m3)",
+                                "Vol. Acum. (m3)",
+                                "Vol. Acum. (bbl)"
+                            ]:
+                                if col in df_kick.columns:
+                                    df_kick[col] = pd.to_numeric(df_kick[col], errors="coerce").fillna(0.0)
+
+                            if "vk" not in st.session_state:
+                                st.session_state.vk = 10.
+                            vk_bbl = float(st.session_state.vk)
+                            vk_m3 = vk_bbl / 6.28981
+
+                            volume_restante = vk_m3
+                            altura_kick = 0.0
+                            elemento_topo_kick = "Não definido"
+
+                            for _, row in df_kick.iterrows():
+                                cap = float(row["Cap. Anular (m3/m)"])
+                                comp = float(row["Comprimento (m)"])
+                                inicio = float(row["Início do Trecho (m)"])
+                                elem = str(row["Elemento do BHA"])
+
+                                if cap <= 0 or comp <= 0:
+                                    continue
+
+                                vol_trecho = cap * comp
+
+                                if volume_restante <= vol_trecho:
+                                    altura_no_trecho = volume_restante / cap
+                                    altura_kick = inicio + altura_no_trecho
+                                    elemento_topo_kick = elem
+                                    volume_restante = 0.0
+                                    break
+                                else:
+                                    volume_restante -= vol_trecho
+
+                            if volume_restante > 1e-9:
+                                altura_kick = float(df_kick["Comprimento Acumulado (m)"].max())
+                                elemento_topo_kick = "Acima do último elemento do BHA"
+
+                            st.session_state.altura_kick_calculada = altura_kick
+                            st.session_state.volume_kick_bbl = vk_bbl
+                            st.session_state.volume_kick_m3 = vk_m3
+                            st.session_state.elemento_topo_kick = elemento_topo_kick
+
+                            c1, c2 = st.columns(2)
+
+                            with c1:
+                                st.metric(
+                                    label="Volume do kick",
+                                    value=f"{vk_bbl:.2f} bbl",
+                                    border=True
+                                )
+
+                            with c2:
+                                st.metric(
+                                    label="Altura do kick",
+                                    value=f"{altura_kick:.2f} m",
+                                    border=True
+                                )
+
+                            st.write(f"**Elemento onde está o topo do kick:** {elemento_topo_kick}")
+
+                            st.dataframe(
+                                st.session_state.df_bha_final,
+                                use_container_width=True,
+                                hide_index=True,
+                                column_config={
+                                    "Elemento do BHA": st.column_config.TextColumn("Elemento do BHA"),
+                                    "OD (pol)": st.column_config.NumberColumn("OD (pol)", format="%.2f"),
+                                    "OD (m)": st.column_config.NumberColumn("OD (m)", format="%.2f"),
+                                    "Comprimento (m)": st.column_config.NumberColumn("Comprimento (m)", format="%.2f"),
+                                    "Comprimento Acumulado (m)": st.column_config.NumberColumn(
+                                        "Comprimento Acumulado (m)", format="%.2f"
+                                    ),
+                                    "Início do Trecho (m)": st.column_config.NumberColumn(
+                                        "Início do Trecho (m)", format="%.2f"
+                                    ),
+                                    "Fim do Trecho (m)": st.column_config.NumberColumn(
+                                        "Fim do Trecho (m)", format="%.2f"
+                                    ),
+                                    "Cap. Anular (m3/m)": st.column_config.NumberColumn(
+                                        "Cap. Anular (m3/m)", format="%.2f"
+                                    ),
+                                    "Vol. (m3)": st.column_config.NumberColumn("Vol. (m3)", format="%.2f"),
+                                    "Vol. Acum. (m3)": st.column_config.NumberColumn("Vol. Acum. (m3)", format="%.2f"),
+                                    "Vol. Acum. (bbl)": st.column_config.NumberColumn("Vol. Acum. (bbl)",
+                                                                                      format="%.2f"),
+                                }
+                            )
+
+                        with st.expander("Kick Tolerance", expanded=True):
+                            df_sapata = pd.DataFrame({
+                                "Profundidade (m)": pd.to_numeric(
+                                    df_suav["Profundidade (m)"], errors="coerce"
+                                ),
+                                "Gradiente de Pressão de Poros (lb/gal)": pd.to_numeric(
+                                    df_suav["Gradiente de Pressão de Poros (lb/gal)"], errors="coerce"
+                                ),
+                                "Gradiente de Fratura (lb/gal)": pd.to_numeric(
+                                    df_suav[["Tração Superior (σθA)", "Tração Superior (σθB)"]].min(axis=1),
+                                    errors="coerce"
+                                )
+                            }).copy()
+
+                            if "ms" not in st.session_state:
+                                st.session_state.ms = .2
+
+                            if "msf" not in st.session_state:
+                                st.session_state.msf = 0.
+
+                            df_sapata["Gradiente de Pressão de Poros + Margem (lb/gal)"] = (
+                                    df_sapata["Gradiente de Pressão de Poros (lb/gal)"] + float(st.session_state.ms)
+                            )
+
+                            df_sapata["Gradiente de Fratura - Margem (lb/gal)"] = (
+                                    df_sapata["Gradiente de Fratura (lb/gal)"] - float(st.session_state.msf)
+                            )
+
+                            df_sapata = (
+                                df_sapata
+                                .dropna(subset=[
+                                    "Profundidade (m)",
+                                    "Gradiente de Pressão de Poros (lb/gal)",
+                                    "Gradiente de Fratura (lb/gal)"
+                                ])
+                                .sort_values("Profundidade (m)")
+                                .reset_index(drop=True)
+                            )
+
+                            df_sapata = df_sapata[
+                                [
+                                    "Profundidade (m)",
+                                    "Gradiente de Pressão de Poros (lb/gal)",
+                                    "Gradiente de Pressão de Poros + Margem (lb/gal)",
+                                    "Gradiente de Fratura - Margem (lb/gal)",
+                                    "Gradiente de Fratura (lb/gal)"
+                                ]
+                            ]
+
+                            df_sapata["Gradiente de Fratura (lb/gal)"] = pd.to_numeric(
+                                df_sapata["Gradiente de Fratura (lb/gal)"], errors="coerce"
+                            )
+
+                            # Remove linhas inválidas e ordena por profundidade
+                            df_sapata = df_sapata.dropna(
+                                subset=["Profundidade (m)", "Gradiente de Fratura (lb/gal)"]
+                            ).sort_values("Profundidade (m)").reset_index(drop=True)
+
+                            if "prs" not in st.session_state:
+                                st.session_state.prs = 500.
+                            # Profundidade informada pelo usuário em "Sapata do revestimento de superfície"
+                            prof_sapata_superficie = float(st.session_state.prs)
+
+                            # Pega a profundidade mais próxima em df_sapata
+                            idx_mais_proximo = (df_sapata["Profundidade (m)"] - prof_sapata_superficie).abs().idxmin()
+
+                            prof_ref_fratura = float(df_sapata.loc[idx_mais_proximo, "Profundidade (m)"])
+                            grad_fratura_ref = float(df_sapata.loc[idx_mais_proximo, "Gradiente de Fratura (lb/gal)"])
+
+                            # Guarda no session_state para usar depois nos cálculos
+                            st.session_state.prof_ref_fratura_sapata = prof_ref_fratura
+                            st.session_state.grad_fratura_sapata_superficie = grad_fratura_ref
+
+                            # Ajuste aqui se sua profundidade de referência tiver outro nome
+                            prof_ref_fratura = float(st.session_state.prs)
+
+                            idx_ref_fratura = (df_sapata["Profundidade (m)"] - prof_ref_fratura).abs().idxmin()
+                            prof_ref_fratura = float(df_sapata.loc[idx_ref_fratura, "Profundidade (m)"])
+                            grad_fratura_ref = float(df_sapata.loc[idx_ref_fratura, "Gradiente de Fratura (lb/gal)"])
+
+                            mask_calculo_kt = df_sapata["Profundidade (m)"] >= prof_ref_fratura
+
+                            rho_kt = pd.Series(index=df_sapata.index, dtype=float)
+
+                            if "dk" not in st.session_state:
+                                st.session_state.dk = 2.
+
+                            rho_kt.loc[mask_calculo_kt] = (
+                                    ((prof_ref_fratura / df_sapata.loc[mask_calculo_kt, "Profundidade (m)"]) *
+                                     ((grad_fratura_ref - st.session_state.msf) -
+                                      df_sapata.loc[
+                                          mask_calculo_kt, "Gradiente de Pressão de Poros + Margem (lb/gal)"]))
+                                    -
+                                    ((altura_kick / df_sapata.loc[mask_calculo_kt, "Profundidade (m)"]) *
+                                     (df_sapata.loc[
+                                          mask_calculo_kt, "Gradiente de Pressão de Poros + Margem (lb/gal)"] - st.session_state.dk))
+                                    +
+                                    df_sapata.loc[mask_calculo_kt, "Gradiente de Pressão de Poros + Margem (lb/gal)"]
+                            )
+
+                            delta_rho_kt = pd.Series(index=df_sapata.index, dtype=float)
+
+                            delta_rho_kt.loc[mask_calculo_kt] = (
+                                    rho_kt.loc[mask_calculo_kt]
+                                    - df_sapata.loc[mask_calculo_kt, "Gradiente de Pressão de Poros + Margem (lb/gal)"]
+                            )
+
+                            # ==========================================================
+                            # Critérios simultâneos para assentamento da próxima sapata
+                            # ==========================================================
+                            prof_sapata_kick = None
+                            idx_stop = None
+                            criterio_sapata = None
+
+                            # ----------------------------------------------------------
+                            # Critério 1A: Kick Tolerance por limite
+                            # primeira profundidade onde Δρkt <= mskt
+                            # ----------------------------------------------------------
+                            mask_kt_limite = (
+                                    rho_kt.notna() &
+                                    (rho_kt <= float(st.session_state.ms))
+                            )
+
+                            idx_kt_limite = None
+                            prof_kt_limite = None
+                            if mask_kt_limite.any():
+                                idx_kt_limite = mask_kt_limite[mask_kt_limite].index[0]
+                                prof_kt_limite = float(df_sapata.loc[idx_kt_limite, "Profundidade (m)"])
+
+                            # ----------------------------------------------------------
+                            # Critério 1B: Kick Tolerance por reversão da curva
+                            # primeira profundidade onde Δρkt atual > Δρkt anterior
+                            # ----------------------------------------------------------
+                            delta_anterior = rho_kt.shift(1)
+
+                            mask_kt_subida = (
+                                    rho_kt.notna() &
+                                    delta_anterior.notna() &
+                                    (rho_kt > delta_anterior)
+                            )
+
+                            idx_kt_subida = None
+                            prof_kt_subida = None
+                            if mask_kt_subida.any():
+                                idx_kt_subida = mask_kt_subida[mask_kt_subida].index[0]
+                                prof_kt_subida = float(df_sapata.loc[idx_kt_subida, "Profundidade (m)"])
+
+                            if "hk" not in st.session_state:
+                                st.session_state.hk = float(round((df["Profundidade"].iloc[-1] / 3.0) / 50.0) * 50.0)
+                            # ----------------------------------------------------------
+                            # Critério 2: Comprimento máximo de poço aberto
+                            # primeira profundidade onde distância desde a sapata de superfície >= hk
+                            # ----------------------------------------------------------
+                            prof_alvo_hk = float(prof_sapata_superficie) + float(st.session_state.hk)
+
+                            mask_hk = df_sapata["Profundidade (m)"] >= prof_alvo_hk
+
+                            idx_hk = None
+                            prof_hk = None
+                            if mask_hk.any():
+                                idx_hk = mask_hk[mask_hk].index[0]
+                                prof_hk = float(df_sapata.loc[idx_hk, "Profundidade (m)"])
+
+                            # ----------------------------------------------------------
+                            # Junta TODOS os candidatos e escolhe o mais raso
+                            # ----------------------------------------------------------
+                            candidatos = []
+
+                            if idx_kt_limite is not None:
+                                candidatos.append((idx_kt_limite, prof_kt_limite, "K.T. (Limite Δρkt)"))
+
+                            if idx_kt_subida is not None:
+                                candidatos.append((idx_kt_subida, prof_kt_subida, "K.T. (Subida ρkt)"))
+
+                            if idx_hk is not None:
+                                candidatos.append((idx_hk, prof_hk, "Comp. Máx. P.A."))
+
+                            if candidatos:
+                                idx_stop, prof_sapata_kick, criterio_sapata = min(candidatos, key=lambda x: x[1])
+
+                                # interrompe as curvas a partir da sapata assentada
+                                rho_kt.loc[idx_stop:] = None
+                                delta_rho_kt.loc[idx_stop:] = None
+
+                            df_sapata.insert(
+                                loc=df_sapata.columns.get_loc('Gradiente de Fratura (lb/gal)') + 1,
+                                column='ρkt',
+                                value=rho_kt
+                            )
+
+                            df_sapata.insert(
+                                loc=df_sapata.columns.get_loc('ρkt') + 1,
+                                column='Δρkt',
+                                value=delta_rho_kt
+                            )
+
+                            sapatas_plot = []
+
+                            if "prc" in st.session_state and pd.notna(st.session_state.prc):
+                                sapatas_plot.append({
+                                    "prof": float(st.session_state.prc),
+                                    "nome": "Sapata do Condutor",
+                                    "cor": "black"
+                                })
+
+                            if prof_sapata_superficie is not None and pd.notna(prof_sapata_superficie):
+                                sapatas_plot.append({
+                                    "prof": float(prof_sapata_superficie),
+                                    "nome": "Sapata do Rev. de Sup.",
+                                    "cor": "black"
+                                })
+
+                            if prof_sapata_kick is not None and pd.notna(prof_sapata_kick):
+                                if criterio_sapata == "K.T. (Limite Δρkt)":
+                                    nome_sapata = "Sapata (K.T. - Limite)"
+                                elif criterio_sapata == "K.T. (Subida ρkt)":
+                                    nome_sapata = "Sapata (K.T. - Limite)"
+                                elif criterio_sapata == "Comp. Máx. P.A.":
+                                    nome_sapata = "Sapata (Comp. Máx. P.A.)"
+                                else:
+                                    nome_sapata = "Sapata"
+
+                                sapatas_plot.append({
+                                    "prof": float(prof_sapata_kick),
+                                    "nome": nome_sapata,
+                                    "cor": "black"
+                                })
+
+                            st.markdown(
+                                f"""
+                                <div style="
+                                    padding: 10px;
+                                    border: 1px solid #D9D9D9;
+                                    border-radius: 8px;
+                                    background-color: #F8F9FA;
+                                    margin-bottom: 10px;
+                                ">
+                                    <b>Profundidade informada da sapata:</b> {prof_sapata_superficie:.2f} m<br>
+                                    <b>Profundidade usada no cálculo (mais próxima):</b> {prof_ref_fratura:.2f} m<br>
+                                    <b>Gradiente de fratura adotado:</b> {grad_fratura_ref:.2f} lb/gal
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+
+                            st.dataframe(df_sapata, use_container_width=True, hide_index=True)
+
+                with col2:
+                    with st.container(border=True):
+                        st.markdown("### Sapatas")
+                        st.session_state.fig_asp = plt.figure(figsize=(8, 10))
+                        if st.session_state.idg == 'Sim':
+                            # === COM coluna de idade ===
+                            gs = gridspec.GridSpec(
+                                1, 4,
+                                width_ratios=[0.1, 0.2, 0.21, 1],
+                                wspace=0
+                            )
+
+                            ax_idade = st.session_state.fig_asp.add_subplot(gs[0])
+                            ax1 = st.session_state.fig_asp.add_subplot(gs[1], sharey=ax_idade)
+
+                            ax_gap = st.session_state.fig_asp.add_subplot(gs[2])
+                            ax_gap.axis('off')
+
+                            ax = st.session_state.fig_asp.add_subplot(gs[3], sharey=ax_idade)
+
+                            idade_formacao(ax_idade, st.session_state.df_idade,
+                                           df_pp['Profundidade (m)'].max() + 100)
+
+                            # evita duplicar rótulos de profundidade
+                            plt.setp(ax1.get_yticklabels(), visible=False)
+                            plt.setp(ax.get_yticklabels(), visible=False)
+
+                        else:
+                            # === SEM coluna de idade ===
+                            gs = gridspec.GridSpec(
+                                1, 3,
+                                width_ratios=[0.2, 0.21, 1],
+                                wspace=0
+                            )
+
+                            ax1 = st.session_state.fig_asp.add_subplot(gs[0])
+                            ax_gap = st.session_state.fig_asp.add_subplot(gs[1])
+                            ax_gap.axis('off')
+
+                            ax = st.session_state.fig_asp.add_subplot(gs[2], sharey=ax1)
+
+                            plt.setp(ax.get_yticklabels(), visible=False)
+
+                        lito(
+                            ax1,
+                            df_pp,
+                            profundidades,
+                            litologias,
+                            st.session_state.y_max_pp
+                        )
+
+                        if "x_max_sa" not in st.session_state:
+                            st.session_state.x_max_sa = 23
+                        if "x_min_sa" not in st.session_state:
+                            st.session_state.x_min_sa = 7
+
+                        def reset_config():
+                            st.session_state.x_min_sa = 7
+                            st.session_state.x_max_sa = 23
+                            st.session_state.x_step_sa = 1
+                            st.session_state.y_min_sa = 0
+                            st.session_state.y_max_sa = int(st.session_state.y.max()) + 100
+                            st.session_state.y_step_sa = 50
+
+                        with st.expander("Configurações do Gráfico", expanded=False):
+                            st.checkbox('Exibir Legendas', key='leg_sa', value=False)
+                            st.number_input("Eixo X - mínimo", value=7, step=1,
+                                            key="x_min_sa")
+                            st.number_input("Eixo X - máximo", value=23, step=1,
+                                            key="x_max_sa")
+                            st.number_input("Passo do eixo X", value=1, step=1,
+                                            key="x_step_sa")
+
+                            st.number_input("Eixo Y - mínimo", value=0, step=100,
+                                            key="y_min_sa")
+                            st.number_input(
+                                "Eixo Y - máximo",
+                                value=int(st.session_state.y.max()) + 100,
+                                step=100,
+                                key="y_max_sa"
+                            )
+                            st.number_input(
+                                "Passo do eixo Y",
+                                value=50,
+                                step=50,
+                                key="y_step_sa"
+                            )
+
+                            st.button(
+                                "Resetar Eixos - Kick Tolerance",
+                                on_click=reset_config,
+                                type="primary",
+                                use_container_width=True
+                            )
+
+                        if st.session_state.ms != 0.:
+                            ax.plot(
+                                df_sapata["Gradiente de Pressão de Poros (lb/gal)"],
+                                df_sapata["Profundidade (m)"],
+                                linestyle="-",
+                                color="red",
+                                linewidth=2,
+                                label="Gradiente de Pressão de Poros (lb/gal)",
+                                zorder=5
+                            )
+
+                        ax.plot(
+                            df_sapata["Gradiente de Pressão de Poros + Margem (lb/gal)"],
+                            df_sapata["Profundidade (m)"],
+                            linestyle="-",
+                            color="orange",
+                            linewidth=2,
+                            label="Gradiente de Pressão de Poros + Margem (lb/gal)",
+                            zorder=5
+                        )
+
+                        if st.session_state.msf != 0.:
+                            ax.plot(
+                                df_sapata["Gradiente de Fratura (lb/gal)"],
+                                df_sapata["Profundidade (m)"],
+                                linestyle="-",
+                                color="blue",
+                                linewidth=2,
+                                label="Gradiente de Fratura (lb/gal)",
+                                zorder=5
+                            )
+
+                        ax.plot(
+                            df_sapata["Gradiente de Fratura - Margem (lb/gal)"],
+                            df_sapata["Profundidade (m)"],
+                            linestyle="-",
+                            color="green",
+                            linewidth=2,
+                            label="Gradiente de Fratura (lb/gal) - Margem",
+                            zorder=5
+                        )
+
+                        ax.plot(
+                            df_sapata["ρkt"],
+                            df_sapata["Profundidade (m)"],
+                            linestyle="-",
+                            color="purple",
+                            linewidth=2,
+                            label="Kick Tolerance",
+                            zorder=5
+                        )
+
+                        # Configurações do gráfico
+                        ax.set_title('Kick Tolerance', fontsize=14, fontweight='bold')
+                        ax.set_xlabel('Gradiente (ppg)', fontsize=12)
+                        ax.invert_yaxis()
+                        ax.tick_params(axis='y', which='both', left=True, labelleft=True)
+                        ax.set_yticks(range(
+                            st.session_state.y_min_sa,
+                            st.session_state.y_max_sa,
+                            st.session_state.y_step_sa
+                        ))
+                        ax.set_ylim(st.session_state.y_max_sa, st.session_state.y_min_sa)
+                        ax.set_xticks(range(
+                            st.session_state.x_min_sa,
+                            st.session_state.x_max_sa,
+                            st.session_state.x_step_sa
+                        ))
+                        ax.set_xlim(st.session_state.x_min_sa, st.session_state.x_max_sa)
+                        ax.grid(True, linestyle='--', alpha=0.5)
+
+                        # =========================
+                        # Sapatas: plotar AQUI
+                        # =========================
+                        x_right = ax.get_xlim()[1] - 0.01 * (ax.get_xlim()[1] - ax.get_xlim()[0])
+
+                        # Recupera os ODs selecionados pelo usuário
+                        od_revest_condutor = st.session_state.get("odrc", '20"')
+                        od_revest_superficie = st.session_state.get("odrs", '13 3/8"')
+
+                        for i, s in enumerate(sapatas_plot):
+                            # Define o nome mostrado no gráfico com base na ordem das duas primeiras sapatas
+                            if i == 0:
+                                nome_sapata = f'Sapata {od_revest_condutor}'
+                            elif i == 1:
+                                nome_sapata = f'Sapata {od_revest_superficie}'
+                            else:
+                                nome_sapata = s["nome"]  # mantém o nome original para as demais
+
+                            ax.axhline(
+                                y=s["prof"],
+                                color=s["cor"],
+                                linestyle="--",
+                                linewidth=2,
+                                zorder=6,
+                                label=f'{nome_sapata} - {s["prof"]:.2f} m'
+                            )
+
+                            ax.text(
+                                x=x_right,
+                                y=s["prof"] - 18,
+                                s=f'{nome_sapata}: {s["prof"]:.2f} m',
+                                color=s["cor"],
+                                fontsize=9,
+                                va="center",
+                                ha="right",
+                                bbox=dict(
+                                    boxstyle="round,pad=0.2",
+                                    facecolor="white",
+                                    edgecolor=s["cor"],
+                                    alpha=0.9
+                                ),
+                                zorder=7
+                            )
+
+                        if st.session_state.leg_sa:
+                            ax.legend(
+                                loc='upper right',
+                                fontsize=8,
+                                frameon=True,
+                                shadow=True,
+                                fancybox=True,
+                                framealpha=1,
+                                facecolor='white',
+                                edgecolor='gray'
+                            )
+
+                        add_watermark(
+                            ax,
+                            logo_path="logo.png",
+                            xy=(0.50, 0.5),
+                            zoom=0.2,
+                            alpha=0.2,
+                            zorder=0
+                        )
+
+                        st.pyplot(st.session_state.fig_asp, use_container_width=True)
+
+            else:
+                st.error('Gere a Janela Operacional na aba "Estabilidade de Poço"', icon="🚨")
+
+        else:
+            st.error('Por favor, insira um documento!', icon="🚨")
 
     #Anotações
-    with tabs[5]:
+    with tabs[6]:
         if "anotacoes" not in st.session_state:
             st.session_state.anotacoes = ""
 
@@ -12067,7 +12980,7 @@ def geo_page():
                         st.rerun()
 
     # Relatório
-    with tabs[6]:
+    with tabs[7]:
 
         col_pdf1, col_pdf2, col_pdf3, col_pdf4, col_pdf5 = st.columns((0.4, 0.2, 1, 0.2, 0.3))
 
@@ -12106,7 +13019,7 @@ def geo_page():
                     )
 
     # Informações Gerais
-    with tabs[7]:
+    with tabs[8]:
         st.title("📘 Informações Gerais do SYGA")
 
         # --- Dicionário com informações dos perfis ---
