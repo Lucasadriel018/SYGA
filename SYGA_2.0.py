@@ -392,22 +392,15 @@ def plot_correlacao_com_logs(pocos, logs, description, lines, v_selected, tvd_la
         "Conglomerado": {"bg": "#CD853F", "simbol": "."},
         "Anidrita / Gipsita": {"bg": "#E6E6FA", "simbol": "/"},
         "Halita": {"bg": "#FFFFFF", "simbol": "."},
-        "Marga": {"bg": "#EEE8AA", "simbol": "-"},
         "Calcário": {"bg": "#B0C4DE", "simbol": "."},
-        "Calcissiltito": "#D8BFD8",
-        "Calcarenito": "#F5DEB3",
-        "Calcirrudito": "#4682B4",
-        "Coquina": "#FFDEAD",
-        "Dolomito": "#C2B280",
-        "Silexito": "#808080",
+        "Carbonato": {"bg": "#cfe8f3", "simbol": "x"},
+        "Calcissiltito": {"bg": "#D8BFD8", "simbol": "."},
+        "Calcarenito": {"bg": "#F5DEB3", "simbol": "."},
+        "Calcirrudito": {"bg": "#4682B4", "simbol": "."},
+        "Coquina": {"bg": "#FFDEAD", "simbol": "."},
+        "Dolomito": {"bg": "#C2B280", "simbol": "."},
         "Basalto": {"bg": "#2F4F4F", "simbol": "+"},
-        "Diabásio": "#556B2F",
-        "Ígnea Ácida": "#CD5C5C",
-        "Ígnea Alcalina": "#B22222",
-        "Ígnea Não Especificada": "#A9A9A9",
-        "Metamórfica Não Especificada": "#696969",
-        "SDR": "#FF7F50",
-        "Crosta Oceânica": "#000080"
+        "Diabásio": {"bg": "#556B2F", "simbol": "."}
     }
 
     nomes = list(pocos.keys())
@@ -1574,15 +1567,24 @@ def lito(ax1, df_pp, profundidades, litologias, bases):
 
         # Estilos de preenchimento
         litho_styles = {
+            "Argilito": {"color": "#9ACD32", "hatch": "|||", "edgecolor": "black"},
             "Arenito": {"color": "#fff7a1", "hatch": "...", "edgecolor": "black"},
             "Fm. Permeável": {"color": "#fff7a1", "hatch": "...", "edgecolor": "black"},
             "Folhelho": {"color": "#2f4f4f", "hatch": None, "edgecolor": "black"},
+            "Siltito": {"color": "#8b4513", "hatch": None, "edgecolor": "black"},
+            "Diamictito": {"color": "#E97451", "hatch": "..", "edgecolor": "black"},
+            "Conglomerado": {"color": "#ffb347", "hatch": "oo", "edgecolor": "black"},
+            "Anidrita / Gipsita": {"color": "#E6E6FA", "hatch": "///", "edgecolor": "black"},
+            "Halita": {"color": "#ffffff", "hatch": None, "edgecolor": "black"},
             "Calcário": {"color": "#a7c7e7", "hatch": "///", "edgecolor": "#003366"},
             "Carbonato": {"color": "#cfe8f3", "hatch": "xx", "edgecolor": "#003366"},
-            "Siltito": {"color": "#8b4513", "hatch": None, "edgecolor": "black"},
+            "Calcissiltito": {"color": "#D8BFD8", "hatch": "---", "edgecolor": "black"},
+            "Calcarenito": {"color": "#F5DEB3", "hatch": "...", "edgecolor": "black"},
+            "Calcirrudito": {"color": "#4682B4", "hatch": "oo", "edgecolor": "black"},
+            "Coquina": {"color": "#FFDEAD", "hatch": "oo", "edgecolor": "black"},
+            "Dolomito": {"color": "#C2B280", "hatch": "xx", "edgecolor": "black"},
             "Basalto": {"color": "#2b2b2b", "hatch": None, "edgecolor": "black"},
-            "Conglomerado": {"color": "#ffb347", "hatch": "oo", "edgecolor": "black"},
-            "Halita": {"color": "#ffffff", "hatch": None, "edgecolor": "black"},
+            "Diabásio": {"color": "#556B2F", "hatch": "++", "edgecolor": "black"},
         }
 
         # Configurações do eixo da litologia
@@ -2078,15 +2080,27 @@ def _aplicar_litologia_no_state(poco_nome: str, df_lito: pd.DataFrame):
 
         lit = st.session_state.pocos[poco_nome]["litologia"][i]
         mapa_lit = {
+            "argilito": "Argilito",
             "arenito": "Arenito",
             "folhelho": "Folhelho",
             "calcario": "Calcário",
             "calcário": "Calcário",
             "carbonato": "Carbonato",
             "siltito": "Siltito",
+            "diamictito": "Diamictito",
             "conglomerado": "Conglomerado",
+            "anidrita / gipsita": "Anidrita / Gipsita",
+            "anidrita": "Anidrita / Gipsita",
+            "gipsita": "Anidrita / Gipsita",
             "halita": "Halita",
+            "calcissiltito": "Calcissiltito",
+            "calcarenito": "Calcarenito",
+            "calcirrudito": "Calcirrudito",
+            "coquina": "Coquina",
+            "dolomito": "Dolomito",
             "basalto": "Basalto",
+            "diabásio": "Diabásio",
+            "diabasio": "Diabásio",
         }
         st.session_state[f"lit_{i}"] = mapa_lit.get(str(lit).strip().lower(), "Arenito")
 
@@ -5618,6 +5632,7 @@ def geo_page():
                     index=0,
                     key="traj_modo"
                 )
+                st.selectbox("Objetivo do estudo", ["Retroanálise", "Previsão de Geopressões"], key="option", index=1)
 
                 uploaded_file = st.file_uploader("***Envie o seu arquivo Excel***", type=["xlsx", "xls", "xlsm"])
 
@@ -5693,14 +5708,17 @@ def geo_page():
                             st.session_state.northing = info_ini["northing"]
 
                     except Exception as e:
-                        st.warning(f"Não foi possível ler a aba 'Início' para preencher dados do poço: {e}")
+                        st.error(f"Não foi possível ler a aba 'Início' para preencher dados do poço: {e}")
 
                     try:
                         df_mud = _ler_peso_fluido_do_xlsm(st.session_state.wb)
                         st.session_state.df_mud = df_mud
 
                     except Exception as e:
-                        st.warning(f"Não foi possível ler pesos do fluido na aba 'Geopressões': {e}")
+                        if st.session_state.option == "Retroanálise":
+                            st.error(f"Não foi possível ler pesos do fluido na aba 'Geopressões': {e}")
+                        else:
+                            pass
 
                     try:
                         df_eventos = pd.read_excel(uploaded_file, sheet_name="Eventos")
@@ -5747,25 +5765,30 @@ def geo_page():
                                                                                        st.session_state.df2)
 
                     except Exception as e:
-                        st.warning(f"Não foi possível carregar/interpolar trajetória pela aba 'Trajetória': {e}")
+                        st.error(f"Não foi possível carregar/interpolar trajetória pela aba 'Trajetória': {e}")
 
                     try:
                         sapatas_df = _ler_sapatas_do_xlsm(st.session_state.wb)
                         st.session_state.sapatas_df = sapatas_df
                     except Exception as e:
-                        st.warning(f"Não foi possível ler as sapatas do Excel: {e}")
+                        if st.session_state.option == "Retroanálise":
+                            st.error(f"Não foi possível ler as sapatas do Excel: {e}")
+                        else:
+                            pass
 
                     try:
                         fases_df = _ler_fases_do_xlsm(st.session_state.wb)
                         st.session_state.fases_df = fases_df
                     except Exception as e:
-                        st.warning(f"Não foi possível ler as fases do Excel: {e}")
+                        if st.session_state.option == "Retroanálise":
+                            st.error(f"Não foi possível ler as fases do Excel: {e}")
+                        else:
+                            pass
 
         with c2:
             container = st.container(border=True)  # Criando um container com borda
             with container:
                 st.markdown('#### Informações básicas do poço')
-                st.selectbox("Objetivo do estudo", ["Retroanálise", "Previsão de Geopressões"], key="option", index=1)
                 st.text_input('Nome do Usuário', max_chars=None, key='user_name', type="default")
                 # st.text_input('País', max_chars=None, key='country_name', type="default")
                 lista_paises = list(paises.keys())
@@ -6212,14 +6235,23 @@ def geo_page():
                 with col3:
 
                     lithology = [
+                        "Argilito",
                         "Arenito",
                         "Folhelho",
                         "Calcário",
                         "Carbonato",
                         "Siltito",
+                        "Diamictito",
                         "Conglomerado",
+                        "Anidrita / Gipsita",
                         "Halita",
-                        "Basalto"
+                        "Calcissiltito",
+                        "Calcarenito",
+                        "Calcirrudito",
+                        "Coquina",
+                        "Dolomito",
+                        "Basalto",
+                        "Diabásio"
                     ]
 
                     lit = st.selectbox(
@@ -9123,7 +9155,25 @@ def geo_page():
 
                             litologia = st.selectbox(
                                 "Litologia",
-                                ["Arenito", "Folhelho", "Calcário", "Siltito", "Conglomerado", "Halita"]
+                                [
+                                    "Argilito",
+                                    "Arenito",
+                                    "Folhelho",
+                                    "Calcário",
+                                    "Carbonato",
+                                    "Siltito",
+                                    "Diamictito",
+                                    "Conglomerado",
+                                    "Anidrita / Gipsita",
+                                    "Halita",
+                                    "Calcissiltito",
+                                    "Calcarenito",
+                                    "Calcirrudito",
+                                    "Coquina",
+                                    "Dolomito",
+                                    "Basalto",
+                                    "Diabásio"
+                                ]
                             )
 
                             # Converter acentuados → YAML keys
@@ -11344,22 +11394,24 @@ def geo_page():
                                 st.number_input('Margem de segurança do Gradiente de Pressão de Poros', step=.1,
                                                 format='%.2f', key='ms',
                                                 min_value=0.0, value=0.)
+                                st.number_input('Volume do kick', step=10., format='%.2f', key='vk',
+                                                min_value=0.0, value=10.)
+                                st.number_input('Margem de segurança do Kick Tolerance', step=.1, format='%.2f',
+                                                key='mskt', min_value=0.0, value=.5)
                             with c2:
                                 st.selectbox('OD do revestimento condutor', ['20"', '13 3/8"', '9 5/8"'],key='odrc')
                                 st.selectbox('OD do revestimento de superfície', ['20"', '13 3/8"', '9 5/8"'], key='odrs', index=1)
                                 st.number_input('Margem de segurança do Gradente de Fratura', step=.1, format='%.2f',
-                                                key='msf',
-                                                min_value=0.0, value=.0)
-                            st.number_input('Margem de segurança do Kick Tolerance', step=.1, format='%.2f',
-                                            key='mskt', min_value=0.0, value=.5)
-                            st.number_input('Volume do kick', step=10., format='%.2f', key='vk',
-                                            min_value=0.0, value=10.)
-                            st.number_input('Densidade do kick', step=.5, format='%.2f', key='dk',
-                                            min_value=0.0, value=2.)
-                            st.number_input('Comprimento máximo de poço aberto', step=100.0, format='%.2f', key='hk',
-                                            min_value=0.0, value=round((df["Profundidade"].iloc[-1] / 3.) / 50.) * 50.)
-                            st.number_input('Profundidade final do poço', step=100.0, format='%.2f', key='pf',
-                                            min_value=0.0, value=df["Profundidade"].iloc[-1])
+                                                key='msf',min_value=0.0, value=.0)
+                                st.number_input('Densidade do kick', step=.5, format='%.2f', key='dk',
+                                                min_value=0.0, value=2.)
+                                st.number_input('Comprimento máximo de poço aberto', step=100.0, format='%.2f',
+                                                key='hk', min_value=0.0,
+                                                value=round((df["Profundidade"].iloc[-1] / 3.) / 50.) * 50.)
+
+                            st.session_state.pf = df["Profundidade"].iloc[-1]
+                            # st.number_input('Profundidade final do poço', step=100.0, format='%.2f', key='pf',
+                            #                 min_value=0.0, value=df["Profundidade"].iloc[-1])
 
                         with st.expander("BHA", expanded=True):
 
@@ -11519,6 +11571,7 @@ def geo_page():
                                         horizontal=True,
                                         key="bha_escolhido"
                                     )
+                                    st.session_state.bha_selecionado = bha_selecionado
 
                             diametro_poco_por_bha = {
                                 '17 1/2"': 17.5,
@@ -11611,11 +11664,13 @@ def geo_page():
                             volume_restante = vk_m3
                             altura_kick = 0.0
                             elemento_topo_kick = "Não definido"
+                            intervalo_elemento_topo_kick = ""
 
                             for _, row in df_kick.iterrows():
                                 cap = float(row["Cap. Anular (m3/m)"])
                                 comp = float(row["Comprimento (m)"])
                                 inicio = float(row["Início do Trecho (m)"])
+                                fim = float(row["Fim do Trecho (m)"])
                                 elem = str(row["Elemento do BHA"])
 
                                 if cap <= 0 or comp <= 0:
@@ -11627,6 +11682,7 @@ def geo_page():
                                     altura_no_trecho = volume_restante / cap
                                     altura_kick = inicio + altura_no_trecho
                                     elemento_topo_kick = elem
+                                    intervalo_elemento_topo_kick = f"{inicio:.2f}–{fim:.2f} m"
                                     volume_restante = 0.0
                                     break
                                 else:
@@ -11635,20 +11691,24 @@ def geo_page():
                             if volume_restante > 1e-9:
                                 altura_kick = float(df_kick["Comprimento Acumulado (m)"].max())
                                 elemento_topo_kick = "Acima do último elemento do BHA"
+                                intervalo_elemento_topo_kick = ""
 
                             st.session_state.altura_kick_calculada = altura_kick
                             st.session_state.volume_kick_bbl = vk_bbl
                             st.session_state.volume_kick_m3 = vk_m3
                             st.session_state.elemento_topo_kick = elemento_topo_kick
+                            st.session_state.intervalo_elemento_topo_kick = intervalo_elemento_topo_kick
 
                             ultrapassou_bha = volume_restante > 1e-9
 
                             if ultrapassou_bha:
                                 texto_topo_kick = "Ultrapassou o comprimento acumulado do BHA"
+                                profundidade_topo_kick_txt = ""
                             else:
-                                texto_topo_kick = elemento_topo_kick
+                                texto_topo_kick = f"{elemento_topo_kick} ({intervalo_elemento_topo_kick})"
+                                profundidade_topo_kick_txt = f"{altura_kick:.2f} m"
 
-                            c1, c2, c3 = st.columns(3)
+                            c1, c2, c3 = st.columns([1, 1, 1.35])
 
                             with c1:
                                 st.metric(
@@ -11664,11 +11724,44 @@ def geo_page():
                                     border=True
                                 )
 
+                            cor_texto_topo_kick = "red" if texto_topo_kick == "Ultrapassou o comprimento acumulado do BHA" else "black"
+
                             with c3:
-                                st.metric(
-                                    label="Topo do kick",
-                                    value=texto_topo_kick,
-                                    border=True
+                                st.markdown(
+                                    f"""
+                                    <div style="
+                                        border: 1px solid rgba(49, 51, 63, 0.2);
+                                        border-radius: 0.5rem;
+                                        padding: 0.6rem 1rem 0.75rem 1rem;
+                                        min-height: 108px;
+                                        display: flex;
+                                        flex-direction: column;
+                                        justify-content: flex-start;
+                                        background: transparent;
+                                    ">
+                                        <div style="
+                                            font-size: 0.875rem;
+                                            color: black;
+                                            margin-top: 0.35rem;
+                                            margin-bottom: 0.15rem;
+                                            font-weight: 400;
+                                        ">
+                                            Topo do kick
+                                        </div>
+                                        <div style="
+                                            font-size: 1.1rem;
+                                            font-weight: 600;
+                                            color: {cor_texto_topo_kick};
+                                            line-height: 1.25;
+                                            word-break: break-word;
+                                            overflow-wrap: break-word;
+                                            margin-top: 0.35rem;
+                                        ">
+                                            {texto_topo_kick}
+                                        </div>
+                                    </div>
+                                    """,
+                                    unsafe_allow_html=True
                                 )
 
                             st.dataframe(
@@ -11819,44 +11912,263 @@ def geo_page():
                                 idx_kt_limite = mask_kt_limite[mask_kt_limite].index[0]
                                 prof_kt_limite = float(df_sapata.loc[idx_kt_limite, "Profundidade (m)"])
 
+                            def calcular_altura_kick_por_bha(df_bha_kick, vk_bbl):
+                                df_kick = df_bha_kick.copy()
+
+                                for col in [
+                                    "Cap. Anular (m3/m)",
+                                    "Comprimento (m)",
+                                    "Início do Trecho (m)",
+                                    "Fim do Trecho (m)",
+                                    "Comprimento Acumulado (m)",
+                                    "Vol. Acum. (m3)",
+                                    "Vol. Acum. (bbl)"
+                                ]:
+                                    if col in df_kick.columns:
+                                        df_kick[col] = pd.to_numeric(df_kick[col], errors="coerce").fillna(0.0)
+
+                                vk_m3 = float(vk_bbl) / 6.28981
+
+                                volume_restante = vk_m3
+                                altura_kick_local = 0.0
+                                elemento_topo_kick_local = "Não definido"
+                                intervalo_elemento_topo_kick_local = ""
+
+                                for _, row in df_kick.iterrows():
+                                    cap = float(row["Cap. Anular (m3/m)"])
+                                    comp = float(row["Comprimento (m)"])
+                                    inicio = float(row["Início do Trecho (m)"])
+                                    fim = float(row["Fim do Trecho (m)"])
+                                    elem = str(row["Elemento do BHA"])
+
+                                    if cap <= 0 or comp <= 0:
+                                        continue
+
+                                    vol_trecho = cap * comp
+
+                                    if volume_restante <= vol_trecho:
+                                        altura_no_trecho = volume_restante / cap
+                                        altura_kick_local = inicio + altura_no_trecho
+                                        elemento_topo_kick_local = elem
+                                        intervalo_elemento_topo_kick_local = f"{inicio:.2f}–{fim:.2f} m"
+                                        volume_restante = 0.0
+                                        break
+                                    else:
+                                        volume_restante -= vol_trecho
+
+                                if volume_restante > 1e-9:
+                                    altura_kick_local = float(df_kick["Comprimento Acumulado (m)"].max())
+                                    elemento_topo_kick_local = "Acima do último elemento do BHA"
+                                    intervalo_elemento_topo_kick_local = ""
+
+                                return altura_kick_local, elemento_topo_kick_local, intervalo_elemento_topo_kick_local
+
                             # ----------------------------------------------------------
-                            # Critério 2: Comprimento máximo de poço aberto
-                            # primeira profundidade onde distância desde a sapata de superfície >= hk
+                            # Cálculo sequencial das sapatas por fase/BHA
+                            # Mantém ρkt e Δρkt acumulados no df_sapata para plotagem
+                            # Recalcula altura do kick para cada BHA
                             # ----------------------------------------------------------
-                            prof_alvo_hk = float(prof_sapata_superficie) + float(st.session_state.hk)
 
-                            mask_hk = df_sapata["Profundidade (m)"] >= prof_alvo_hk
+                            mapa_sapata_por_bha = {
+                                '17 1/2"': '13 3/8"',
+                                '12 1/4"': '9 5/8"',
+                                '8 1/2"': '7"',
+                                '6 1/8"': '5 1/2"'
+                            }
 
-                            idx_hk = None
-                            prof_hk = None
-                            if mask_hk.any():
-                                idx_hk = mask_hk[mask_hk].index[0]
-                                prof_hk = float(df_sapata.loc[idx_hk, "Profundidade (m)"])
+                            ordem_bhas = ['17 1/2"', '12 1/4"', '8 1/2"', '6 1/8"']
 
-                            candidatos = []
+                            bha_inicial = st.session_state.get("bha_selecionado", '12 1/4"')
+                            if bha_inicial not in ordem_bhas:
+                                bha_inicial = '12 1/4"'
 
-                            if idx_kt_limite is not None:
-                                candidatos.append((idx_kt_limite, prof_kt_limite, "K.T. (Limite Δρkt)"))
+                            idx_bha_inicial = ordem_bhas.index(bha_inicial)
+                            bhas_restantes = ordem_bhas[idx_bha_inicial:]
 
-                            if idx_hk is not None:
-                                candidatos.append((idx_hk, prof_hk, "Comp. Máx. P.A."))
+                            prof_final_poco = float(df_sapata["Profundidade (m)"].max())
 
-                            if candidatos:
-                                idx_stop, prof_sapata_kick, criterio_sapata = min(candidatos, key=lambda x: x[1])
+                            sapatas_calculadas = []
+                            historico_fases = []
+                            curvas_kt_plot = []
 
-                                rho_kt.loc[idx_stop:] = None
-                                delta_rho_kt.loc[idx_stop:] = None
+                            prof_sapata_atual = float(prof_sapata_superficie)
+
+                            rho_kt_acumulado = pd.Series(np.nan, index=df_sapata.index, dtype=float)
+                            delta_rho_kt_acumulado = pd.Series(np.nan, index=df_sapata.index, dtype=float)
+
+                            for bha_fase in bhas_restantes:
+                                if prof_sapata_atual >= prof_final_poco:
+                                    break
+
+                                chave_final_fase = f"df_bha_final_{bha_fase}"
+
+                                if chave_final_fase in st.session_state and isinstance(
+                                        st.session_state[chave_final_fase], pd.DataFrame):
+                                    df_bha_fase = st.session_state[chave_final_fase].copy()
+                                else:
+                                    diametro_poco_por_bha = {
+                                        '17 1/2"': 17.5,
+                                        '12 1/4"': 12.25,
+                                        '8 1/2"': 8.5,
+                                        '6 1/8"': 6.125,
+                                    }
+                                    diametro_poco_m_fase = diametro_poco_por_bha[bha_fase] * 0.0254
+                                    df_bha_fase = calcular_bha(bha_opcoes[bha_fase].copy(), diametro_poco_m_fase)
+
+                                altura_kick_fase, elemento_topo_kick_fase, intervalo_topo_kick_fase = calcular_altura_kick_por_bha(
+                                    df_bha_fase,
+                                    st.session_state.vk
+                                )
+
+                                idx_ref_fratura = (df_sapata["Profundidade (m)"] - prof_sapata_atual).abs().idxmin()
+                                prof_ref_fratura_fase = float(df_sapata.loc[idx_ref_fratura, "Profundidade (m)"])
+                                grad_fratura_ref_fase = float(
+                                    df_sapata.loc[idx_ref_fratura, "Gradiente de Fratura (lb/gal)"])
+
+                                mask_calculo_fase = df_sapata["Profundidade (m)"] >= prof_ref_fratura_fase
+
+                                rho_kt = pd.Series(np.nan, index=df_sapata.index, dtype=float)
+                                delta_rho_kt = pd.Series(np.nan, index=df_sapata.index, dtype=float)
+
+                                rho_kt.loc[mask_calculo_fase] = (
+                                        ((prof_ref_fratura_fase / df_sapata.loc[
+                                            mask_calculo_fase, "Profundidade (m)"]) *
+                                         ((grad_fratura_ref_fase - st.session_state.msf) -
+                                          df_sapata.loc[
+                                              mask_calculo_fase, "Gradiente de Pressão de Poros + Margem (lb/gal)"]))
+                                        -
+                                        ((altura_kick_fase / df_sapata.loc[mask_calculo_fase, "Profundidade (m)"]) *
+                                         (df_sapata.loc[
+                                              mask_calculo_fase, "Gradiente de Pressão de Poros + Margem (lb/gal)"] - st.session_state.dk))
+                                        +
+                                        df_sapata.loc[
+                                            mask_calculo_fase, "Gradiente de Pressão de Poros + Margem (lb/gal)"]
+                                )
+
+                                delta_rho_kt.loc[mask_calculo_fase] = (
+                                        rho_kt.loc[mask_calculo_fase]
+                                        - df_sapata.loc[
+                                            mask_calculo_fase, "Gradiente de Pressão de Poros + Margem (lb/gal)"]
+                                )
+
+                                mask_kt_limite = (
+                                        delta_rho_kt.notna() &
+                                        (delta_rho_kt <= st.session_state.mskt)
+                                )
+
+                                idx_kt_limite = None
+                                prof_kt_limite = None
+                                if mask_kt_limite.any():
+                                    idx_kt_limite = mask_kt_limite[mask_kt_limite].index[0]
+                                    prof_kt_limite = float(df_sapata.loc[idx_kt_limite, "Profundidade (m)"])
+
+                                prof_alvo_hk = float(prof_sapata_atual) + float(st.session_state.hk)
+
+                                mask_hk = df_sapata["Profundidade (m)"] >= prof_alvo_hk
+
+                                idx_hk = None
+                                prof_hk = None
+                                if mask_hk.any():
+                                    idx_hk = mask_hk[mask_hk].index[0]
+                                    prof_hk = float(df_sapata.loc[idx_hk, "Profundidade (m)"])
+
+                                candidatos = []
+
+                                if idx_kt_limite is not None:
+                                    candidatos.append((idx_kt_limite, prof_kt_limite, "Kick tolerance atingido."))
+
+                                if idx_hk is not None:
+                                    candidatos.append((idx_hk, prof_hk, "Comprimento máximo de poço aberto."))
+
+                                if not candidatos:
+                                    mask_preencher = rho_kt.notna()
+                                    rho_kt_acumulado.loc[mask_preencher] = rho_kt.loc[mask_preencher]
+                                    delta_rho_kt_acumulado.loc[mask_preencher] = delta_rho_kt.loc[mask_preencher]
+
+                                    curvas_kt_plot.append({
+                                        "bha": bha_fase,
+                                        "prof": df_sapata.loc[mask_preencher, "Profundidade (m)"].to_numpy(dtype=float),
+                                        "rho_kt": rho_kt.loc[mask_preencher].to_numpy(dtype=float)
+                                    })
+
+                                    historico_fases.append({
+                                        "bha": bha_fase,
+                                        "prof_sapata_informada": float(prof_sapata_atual),
+                                        "prof_ref_fratura": float(prof_ref_fratura_fase),
+                                        "grad_fratura_ref": float(grad_fratura_ref_fase),
+                                        "altura_kick": float(altura_kick_fase),
+                                        "elemento_topo_kick": elemento_topo_kick_fase,
+                                        "intervalo_topo_kick": intervalo_topo_kick_fase,
+                                        "prof_sapata_calc": None,
+                                        "criterio": "Não atingido até o fim dos dados de perfilagem."
+                                    })
+                                    break
+
+                                idx_stop, prof_sapata_nova, criterio_sapata = min(candidatos, key=lambda x: x[1])
+
+                                rho_kt.loc[idx_stop:] = np.nan
+                                delta_rho_kt.loc[idx_stop:] = np.nan
+
+                                mask_preencher = rho_kt.notna()
+                                rho_kt_acumulado.loc[mask_preencher] = rho_kt.loc[mask_preencher]
+                                delta_rho_kt_acumulado.loc[mask_preencher] = delta_rho_kt.loc[mask_preencher]
+
+                                curvas_kt_plot.append({
+                                    "bha": bha_fase,
+                                    "prof": df_sapata.loc[mask_preencher, "Profundidade (m)"].to_numpy(dtype=float),
+                                    "rho_kt": rho_kt.loc[mask_preencher].to_numpy(dtype=float)
+                                })
+
+                                diametro_sapata = mapa_sapata_por_bha.get(bha_fase)
+                                nome_sapata = f'Sapata {diametro_sapata}' if diametro_sapata is not None else "Sapata"
+
+                                st.session_state.curvas_kt_plot = curvas_kt_plot
+
+                                sapatas_calculadas.append({
+                                    "prof": float(prof_sapata_nova),
+                                    "nome": nome_sapata,
+                                    "cor": "black",
+                                    "bha": bha_fase,
+                                    "criterio": criterio_sapata,
+                                    "prof_ref_fratura": float(prof_ref_fratura_fase),
+                                    "grad_fratura_ref": float(grad_fratura_ref_fase),
+                                    "prof_sapata_informada": float(prof_sapata_atual),
+                                    "altura_kick": float(altura_kick_fase),
+                                    "elemento_topo_kick": elemento_topo_kick_fase,
+                                    "intervalo_topo_kick": intervalo_topo_kick_fase
+                                })
+
+                                historico_fases.append({
+                                    "bha": bha_fase,
+                                    "prof_sapata_informada": float(prof_sapata_atual),
+                                    "prof_ref_fratura": float(prof_ref_fratura_fase),
+                                    "grad_fratura_ref": float(grad_fratura_ref_fase),
+                                    "altura_kick": float(altura_kick_fase),
+                                    "elemento_topo_kick": elemento_topo_kick_fase,
+                                    "intervalo_topo_kick": intervalo_topo_kick_fase,
+                                    "prof_sapata_calc": float(prof_sapata_nova),
+                                    "criterio": criterio_sapata
+                                })
+
+                                prof_sapata_atual = float(prof_sapata_nova)
+
+                                if prof_sapata_atual >= prof_final_poco:
+                                    break
+
+                            for col in ["ρkt", "Δρkt"]:
+                                if col in df_sapata.columns:
+                                    df_sapata.drop(columns=[col], inplace=True)
 
                             df_sapata.insert(
                                 loc=df_sapata.columns.get_loc('Gradiente de Fratura (lb/gal)') + 1,
                                 column='ρkt',
-                                value=rho_kt
+                                value=rho_kt_acumulado
                             )
 
                             df_sapata.insert(
                                 loc=df_sapata.columns.get_loc('ρkt') + 1,
                                 column='Δρkt',
-                                value=delta_rho_kt
+                                value=delta_rho_kt_acumulado
                             )
 
                             sapatas_plot = []
@@ -11875,36 +12187,59 @@ def geo_page():
                                     "cor": "black"
                                 })
 
-                            if prof_sapata_kick is not None and pd.notna(prof_sapata_kick):
-                                if criterio_sapata == "K.T. (Limite Δρkt)":
-                                    nome_sapata = "Sapata (K.T. - Limite)"
-                                elif criterio_sapata == "Comp. Máx. P.A.":
-                                    nome_sapata = "Sapata (Comp. Máx. P.A.)"
-                                else:
-                                    nome_sapata = "Sapata"
+                            for sap in sapatas_calculadas:
+                                if sap["prof"] is not None and pd.notna(sap["prof"]):
+                                    sapatas_plot.append({
+                                        "prof": float(sap["prof"]),
+                                        "nome": sap["nome"],
+                                        "cor": sap["cor"]
+                                    })
 
-                                sapatas_plot.append({
-                                    "prof": float(prof_sapata_kick),
-                                    "nome": nome_sapata,
-                                    "cor": "black"
-                                })
+                            prof_sapata_kick = sapatas_calculadas[-1]["prof"] if sapatas_calculadas else None
+                            criterio_sapata = sapatas_calculadas[-1]["criterio"] if sapatas_calculadas else None
 
-                            st.markdown(
-                                f"""
-                                <div style="
-                                    padding: 10px;
-                                    border: 1px solid #D9D9D9;
-                                    border-radius: 8px;
-                                    background-color: #F8F9FA;
-                                    margin-bottom: 10px;
-                                ">
-                                    <b>Profundidade informada da sapata:</b> {prof_sapata_superficie:.2f} m<br>
-                                    <b>Profundidade usada no cálculo (mais próxima):</b> {prof_ref_fratura:.2f} m<br>
-                                    <b>Gradiente de fratura adotado:</b> {grad_fratura_ref:.2f} lb/gal
-                                </div>
-                                """,
-                                unsafe_allow_html=True
-                            )
+                            if historico_fases:
+                                st.markdown("#### Resumo das fases")
+
+                                for i, fase in enumerate(historico_fases, start=1):
+                                    prof_calc_txt = (
+                                        f'{fase["prof_sapata_calc"]:.2f} m'
+                                        if fase["prof_sapata_calc"] is not None and pd.notna(fase["prof_sapata_calc"])
+                                        else "Não atingido até o fim dos dados de perfilagem."
+                                    )
+
+                                    intervalo_topo_txt = (
+                                        f' · {fase["intervalo_topo_kick"]}'
+                                        if fase["intervalo_topo_kick"]
+                                        else ""
+                                    )
+
+                                    with st.expander(f'Fase {fase["bha"]}', expanded=True):
+                                        c1, c2 = st.columns(2)
+
+                                        with c1:
+                                            st.caption("Profundidade da sapata")
+                                            st.write(f'**{prof_calc_txt}**')
+
+                                            st.caption("Gradiente de fratura na sapata")
+                                            st.write(f'**{fase["grad_fratura_ref"]:.2f} lb/gal**')
+
+                                        with c2:
+                                            st.caption("Altura do kick")
+                                            st.write(f'**{fase["altura_kick"]:.2f} m**')
+
+                                            st.caption("Topo do kick")
+                                            st.write(f'**{fase["elemento_topo_kick"]}{intervalo_topo_txt}**')
+
+                                        st.markdown(
+                                            f"""
+                                            <span>
+                                                <b>Critério:</b>
+                                                <span style="color: red;">{fase["criterio"]}</span>
+                                            </span>
+                                            """,
+                                            unsafe_allow_html=True
+                                        )
 
                             st.dataframe(df_sapata, use_container_width=True, hide_index=True)
 
@@ -12045,15 +12380,24 @@ def geo_page():
                             zorder=5
                         )
 
-                        ax.plot(
-                            df_sapata["ρkt"],
-                            df_sapata["Profundidade (m)"],
-                            linestyle="-",
-                            color="purple",
-                            linewidth=2,
-                            label="Kick Tolerance",
-                            zorder=5
-                        )
+                        curvas_kt_plot = st.session_state.get("curvas_kt_plot", [])
+
+                        for curva in curvas_kt_plot:
+                            bha_curva = curva["bha"]
+                            prof_plot = pd.to_numeric(pd.Series(curva["prof"]), errors="coerce")
+                            rho_plot = pd.to_numeric(pd.Series(curva["rho_kt"]), errors="coerce")
+                            mask_ok = prof_plot.notna() & rho_plot.notna()
+
+                            if mask_ok.any():
+                                ax.plot(
+                                    rho_plot[mask_ok],
+                                    prof_plot[mask_ok],
+                                    linestyle="-",
+                                    color="purple",
+                                    linewidth=2,
+                                    label=f"Kick Tolerance - {bha_curva}",
+                                    zorder=5
+                                )
 
                         # Configurações do gráfico
                         ax.set_title('Kick Tolerance', fontsize=14, fontweight='bold')
@@ -12090,7 +12434,7 @@ def geo_page():
                             elif i == 1:
                                 nome_sapata = f'Sapata {od_revest_superficie}'
                             else:
-                                nome_sapata = s["nome"]  # mantém o nome original para as demais
+                                nome_sapata = s["nome"]
 
                             ax.axhline(
                                 y=s["prof"],
@@ -12619,7 +12963,7 @@ def geo_page():
                                 "Conglomerado": {"bg": "#CD853F", "simbol": "."},
                                 "Anidrita / Gipsita": {"bg": "#E6E6FA", "simbol": "/"},
                                 "Halita": {"bg": "#FFFFFF", "simbol": "."},
-                                "Marga": {"bg": "#EEE8AA", "simbol": "-"},
+                                "Carbonato": {"bg": "#EEE8AA", "simbol": "-"},
                                 "Calcário": {"bg": "#B0C4DE", "simbol": "."},
                                 "Basalto": {"bg": "#2F4F4F", "simbol": "+"},
                                 "SDR": {"bg": "#FF7F50", "simbol": "."},
