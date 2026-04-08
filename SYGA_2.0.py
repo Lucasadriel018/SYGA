@@ -2801,14 +2801,7 @@ def _montar_interpretacoes_syga(sub_under, sub_over):
     return interpretacoes
 
 
-def _desenhar_pagina_fase(
-    c, width, height, logo, footer_y,
-    titulo, fase_broca, fase_revestimento,
-    prof_ini, prof_fim,
-    df_cmp_global,
-    draw_header,
-    incluir_fim=False
-):
+def _desenhar_pagina_fase(c, width, height, logo, footer_y,titulo, fase_broca, fase_revestimento,prof_ini, prof_fim,df_cmp_global,draw_header,incluir_fim=False):
     # -------------------------------------------------
     # Validação ANTES de desenhar a página
     # -------------------------------------------------
@@ -5611,8 +5604,6 @@ def geo_page():
     tabs = st.tabs(['Entrada de Dados', 'Coluna litológica', 'Gradiente de Sobrecarga',
                     'Gradiente de Pressão de Poros', 'Estabilidade de Poço', 'Assentamento de Sapatas',
                     'Anotações', 'Relatório', 'Informações Sobre o SYGA' ])
-    # tabs = st.tabs(['Entrada de Dados', 'Coluna litológica', 'Gradiente de Sobrecarga',
-    #                 'Gradiente de Pressão de Poros', 'Estabilidade de Poço', 'Anotações', 'Relatório', 'Informações Sobre o SYGA'])
 
     # Carregar Dados
     with tabs[0]:
@@ -6648,8 +6639,31 @@ def geo_page():
                             st.session_state.oes = st.session_state.ext_df['Pressão de Sobrecarga (psi)']
                             st.session_state.oesl = "P. de Sobrecarga"
 
-                        # Ajuste da figura
-                        st.session_state.fig_gs, ax = plt.subplots(figsize=(8, 10))
+                        # Ajuste da figura com coluna de litologia
+                        st.session_state.fig_gs = plt.figure(figsize=(8, 10))
+
+                        gs = gridspec.GridSpec(
+                            1, 3,
+                            width_ratios=[0.18, 0.21, 1],
+                            wspace=0
+                        )
+
+                        ax1 = st.session_state.fig_gs.add_subplot(gs[0])
+                        ax_gap = st.session_state.fig_gs.add_subplot(gs[1])
+                        ax_gap.axis('off')
+
+                        ax = st.session_state.fig_gs.add_subplot(gs[2], sharey=ax1)
+
+                        plt.setp(ax.get_yticklabels(), visible=False)
+
+                        lito(
+                            ax1,
+                            df,
+                            profundidades,
+                            litologias,
+                            st.session_state.y_max_s
+                        )
+
                         if st.session_state.onshore:
                             if st.session_state.rtkb and st.session_state.es != 0:
                                 if st.session_state.ex == 'Desativada':
@@ -6683,6 +6697,7 @@ def geo_page():
                         ax.set_xticks(
                             range(st.session_state.x_min_s, st.session_state.x_max_s, st.session_state.x_step_s))
                         ax.set_xlim(st.session_state.x_min_s, st.session_state.x_max_s)
+                        ax.tick_params(axis='y', which='both', left=True, labelleft=True)
                         ax.grid(True, linestyle='--', alpha=0.5)
                         ax.legend(
                             loc='upper right',
@@ -7693,11 +7708,11 @@ def geo_page():
                                 ax.set_title('Gradiente de Pressão de Poros (lb/gal)', fontsize=14,
                                              fontweight='bold')
                                 ax.set_xlabel('Gradiente (ppg)', fontsize=12)
-                                ax.set_ylabel('Profundidade (m)', fontsize=12)
+                                ax.set_ylabel('Profundidade TVD (m)', fontsize=12)
                             else:
                                 ax.set_title('Pressão de Poros (psi)', fontsize=14, fontweight='bold')
                                 ax.set_xlabel('Pressão (psi)', fontsize=12)
-                                ax.set_ylabel('Profundidade (m)', fontsize=12)
+                                ax.set_ylabel('Profundidade TVD (m)', fontsize=12)
                             ax.invert_yaxis()
                             ax.tick_params(axis='y', which='both', left=True, labelleft=True)
                             ax.set_yticks(range(st.session_state.y_min_pp, st.session_state.y_max_pp,
@@ -7863,7 +7878,7 @@ def geo_page():
 
                                 ax.set_title('Sônico x Profundidade (m)', fontsize=14, fontweight='bold')
                                 ax.set_xlabel('Perfil sônico (µs/pé)', fontsize=12)
-                                ax.set_ylabel('Profundidade (m)', fontsize=12)
+                                ax.set_ylabel('Profundidade TVD (m)', fontsize=12)
                                 # Ticks do eixo X
                                 xticks = [10, 20, 30, 40, 50, 60, 70, 80, 90, 100,
                                           200, 300, 400, 500, 600, 700, 800, 900, 1000, 1100]
@@ -8035,7 +8050,7 @@ def geo_page():
                                                 linestyle='-', linewidth=2, label="Perfil Raio Gama")
                                 ax.set_title('GR x Profundidade (m)', fontsize=14, fontweight='bold')
                                 ax.set_xlabel('Perfil Raio Gama (GAPI)', fontsize=12)
-                                ax.set_ylabel('Profundidade (m)', fontsize=12)
+                                ax.set_ylabel('Profundidade TVD (m)', fontsize=12)
 
                                 ax.set_xlim(0, df_pp["Perfil Raio Gama"].max() + 20)
 
@@ -8264,36 +8279,20 @@ def geo_page():
                                     # Atualiza o DataFrame base temporariamente para os cálculos
                                     gf = st.session_state.edited_gf.copy()
 
-                                    # Cálculo com tratamento de exceção
-                                    try:
-                                        b, log_a = np.polyfit(gf['K'], np.log(gf['Profundidade (m)']), 1)
-                                        a = np.exp(log_a)
-                                    except Exception as e:
-                                        b, a = 1, 1
+                                    # Só calcula se houver dados válidos
+                                    if gf.empty:
+                                        a = None
+                                        b = None
+                                    else:
+                                        try:
+                                            b, log_a = np.polyfit(gf['K'], np.log(gf['Profundidade (m)']), 1)
+                                            a = np.exp(log_a)
+                                        except Exception:
+                                            a = None
+                                            b = None
+
                                     st.session_state['a'] = a
                                     st.session_state['b'] = b
-
-                                with st.expander('Zonas de perda', expanded=True):
-                                    with st.form('loss_form', border=False):
-                                        st.markdown("### Inserir Zonas de Perda de Circulação")
-                                        z = pd.DataFrame({
-                                            'Profundidade da zona de perda (m)': [0.0],
-                                            'Peso do fluido (lb/gal)': [0.0]
-                                        })
-                                        if 'zonas' not in st.session_state:
-                                            st.session_state.zonas = []
-                                        cols_to_check = ["Profundidade da zona de perda (m)", "Peso do fluido (lb/gal)"]
-                                        st.session_state.edited_z = st.data_editor(z, hide_index=True,
-                                                                                   num_rows='dynamic',
-                                                                                   key='edited')
-                                        if st.form_submit_button('Inserir Zonas de Perda', use_container_width=True,
-                                                                 type='primary'):
-                                            st.session_state.zonas = []
-                                            if (st.session_state.edited_z[cols_to_check] != 0).all(axis=1).any():
-                                                for i, value in enumerate(
-                                                        st.session_state.edited_z["Profundidade da zona de perda (m)"]):
-                                                    st.session_state.zonas.append([value, st.session_state.edited_z[
-                                                        "Peso do fluido (lb/gal)"][i]])
 
                         if st.session_state.spp:
                             df_f = pd.DataFrame({
@@ -8312,29 +8311,34 @@ def geo_page():
                                 'Gradiente de Pressão de Poros (lb/gal)': df_pp['Gradiente de Pressão de Poros Médio (lb/gal)']
                             })
 
-                        # Cálculo de K
-                        df_f['K'] = (np.log(df_f['Profundidade (m)']) - np.log(a)) / b
+                        try:
+                            # Cálculo de K
+                            df_f['K'] = (np.log(df_f['Profundidade (m)']) - np.log(a)) / b
 
-                        df_f['Gradiente de Fratura (lb/gal)'] = df_f.apply(
-                            lambda row: row['Gradiente de Pressão de Poros (lb/gal)']
-                                        + row['K'] * (row['Gradiente de Sobrecarga (lb/gal)'] - row[
-                                'Gradiente de Pressão de Poros (lb/gal)']),
-                            axis=1
-                        )
 
-                        # Substitui valores negativos por 0
-                        df_f['Gradiente de Fratura (lb/gal)'] = np.where(df_f['Gradiente de Fratura (lb/gal)'] < 0, 0,
-                                                                         df_f['Gradiente de Fratura (lb/gal)'])
+                            df_f['Gradiente de Fratura (lb/gal)'] = df_f.apply(
+                                lambda row: row['Gradiente de Pressão de Poros (lb/gal)']
+                                            + row['K'] * (row['Gradiente de Sobrecarga (lb/gal)'] - row[
+                                    'Gradiente de Pressão de Poros (lb/gal)']),
+                                axis=1
+                            )
 
-                        df_f.insert(
-                            loc=4,
-                            column='Pressão de Fratura (psi)',
-                            value=0.1704 * df_f['Gradiente de Fratura (lb/gal)'] * df_f['Profundidade (m)']
-                        )
+                            # Substitui valores negativos por 0
+                            df_f['Gradiente de Fratura (lb/gal)'] = np.where(df_f['Gradiente de Fratura (lb/gal)'] < 0, 0,
+                                                                             df_f['Gradiente de Fratura (lb/gal)'])
 
-                        for i in st.session_state.zonas:
-                            index = (df_f['Profundidade (m)'] - i[0]).abs().idxmin()
-                            df_f.loc[index, 'Gradiente de Fratura (lb/gal)'] = i[1]
+                            df_f.insert(
+                                loc=4,
+                                column='Pressão de Fratura (psi)',
+                                value=0.1704 * df_f['Gradiente de Fratura (lb/gal)'] * df_f['Profundidade (m)']
+                            )
+
+                            for i in st.session_state.zonas:
+                                index = (df_f['Profundidade (m)'] - i[0]).abs().idxmin()
+                                df_f.loc[index, 'Gradiente de Fratura (lb/gal)'] = i[1]
+
+                        except Exception as e:
+                            pass
 
                         with colu3:
                             with st.container(border=True):
@@ -8555,24 +8559,6 @@ def geo_page():
                                         ax.scatter(fit_x, fit_y, color='blue', label="FIT's", zorder=5, marker='^',
                                                    s=50)
 
-                                    if 'edited_z' in st.session_state and not st.session_state.edited_z.empty:
-                                        # pega os valores das colunas
-                                        x_vals = st.session_state.edited_z["Peso do fluido (lb/gal)"]
-                                        y_vals = st.session_state.edited_z["Profundidade da zona de perda (m)"]
-
-                                        mask = (x_vals != 0) & (y_vals != 0)
-                                        if mask.any():
-                                            ax.scatter(
-                                                x_vals[mask],
-                                                y_vals[mask],
-                                                facecolors='brown',
-                                                edgecolors='black',
-                                                marker='o',
-                                                s=80,
-                                                label="Perdas de Circulação",
-                                                zorder=6
-                                            )
-
                                     # Janela Operacional: Preenchimento entre pressão de poros e fratura
                                     if st.session_state.ogf == "Gradiente (lb/gal)":
                                         if st.session_state.grap:
@@ -8618,7 +8604,7 @@ def geo_page():
 
                                 ax.set_title('Geopressões (lb/gal)', fontsize=14, fontweight='bold')
                                 ax.set_xlabel('Gradiente (ppg)', fontsize=12)
-                                ax.set_ylabel('Profundidade (m)', fontsize=12)
+                                ax.set_ylabel('Profundidade TVD (m)', fontsize=12)
                                 ax.invert_yaxis()
                                 ax.set_ylim(st.session_state.y_max_f, st.session_state.y_min_f)
                                 ax.tick_params(axis='y', which='both', left=True, labelleft=True)
@@ -8727,14 +8713,18 @@ def geo_page():
                                     label="K"
                                 )
                                 k_values = np.linspace(gf['K'].min(), gf['K'].max(), 200)
-                                depth_trend = a * np.exp(b * k_values)
+                                try:
+                                    depth_trend = a * np.exp(b * k_values)
 
-                                ax.plot(k_values, depth_trend, color='red', linestyle='--', linewidth=2,
+                                    ax.plot(k_values, depth_trend, color='red', linestyle='--', linewidth=2,
                                         label='Linha de Tendência Exponencial de K')
+
+                                except Exception as e:
+                                    pass
 
                                 ax.set_title('K x Profundidade', fontsize=14, fontweight='bold')
                                 ax.set_xlabel('K', fontsize=12)
-                                ax.set_ylabel('Profundidade (m)', fontsize=12)
+                                ax.set_ylabel('Profundidade TVD (m)', fontsize=12)
                                 ax.invert_yaxis()
 
                                 max_depth = int(st.session_state.df1['Profundidade'].max())
@@ -8787,8 +8777,6 @@ def geo_page():
                                 bbox_inches="tight",
                                 facecolor="white"
                             )
-
-
 
                     # except Exception as e:
                     else:
@@ -11069,7 +11057,7 @@ def geo_page():
 
                                                 plotted_label = True
 
-                                        if 'edited_z2' in st.session_state and not st.session_state.edited_z.empty:
+                                        if 'edited_z2' in st.session_state:
                                             # pega os valores das colunas
                                             x_vals = st.session_state.edited_z2["Peso do fluido (lb/gal)"]
                                             y_vals = st.session_state.edited_z2[
@@ -11230,7 +11218,7 @@ def geo_page():
                                         ax.set_title('Janela Operacional (lb/gal)', fontsize=14,
                                                      fontweight='bold')
                                         ax.set_xlabel('Gradiente (ppg)', fontsize=12)
-                                        ax.set_ylabel('Profundidade (m)', fontsize=12)
+                                        ax.set_ylabel('Profundidade TVD (m)', fontsize=12)
                                         ax.invert_yaxis()
                                         ax.tick_params(axis='y', which='both', left=True, labelleft=True)
                                         ax.set_ylim(st.session_state.y_max, st.session_state.y_min)
@@ -11384,6 +11372,17 @@ def geo_page():
 
                 with col1:
                     with st.container(border=True):
+                        st.segmented_control(
+                            "***Método do Gradiente de Fratura a ser utilizado***",
+                            [
+                                "Gradiente de fratura por Mohr Coulomb",
+                                "Gradiente de Fratura pelo Método das Tensões Mínimas"
+                            ],
+                            selection_mode="single",
+                            default="Gradiente de fratura por Mohr Coulomb",
+                            key="metodo_gradiente_fratura",
+                            width="stretch"
+                        )
                         st.markdown("### Critério de Assentamento de Sapatas - Kick Tolerance")
                         with st.expander("Dados", expanded=True):
                             c1, c2 = st.columns(2)
@@ -11794,17 +11793,45 @@ def geo_page():
                             )
 
                         with st.expander("Kick Tolerance", expanded=True):
+
+                            metodo_fratura = st.session_state.get(
+                                "metodo_gradiente_fratura",
+                                "Gradiente de fratura por Mohr Coulomb"
+                            )
+
+                            grad_fratura_mohr = pd.to_numeric(
+                                df_suav[["Tração Superior (σθA)", "Tração Superior (σθB)"]].min(axis=1),
+                                errors="coerce"
+                            ).reset_index(drop=True)
+
+                            if metodo_fratura == "Gradiente de Fratura pelo Método das Tensões Mínimas":
+                                if (
+                                        "df_f" in st.session_state
+                                        and isinstance(st.session_state.df_f, pd.DataFrame)
+                                        and not st.session_state.df_f.empty
+                                        and "Gradiente de Fratura (lb/gal)" in st.session_state.df_f.columns
+                                ):
+                                    grad_fratura_sapata = pd.to_numeric(
+                                        st.session_state.df_f["Gradiente de Fratura (lb/gal)"],
+                                        errors="coerce"
+                                    ).reset_index(drop=True)
+                                else:
+                                    st.warning(
+                                        "O Gradiente de Fratura pelo Método das Tensões Mínimas ainda não foi calculado. "
+                                        "Foi utilizado o Gradiente de Fratura por Mohr Coulomb."
+                                    )
+                                    grad_fratura_sapata = grad_fratura_mohr.copy()
+                            else:
+                                grad_fratura_sapata = grad_fratura_mohr.copy()
+
                             df_sapata = pd.DataFrame({
                                 "Profundidade (m)": pd.to_numeric(
                                     df_suav["Profundidade (m)"], errors="coerce"
-                                ),
+                                ).reset_index(drop=True),
                                 "Gradiente de Pressão de Poros (lb/gal)": pd.to_numeric(
                                     df_suav["Gradiente de Pressão de Poros (lb/gal)"], errors="coerce"
-                                ),
-                                "Gradiente de Fratura (lb/gal)": pd.to_numeric(
-                                    df_suav[["Tração Superior (σθA)", "Tração Superior (σθB)"]].min(axis=1),
-                                    errors="coerce"
-                                )
+                                ).reset_index(drop=True),
+                                "Gradiente de Fratura (lb/gal)": grad_fratura_sapata
                             }).copy()
 
                             df_sapata["Gradiente de Pressão de Poros + Margem (lb/gal)"] = (
@@ -11840,25 +11867,20 @@ def geo_page():
                                 df_sapata["Gradiente de Fratura (lb/gal)"], errors="coerce"
                             )
 
-                            # Remove linhas inválidas e ordena por profundidade
                             df_sapata = df_sapata.dropna(
                                 subset=["Profundidade (m)", "Gradiente de Fratura (lb/gal)"]
                             ).sort_values("Profundidade (m)").reset_index(drop=True)
 
-                            # Profundidade informada pelo usuário em "Sapata do revestimento de superfície"
                             prof_sapata_superficie = float(st.session_state.prs)
 
-                            # Pega a profundidade mais próxima em df_sapata
                             idx_mais_proximo = (df_sapata["Profundidade (m)"] - prof_sapata_superficie).abs().idxmin()
 
                             prof_ref_fratura = float(df_sapata.loc[idx_mais_proximo, "Profundidade (m)"])
                             grad_fratura_ref = float(df_sapata.loc[idx_mais_proximo, "Gradiente de Fratura (lb/gal)"])
 
-                            # Guarda no session_state para usar depois nos cálculos
                             st.session_state.prof_ref_fratura_sapata = prof_ref_fratura
                             st.session_state.grad_fratura_sapata_superficie = grad_fratura_ref
 
-                            # Ajuste aqui se sua profundidade de referência tiver outro nome
                             prof_ref_fratura = float(st.session_state.prs)
 
                             idx_ref_fratura = (df_sapata["Profundidade (m)"] - prof_ref_fratura).abs().idxmin()
@@ -11889,22 +11911,14 @@ def geo_page():
                                     - df_sapata.loc[mask_calculo_kt, "Gradiente de Pressão de Poros + Margem (lb/gal)"]
                             )
 
-                            # ==========================================================
-                            # Critérios simultâneos para assentamento da próxima sapata
-                            # ==========================================================
                             prof_sapata_kick = None
                             idx_stop = None
                             criterio_sapata = None
 
-                            # ----------------------------------------------------------
-                            # Critério 1A: Kick Tolerance por limite
-                            # primeira profundidade onde Δρkt <= mskt
-                            # ----------------------------------------------------------
                             mask_kt_limite = (
                                     delta_rho_kt.notna() &
                                     (delta_rho_kt <= st.session_state.mskt)
                             )
-
 
                             idx_kt_limite = None
                             prof_kt_limite = None
@@ -11962,12 +11976,6 @@ def geo_page():
                                     intervalo_elemento_topo_kick_local = ""
 
                                 return altura_kick_local, elemento_topo_kick_local, intervalo_elemento_topo_kick_local
-
-                            # ----------------------------------------------------------
-                            # Cálculo sequencial das sapatas por fase/BHA
-                            # Mantém ρkt e Δρkt acumulados no df_sapata para plotagem
-                            # Recalcula altura do kick para cada BHA
-                            # ----------------------------------------------------------
 
                             mapa_sapata_por_bha = {
                                 '17 1/2"': '13 3/8"',
@@ -12621,9 +12629,6 @@ def geo_page():
                 # Layout
                 col_left, col_right = st.columns((1, 0.75))
 
-                # =========================
-                # ESQUERDA — eventos vindos do Excel
-                # =========================
                 with col_left:
                     df_eventos = st.session_state.get("df_eventos", None)
 
@@ -12732,9 +12737,6 @@ def geo_page():
                                 hide_index=True
                             )
 
-                # =========================
-                # DIREITA — gráfico
-                # =========================
                 with col_right:
                     with st.container(border=True):
 
@@ -12882,9 +12884,6 @@ def geo_page():
                                     ),
                                 ))
 
-                            # =========================
-                            # LEGENDA ÚNICA POR EVENTO
-                            # =========================
                             pontos_por_evento = {}
                             trechos_por_evento = {}
 
@@ -12956,18 +12955,22 @@ def geo_page():
                         def get_paleta_lito():
                             return {
                                 "Argilito": {"bg": "#9ACD32", "simbol": "|"},
-                                "Folhelho": {"bg": "#9ACD32", "simbol": "-"},
-                                "Siltito": {"bg": "#A67B5B", "simbol": "-"},
                                 "Arenito": {"bg": "#FFD580", "simbol": "."},
+                                "Folhelho": {"bg": "#9ACD32", "simbol": "-"},
+                                "Calcário": {"bg": "#B0C4DE", "simbol": "."},
+                                "Carbonato": {"bg": "#EEE8AA", "simbol": "-"},
+                                "Siltito": {"bg": "#A67B5B", "simbol": "-"},
                                 "Diamictito": {"bg": "#E97451", "simbol": "."},
                                 "Conglomerado": {"bg": "#CD853F", "simbol": "."},
                                 "Anidrita / Gipsita": {"bg": "#E6E6FA", "simbol": "/"},
                                 "Halita": {"bg": "#FFFFFF", "simbol": "."},
-                                "Carbonato": {"bg": "#EEE8AA", "simbol": "-"},
-                                "Calcário": {"bg": "#B0C4DE", "simbol": "."},
+                                "Calcissiltito": {"bg": "#D8BFD8", "simbol": "."},
+                                "Calcarenito": {"bg": "#F5DEB3", "simbol": "."},
+                                "Calcirrudito": {"bg": "#4682B4", "simbol": "."},
+                                "Coquina": {"bg": "#FFDEAD", "simbol": "."},
+                                "Dolomito": {"bg": "#C2B280", "simbol": "."},
                                 "Basalto": {"bg": "#2F4F4F", "simbol": "+"},
-                                "SDR": {"bg": "#FF7F50", "simbol": "."},
-                                "Crosta Oceânica": {"bg": "#000080", "simbol": "."},
+                                "Diabásio": {"bg": "#556B2F", "simbol": "."},
                             }
 
                         def add_lito_track_plotly(
