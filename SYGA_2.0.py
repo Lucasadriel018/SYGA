@@ -5840,10 +5840,10 @@ def geo_page():
                     st.session_state.hem = "Sul"
 
                 if "easting" not in st.session_state:
-                    st.session_state.easting = 569886.5
+                    st.session_state.easting = 857718.96
 
                 if "northing" not in st.session_state:
-                    st.session_state.northing = 8571669.07
+                    st.session_state.northing = 8933902.28
 
                 if "raio" not in st.session_state:
                     st.session_state.raio = 0.1
@@ -5872,20 +5872,13 @@ def geo_page():
 
                 st.markdown("### Coordenadas do Poço")
                 with st.expander(f'Coordenadas da cabeça do poço {st.session_state.poco}', expanded=False):
-                    if st.session_state.geo_auto_ok:
-                        st.success("Localização preenchida automaticamente.")
-                    elif st.session_state.geo_auto_tentado:
-                        st.info("A localização não foi retornada pelo navegador. Preencha manualmente abaixo.")
-                    else:
-                        st.info("Aguardando resposta da geolocalização do navegador...")
-
                     st.number_input("Zona UTM", min_value=1, max_value=60, value=24, key='zona')
                     st.radio("Hemisfério", ("Norte", "Sul"), index=1, key='hem')
                     st.number_input(
                         "Coordenada Leste (Easting)",
                         min_value=100000.0,
                         max_value=900000.0,
-                        value=569886.5,
+                        value=857718.96,
                         format="%.2f",
                         key='easting'
                     )
@@ -5893,7 +5886,7 @@ def geo_page():
                         "Coordenada Norte (Northing)",
                         min_value=0.0,
                         max_value=10000000.0,
-                        value=8571669.07,
+                        value=8933902.28,
                         format="%.2f",
                         key='northing'
                     )
