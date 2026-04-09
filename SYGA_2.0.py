@@ -2113,6 +2113,8 @@ def _ler_inicio_do_xlsm(wb) -> dict:
       - D10 -> Objetivo (comments)
       - D7  -> Easting
       - D6  -> Northing
+      - B9  -> Hemisfério
+      - B8  -> Zona UTM
     """
     if "Início" not in wb.sheetnames and "Inicio" not in wb.sheetnames:
         raise ValueError("A aba 'Início' (ou 'Inicio') não existe no arquivo.")
@@ -2123,6 +2125,8 @@ def _ler_inicio_do_xlsm(wb) -> dict:
     objetivo = ws["D10"].value
     easting = ws["D7"].value
     northing = ws["D6"].value
+    zona = ws["D8"].value
+    hem = ws["D9"].value
 
     def _to_float(v):
         try:
@@ -2132,11 +2136,26 @@ def _ler_inicio_do_xlsm(wb) -> dict:
         except Exception:
             return None
 
+    def _to_int(v):
+        try:
+            if v is None or v == "":
+                return None
+            return int(float(v))
+        except Exception:
+            return None
+
+    def _to_str(v):
+        if v is None or v == "":
+            return None
+        return str(v).strip()
+
     return {
         "poco": None if nome_poco in (None, "") else str(nome_poco).strip(),
         "comments": "" if objetivo in (None, "") else str(objetivo).strip(),
         "easting": _to_float(easting),
         "northing": _to_float(northing),
+        "zona": _to_int(zona),
+        "hem": _to_str(hem),
     }
 
 
@@ -5698,6 +5717,12 @@ def geo_page():
                         if info_ini["northing"] is not None:
                             st.session_state.northing = info_ini["northing"]
 
+                        if info_ini["zona"] is not None:
+                            st.session_state.zona = info_ini["zona"]
+
+                        if info_ini["hem"] is not None:
+                            st.session_state.hem = info_ini["hem"]
+
                     except Exception as e:
                         st.error(f"Não foi possível ler a aba 'Início' para preencher dados do poço: {e}")
 
@@ -5872,13 +5897,13 @@ def geo_page():
 
                 st.markdown("### Coordenadas do Poço")
                 with st.expander(f'Coordenadas da cabeça do poço {st.session_state.poco}', expanded=False):
-                    st.number_input("Zona UTM", min_value=1, max_value=60, value=24, key='zona')
+                    st.number_input("Zona UTM", min_value=1, max_value=60, key='zona')
                     st.radio("Hemisfério", ("Norte", "Sul"), index=1, key='hem')
                     st.number_input(
                         "Coordenada Leste (Easting)",
                         min_value=100000.0,
                         max_value=900000.0,
-                        value=857718.96,
+                        # value=857718.96,
                         format="%.2f",
                         key='easting'
                     )
@@ -5886,7 +5911,7 @@ def geo_page():
                         "Coordenada Norte (Northing)",
                         min_value=0.0,
                         max_value=10000000.0,
-                        value=8933902.28,
+                        # value=8933902.28,
                         format="%.2f",
                         key='northing'
                     )
@@ -6004,6 +6029,7 @@ def geo_page():
                         pocos_manuais.append({
                             "nome": str(nome),
                             "zona_utm": st.session_state.zona,
+                            "hem": st.session_state.hem,
                             "coordenadas": {
                                 "easting": float(e),
                                 "northing": float(n)
@@ -6025,15 +6051,24 @@ def geo_page():
 
                 # --- PLOTAR POÇOS E CALCULAR DISTÂNCIAS ---
                 dados_pontos = []
+
+                def _hemisferio_norte(valor):
+                    txt = str(valor).strip().lower()
+                    return txt in ("n", "norte", "north")
+
                 for poco in pocos_para_plotar:
                     e = poco['coordenadas']['easting']
                     n = poco['coordenadas']['northing']
+
+                    hem_poco = poco.get("hem", "Sul")
+
                     lat_p, lon_p = utm.to_latlon(
                         e,
                         n,
                         poco['zona_utm'],
-                        northern=(st.session_state.hem == "Norte")
+                        northern=_hemisferio_norte(hem_poco)
                     )
+
                     dist = haversine(lat_base, lon_base, lat_p, lon_p)
                     dentro_do_raio = dist <= (st.session_state.raio * 1000)
 
