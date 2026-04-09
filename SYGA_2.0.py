@@ -3185,6 +3185,58 @@ def _subtrechos_por_falha_cmp(df_cmp_fase, segs, lado, tol_prof=1e-9):
     return out
 
 
+def calcular_altura_kick_por_bha(df_bha_kick, vk_bbl):
+    df_kick = df_bha_kick.copy()
+
+    for col in [
+        "Cap. Anular (m3/m)",
+        "Comprimento (m)",
+        "Início do Trecho (m)",
+        "Fim do Trecho (m)",
+        "Comprimento Acumulado (m)",
+        "Vol. Acum. (m3)",
+        "Vol. Acum. (bbl)"
+    ]:
+        if col in df_kick.columns:
+            df_kick[col] = pd.to_numeric(df_kick[col], errors="coerce").fillna(0.0)
+
+    vk_m3 = float(vk_bbl) / 6.28981
+
+    volume_restante = vk_m3
+    altura_kick_local = 0.0
+    elemento_topo_kick_local = "Não definido"
+    intervalo_elemento_topo_kick_local = ""
+
+    for _, row in df_kick.iterrows():
+        cap = float(row["Cap. Anular (m3/m)"])
+        comp = float(row["Comprimento (m)"])
+        inicio = float(row["Início do Trecho (m)"])
+        fim = float(row["Fim do Trecho (m)"])
+        elem = str(row["Elemento do BHA"])
+
+        if cap <= 0 or comp <= 0:
+            continue
+
+        vol_trecho = cap * comp
+
+        if volume_restante <= vol_trecho:
+            altura_no_trecho = volume_restante / cap
+            altura_kick_local = inicio + altura_no_trecho
+            elemento_topo_kick_local = elem
+            intervalo_elemento_topo_kick_local = f"{inicio:.2f}–{fim:.2f} m"
+            volume_restante = 0.0
+            break
+        else:
+            volume_restante -= vol_trecho
+
+    if volume_restante > 1e-9:
+        altura_kick_local = float(df_kick["Comprimento Acumulado (m)"].max())
+        elemento_topo_kick_local = "Acima do último elemento do BHA"
+        intervalo_elemento_topo_kick_local = ""
+
+    return altura_kick_local, elemento_topo_kick_local, intervalo_elemento_topo_kick_local
+
+
 def gerar_relatorio_pdf():
     hora_now = datetime.now() + timedelta(hours=0)
     pdf_buffer = io.BytesIO()
@@ -11459,20 +11511,33 @@ def geo_page():
         if uploaded_file:
             if "df_suav" in st.session_state:
                 col1, col2 = st.columns((2,1))
-
                 with col1:
                     with st.container(border=True):
-                        st.segmented_control(
-                            "***Método do Gradiente de Fratura a ser utilizado***",
-                            [
-                                "Gradiente de fratura por Mohr Coulomb",
-                                "Gradiente de Fratura pelo Método das Tensões Mínimas"
-                            ],
-                            selection_mode="single",
-                            default="Gradiente de fratura por Mohr Coulomb",
-                            key="metodo_gradiente_fratura",
-                            width="stretch"
-                        )
+                        coluna1, coluna2 = st.columns(2)
+                        with coluna1:
+                            st.segmented_control(
+                                "***Método do Gradiente de Fratura a ser utilizado***",
+                                [
+                                    "Mohr Coulomb",
+                                    "Método das Tensões Mínimas"
+                                ],
+                                selection_mode="single",
+                                default="Mohr Coulomb",
+                                key="metodo_gradiente_fratura",
+                                width="stretch"
+                            )
+                        with coluna2:
+                            st.segmented_control(
+                                "***Método de Cálculo do Kick Tolerance a ser utilizado***",
+                                [
+                                    "Cima para Baixo",
+                                    "Baixo para Cima"
+                                ],
+                                selection_mode="single",
+                                default="Cima para Baixo",
+                                key="metodo_kt",
+                                width="stretch"
+                            )
                         st.markdown("### Critério de Assentamento de Sapatas - Kick Tolerance")
                         with st.expander("Dados", expanded=True):
                             c1, c2 = st.columns(2)
@@ -11499,8 +11564,6 @@ def geo_page():
                                                 value=round((df["Profundidade"].iloc[-1] / 3.) / 50.) * 50.)
 
                             st.session_state.pf = df["Profundidade"].iloc[-1]
-                            # st.number_input('Profundidade final do poço', step=100.0, format='%.2f', key='pf',
-                            #                 min_value=0.0, value=df["Profundidade"].iloc[-1])
 
                         with st.expander("BHA", expanded=True):
 
@@ -11883,10 +11946,9 @@ def geo_page():
                             )
 
                         with st.expander("Kick Tolerance", expanded=True):
-
                             metodo_fratura = st.session_state.get(
                                 "metodo_gradiente_fratura",
-                                "Gradiente de fratura por Mohr Coulomb"
+                                "Mohr Coulomb"
                             )
 
                             grad_fratura_mohr = pd.to_numeric(
@@ -11894,7 +11956,7 @@ def geo_page():
                                 errors="coerce"
                             ).reset_index(drop=True)
 
-                            if metodo_fratura == "Gradiente de Fratura pelo Método das Tensões Mínimas":
+                            if metodo_fratura == "Método das Tensões Mínimas":
                                 if (
                                         "df_f" in st.session_state
                                         and isinstance(st.session_state.df_f, pd.DataFrame)
@@ -11961,193 +12023,51 @@ def geo_page():
                                 subset=["Profundidade (m)", "Gradiente de Fratura (lb/gal)"]
                             ).sort_values("Profundidade (m)").reset_index(drop=True)
 
-                            prof_sapata_superficie = float(st.session_state.prs)
+                            if st.session_state.metodo_kt == "Cima para Baixo":
 
-                            idx_mais_proximo = (df_sapata["Profundidade (m)"] - prof_sapata_superficie).abs().idxmin()
+                                prof_sapata_superficie = float(st.session_state.prs)
 
-                            prof_ref_fratura = float(df_sapata.loc[idx_mais_proximo, "Profundidade (m)"])
-                            grad_fratura_ref = float(df_sapata.loc[idx_mais_proximo, "Gradiente de Fratura (lb/gal)"])
+                                idx_mais_proximo = (df_sapata["Profundidade (m)"] - prof_sapata_superficie).abs().idxmin()
 
-                            st.session_state.prof_ref_fratura_sapata = prof_ref_fratura
-                            st.session_state.grad_fratura_sapata_superficie = grad_fratura_ref
+                                prof_ref_fratura = float(df_sapata.loc[idx_mais_proximo, "Profundidade (m)"])
+                                grad_fratura_ref = float(df_sapata.loc[idx_mais_proximo, "Gradiente de Fratura (lb/gal)"])
 
-                            prof_ref_fratura = float(st.session_state.prs)
+                                st.session_state.prof_ref_fratura_sapata = prof_ref_fratura
+                                st.session_state.grad_fratura_sapata_superficie = grad_fratura_ref
 
-                            idx_ref_fratura = (df_sapata["Profundidade (m)"] - prof_ref_fratura).abs().idxmin()
-                            prof_ref_fratura = float(df_sapata.loc[idx_ref_fratura, "Profundidade (m)"])
-                            grad_fratura_ref = float(df_sapata.loc[idx_ref_fratura, "Gradiente de Fratura (lb/gal)"])
+                                prof_ref_fratura = float(st.session_state.prs)
 
-                            mask_calculo_kt = df_sapata["Profundidade (m)"] >= prof_ref_fratura
+                                idx_ref_fratura = (df_sapata["Profundidade (m)"] - prof_ref_fratura).abs().idxmin()
+                                prof_ref_fratura = float(df_sapata.loc[idx_ref_fratura, "Profundidade (m)"])
+                                grad_fratura_ref = float(df_sapata.loc[idx_ref_fratura, "Gradiente de Fratura (lb/gal)"])
 
-                            rho_kt = pd.Series(index=df_sapata.index, dtype=float)
+                                mask_calculo_kt = df_sapata["Profundidade (m)"] >= prof_ref_fratura
 
-                            rho_kt.loc[mask_calculo_kt] = (
-                                    ((prof_ref_fratura / df_sapata.loc[mask_calculo_kt, "Profundidade (m)"]) *
-                                     ((grad_fratura_ref - st.session_state.msf) -
-                                      df_sapata.loc[
-                                          mask_calculo_kt, "Gradiente de Pressão de Poros + Margem (lb/gal)"]))
-                                    -
-                                    ((altura_kick / df_sapata.loc[mask_calculo_kt, "Profundidade (m)"]) *
-                                     (df_sapata.loc[
-                                          mask_calculo_kt, "Gradiente de Pressão de Poros + Margem (lb/gal)"] - st.session_state.dk))
-                                    +
-                                    df_sapata.loc[mask_calculo_kt, "Gradiente de Pressão de Poros + Margem (lb/gal)"]
-                            )
+                                rho_kt = pd.Series(index=df_sapata.index, dtype=float)
 
-                            delta_rho_kt = pd.Series(index=df_sapata.index, dtype=float)
-
-                            delta_rho_kt.loc[mask_calculo_kt] = (
-                                    rho_kt.loc[mask_calculo_kt]
-                                    - df_sapata.loc[mask_calculo_kt, "Gradiente de Pressão de Poros + Margem (lb/gal)"]
-                            )
-
-                            prof_sapata_kick = None
-                            idx_stop = None
-                            criterio_sapata = None
-
-                            mask_kt_limite = (
-                                    delta_rho_kt.notna() &
-                                    (delta_rho_kt <= st.session_state.mskt)
-                            )
-
-                            idx_kt_limite = None
-                            prof_kt_limite = None
-                            if mask_kt_limite.any():
-                                idx_kt_limite = mask_kt_limite[mask_kt_limite].index[0]
-                                prof_kt_limite = float(df_sapata.loc[idx_kt_limite, "Profundidade (m)"])
-
-                            def calcular_altura_kick_por_bha(df_bha_kick, vk_bbl):
-                                df_kick = df_bha_kick.copy()
-
-                                for col in [
-                                    "Cap. Anular (m3/m)",
-                                    "Comprimento (m)",
-                                    "Início do Trecho (m)",
-                                    "Fim do Trecho (m)",
-                                    "Comprimento Acumulado (m)",
-                                    "Vol. Acum. (m3)",
-                                    "Vol. Acum. (bbl)"
-                                ]:
-                                    if col in df_kick.columns:
-                                        df_kick[col] = pd.to_numeric(df_kick[col], errors="coerce").fillna(0.0)
-
-                                vk_m3 = float(vk_bbl) / 6.28981
-
-                                volume_restante = vk_m3
-                                altura_kick_local = 0.0
-                                elemento_topo_kick_local = "Não definido"
-                                intervalo_elemento_topo_kick_local = ""
-
-                                for _, row in df_kick.iterrows():
-                                    cap = float(row["Cap. Anular (m3/m)"])
-                                    comp = float(row["Comprimento (m)"])
-                                    inicio = float(row["Início do Trecho (m)"])
-                                    fim = float(row["Fim do Trecho (m)"])
-                                    elem = str(row["Elemento do BHA"])
-
-                                    if cap <= 0 or comp <= 0:
-                                        continue
-
-                                    vol_trecho = cap * comp
-
-                                    if volume_restante <= vol_trecho:
-                                        altura_no_trecho = volume_restante / cap
-                                        altura_kick_local = inicio + altura_no_trecho
-                                        elemento_topo_kick_local = elem
-                                        intervalo_elemento_topo_kick_local = f"{inicio:.2f}–{fim:.2f} m"
-                                        volume_restante = 0.0
-                                        break
-                                    else:
-                                        volume_restante -= vol_trecho
-
-                                if volume_restante > 1e-9:
-                                    altura_kick_local = float(df_kick["Comprimento Acumulado (m)"].max())
-                                    elemento_topo_kick_local = "Acima do último elemento do BHA"
-                                    intervalo_elemento_topo_kick_local = ""
-
-                                return altura_kick_local, elemento_topo_kick_local, intervalo_elemento_topo_kick_local
-
-                            mapa_sapata_por_bha = {
-                                '17 1/2"': '13 3/8"',
-                                '12 1/4"': '9 5/8"',
-                                '8 1/2"': '7"',
-                                '6 1/8"': '5 1/2"'
-                            }
-
-                            ordem_bhas = ['17 1/2"', '12 1/4"', '8 1/2"', '6 1/8"']
-
-                            bha_inicial = st.session_state.get("bha_selecionado", '12 1/4"')
-                            if bha_inicial not in ordem_bhas:
-                                bha_inicial = '12 1/4"'
-
-                            idx_bha_inicial = ordem_bhas.index(bha_inicial)
-                            bhas_restantes = ordem_bhas[idx_bha_inicial:]
-
-                            prof_final_poco = float(df_sapata["Profundidade (m)"].max())
-
-                            sapatas_calculadas = []
-                            historico_fases = []
-                            curvas_kt_plot = []
-
-                            prof_sapata_atual = float(prof_sapata_superficie)
-
-                            rho_kt_acumulado = pd.Series(np.nan, index=df_sapata.index, dtype=float)
-                            delta_rho_kt_acumulado = pd.Series(np.nan, index=df_sapata.index, dtype=float)
-
-                            for bha_fase in bhas_restantes:
-                                if prof_sapata_atual >= prof_final_poco:
-                                    break
-
-                                chave_final_fase = f"df_bha_final_{bha_fase}"
-
-                                if chave_final_fase in st.session_state and isinstance(
-                                        st.session_state[chave_final_fase], pd.DataFrame):
-                                    df_bha_fase = st.session_state[chave_final_fase].copy()
-                                else:
-                                    diametro_poco_por_bha = {
-                                        '17 1/2"': 17.5,
-                                        '12 1/4"': 12.25,
-                                        '8 1/2"': 8.5,
-                                        '6 1/8"': 6.125,
-                                    }
-                                    diametro_poco_m_fase = diametro_poco_por_bha[bha_fase] * 0.0254
-                                    df_bha_fase = calcular_bha(bha_opcoes[bha_fase].copy(), diametro_poco_m_fase)
-
-                                altura_kick_fase, elemento_topo_kick_fase, intervalo_topo_kick_fase = calcular_altura_kick_por_bha(
-                                    df_bha_fase,
-                                    st.session_state.vk
-                                )
-
-                                idx_ref_fratura = (df_sapata["Profundidade (m)"] - prof_sapata_atual).abs().idxmin()
-                                prof_ref_fratura_fase = float(df_sapata.loc[idx_ref_fratura, "Profundidade (m)"])
-                                grad_fratura_ref_fase = float(
-                                    df_sapata.loc[idx_ref_fratura, "Gradiente de Fratura (lb/gal)"])
-
-                                mask_calculo_fase = df_sapata["Profundidade (m)"] >= prof_ref_fratura_fase
-
-                                rho_kt = pd.Series(np.nan, index=df_sapata.index, dtype=float)
-                                delta_rho_kt = pd.Series(np.nan, index=df_sapata.index, dtype=float)
-
-                                rho_kt.loc[mask_calculo_fase] = (
-                                        ((prof_ref_fratura_fase / df_sapata.loc[
-                                            mask_calculo_fase, "Profundidade (m)"]) *
-                                         ((grad_fratura_ref_fase - st.session_state.msf) -
+                                rho_kt.loc[mask_calculo_kt] = (
+                                        ((prof_ref_fratura / df_sapata.loc[mask_calculo_kt, "Profundidade (m)"]) *
+                                         ((grad_fratura_ref - st.session_state.msf) -
                                           df_sapata.loc[
-                                              mask_calculo_fase, "Gradiente de Pressão de Poros + Margem (lb/gal)"]))
+                                              mask_calculo_kt, "Gradiente de Pressão de Poros + Margem (lb/gal)"]))
                                         -
-                                        ((altura_kick_fase / df_sapata.loc[mask_calculo_fase, "Profundidade (m)"]) *
+                                        ((altura_kick / df_sapata.loc[mask_calculo_kt, "Profundidade (m)"]) *
                                          (df_sapata.loc[
-                                              mask_calculo_fase, "Gradiente de Pressão de Poros + Margem (lb/gal)"] - st.session_state.dk))
+                                              mask_calculo_kt, "Gradiente de Pressão de Poros + Margem (lb/gal)"] - st.session_state.dk))
                                         +
-                                        df_sapata.loc[
-                                            mask_calculo_fase, "Gradiente de Pressão de Poros + Margem (lb/gal)"]
+                                        df_sapata.loc[mask_calculo_kt, "Gradiente de Pressão de Poros + Margem (lb/gal)"]
                                 )
 
-                                delta_rho_kt.loc[mask_calculo_fase] = (
-                                        rho_kt.loc[mask_calculo_fase]
-                                        - df_sapata.loc[
-                                            mask_calculo_fase, "Gradiente de Pressão de Poros + Margem (lb/gal)"]
+                                delta_rho_kt = pd.Series(index=df_sapata.index, dtype=float)
+
+                                delta_rho_kt.loc[mask_calculo_kt] = (
+                                        rho_kt.loc[mask_calculo_kt]
+                                        - df_sapata.loc[mask_calculo_kt, "Gradiente de Pressão de Poros + Margem (lb/gal)"]
                                 )
+
+                                prof_sapata_kick = None
+                                idx_stop = None
+                                criterio_sapata = None
 
                                 mask_kt_limite = (
                                         delta_rho_kt.notna() &
@@ -12160,25 +12080,146 @@ def geo_page():
                                     idx_kt_limite = mask_kt_limite[mask_kt_limite].index[0]
                                     prof_kt_limite = float(df_sapata.loc[idx_kt_limite, "Profundidade (m)"])
 
-                                prof_alvo_hk = float(prof_sapata_atual) + float(st.session_state.hk)
+                                mapa_sapata_por_bha = {
+                                    '17 1/2"': '13 3/8"',
+                                    '12 1/4"': '9 5/8"',
+                                    '8 1/2"': '7"',
+                                    '6 1/8"': '5 1/2"'
+                                }
 
-                                mask_hk = df_sapata["Profundidade (m)"] >= prof_alvo_hk
+                                ordem_bhas = ['17 1/2"', '12 1/4"', '8 1/2"', '6 1/8"']
 
-                                idx_hk = None
-                                prof_hk = None
-                                if mask_hk.any():
-                                    idx_hk = mask_hk[mask_hk].index[0]
-                                    prof_hk = float(df_sapata.loc[idx_hk, "Profundidade (m)"])
+                                bha_inicial = st.session_state.get("bha_selecionado", '12 1/4"')
+                                if bha_inicial not in ordem_bhas:
+                                    bha_inicial = '12 1/4"'
 
-                                candidatos = []
+                                idx_bha_inicial = ordem_bhas.index(bha_inicial)
+                                bhas_restantes = ordem_bhas[idx_bha_inicial:]
 
-                                if idx_kt_limite is not None:
-                                    candidatos.append((idx_kt_limite, prof_kt_limite, "Kick tolerance atingido."))
+                                prof_final_poco = float(df_sapata["Profundidade (m)"].max())
 
-                                if idx_hk is not None:
-                                    candidatos.append((idx_hk, prof_hk, "Comprimento máximo de poço aberto."))
+                                sapatas_calculadas = []
+                                historico_fases = []
+                                curvas_kt_plot = []
 
-                                if not candidatos:
+                                prof_sapata_atual = float(prof_sapata_superficie)
+
+                                rho_kt_acumulado = pd.Series(np.nan, index=df_sapata.index, dtype=float)
+                                delta_rho_kt_acumulado = pd.Series(np.nan, index=df_sapata.index, dtype=float)
+
+                                for bha_fase in bhas_restantes:
+                                    if prof_sapata_atual >= prof_final_poco:
+                                        break
+
+                                    chave_final_fase = f"df_bha_final_{bha_fase}"
+
+                                    if chave_final_fase in st.session_state and isinstance(
+                                            st.session_state[chave_final_fase], pd.DataFrame):
+                                        df_bha_fase = st.session_state[chave_final_fase].copy()
+                                    else:
+                                        diametro_poco_por_bha = {
+                                            '17 1/2"': 17.5,
+                                            '12 1/4"': 12.25,
+                                            '8 1/2"': 8.5,
+                                            '6 1/8"': 6.125,
+                                        }
+                                        diametro_poco_m_fase = diametro_poco_por_bha[bha_fase] * 0.0254
+                                        df_bha_fase = calcular_bha(bha_opcoes[bha_fase].copy(), diametro_poco_m_fase)
+
+                                    altura_kick_fase, elemento_topo_kick_fase, intervalo_topo_kick_fase = calcular_altura_kick_por_bha(
+                                        df_bha_fase,
+                                        st.session_state.vk
+                                    )
+
+                                    idx_ref_fratura = (df_sapata["Profundidade (m)"] - prof_sapata_atual).abs().idxmin()
+                                    prof_ref_fratura_fase = float(df_sapata.loc[idx_ref_fratura, "Profundidade (m)"])
+                                    grad_fratura_ref_fase = float(
+                                        df_sapata.loc[idx_ref_fratura, "Gradiente de Fratura (lb/gal)"])
+
+                                    mask_calculo_fase = df_sapata["Profundidade (m)"] >= prof_ref_fratura_fase
+
+                                    rho_kt = pd.Series(np.nan, index=df_sapata.index, dtype=float)
+                                    delta_rho_kt = pd.Series(np.nan, index=df_sapata.index, dtype=float)
+
+                                    rho_kt.loc[mask_calculo_fase] = (
+                                            ((prof_ref_fratura_fase / df_sapata.loc[
+                                                mask_calculo_fase, "Profundidade (m)"]) *
+                                             ((grad_fratura_ref_fase - st.session_state.msf) -
+                                              df_sapata.loc[
+                                                  mask_calculo_fase, "Gradiente de Pressão de Poros + Margem (lb/gal)"]))
+                                            -
+                                            ((altura_kick_fase / df_sapata.loc[mask_calculo_fase, "Profundidade (m)"]) *
+                                             (df_sapata.loc[
+                                                  mask_calculo_fase, "Gradiente de Pressão de Poros + Margem (lb/gal)"] - st.session_state.dk))
+                                            +
+                                            df_sapata.loc[
+                                                mask_calculo_fase, "Gradiente de Pressão de Poros + Margem (lb/gal)"]
+                                    )
+
+                                    delta_rho_kt.loc[mask_calculo_fase] = (
+                                            rho_kt.loc[mask_calculo_fase]
+                                            - df_sapata.loc[
+                                                mask_calculo_fase, "Gradiente de Pressão de Poros + Margem (lb/gal)"]
+                                    )
+
+                                    mask_kt_limite = (
+                                            delta_rho_kt.notna() &
+                                            (delta_rho_kt <= st.session_state.mskt)
+                                    )
+
+                                    idx_kt_limite = None
+                                    prof_kt_limite = None
+                                    if mask_kt_limite.any():
+                                        idx_kt_limite = mask_kt_limite[mask_kt_limite].index[0]
+                                        prof_kt_limite = float(df_sapata.loc[idx_kt_limite, "Profundidade (m)"])
+
+                                    prof_alvo_hk = float(prof_sapata_atual) + float(st.session_state.hk)
+
+                                    mask_hk = df_sapata["Profundidade (m)"] >= prof_alvo_hk
+
+                                    idx_hk = None
+                                    prof_hk = None
+                                    if mask_hk.any():
+                                        idx_hk = mask_hk[mask_hk].index[0]
+                                        prof_hk = float(df_sapata.loc[idx_hk, "Profundidade (m)"])
+
+                                    candidatos = []
+
+                                    if idx_kt_limite is not None:
+                                        candidatos.append((idx_kt_limite, prof_kt_limite, "Kick tolerance atingido."))
+
+                                    if idx_hk is not None:
+                                        candidatos.append((idx_hk, prof_hk, "Comprimento máximo de poço aberto."))
+
+                                    if not candidatos:
+                                        mask_preencher = rho_kt.notna()
+                                        rho_kt_acumulado.loc[mask_preencher] = rho_kt.loc[mask_preencher]
+                                        delta_rho_kt_acumulado.loc[mask_preencher] = delta_rho_kt.loc[mask_preencher]
+
+                                        curvas_kt_plot.append({
+                                            "bha": bha_fase,
+                                            "prof": df_sapata.loc[mask_preencher, "Profundidade (m)"].to_numpy(dtype=float),
+                                            "rho_kt": rho_kt.loc[mask_preencher].to_numpy(dtype=float)
+                                        })
+
+                                        historico_fases.append({
+                                            "bha": bha_fase,
+                                            "prof_sapata_informada": float(prof_sapata_atual),
+                                            "prof_ref_fratura": float(prof_ref_fratura_fase),
+                                            "grad_fratura_ref": float(grad_fratura_ref_fase),
+                                            "altura_kick": float(altura_kick_fase),
+                                            "elemento_topo_kick": elemento_topo_kick_fase,
+                                            "intervalo_topo_kick": intervalo_topo_kick_fase,
+                                            "prof_sapata_calc": None,
+                                            "criterio": "Não atingido até o fim dos dados de perfilagem."
+                                        })
+                                        break
+
+                                    idx_stop, prof_sapata_nova, criterio_sapata = min(candidatos, key=lambda x: x[1])
+
+                                    rho_kt.loc[idx_stop:] = np.nan
+                                    delta_rho_kt.loc[idx_stop:] = np.nan
+
                                     mask_preencher = rho_kt.notna()
                                     rho_kt_acumulado.loc[mask_preencher] = rho_kt.loc[mask_preencher]
                                     delta_rho_kt_acumulado.loc[mask_preencher] = delta_rho_kt.loc[mask_preencher]
@@ -12189,6 +12230,25 @@ def geo_page():
                                         "rho_kt": rho_kt.loc[mask_preencher].to_numpy(dtype=float)
                                     })
 
+                                    diametro_sapata = mapa_sapata_por_bha.get(bha_fase)
+                                    nome_sapata = f'Sapata {diametro_sapata}' if diametro_sapata is not None else "Sapata"
+
+                                    st.session_state.curvas_kt_plot = curvas_kt_plot
+
+                                    sapatas_calculadas.append({
+                                        "prof": float(prof_sapata_nova),
+                                        "nome": nome_sapata,
+                                        "cor": "black",
+                                        "bha": bha_fase,
+                                        "criterio": criterio_sapata,
+                                        "prof_ref_fratura": float(prof_ref_fratura_fase),
+                                        "grad_fratura_ref": float(grad_fratura_ref_fase),
+                                        "prof_sapata_informada": float(prof_sapata_atual),
+                                        "altura_kick": float(altura_kick_fase),
+                                        "elemento_topo_kick": elemento_topo_kick_fase,
+                                        "intervalo_topo_kick": intervalo_topo_kick_fase
+                                    })
+
                                     historico_fases.append({
                                         "bha": bha_fase,
                                         "prof_sapata_informada": float(prof_sapata_atual),
@@ -12197,149 +12257,378 @@ def geo_page():
                                         "altura_kick": float(altura_kick_fase),
                                         "elemento_topo_kick": elemento_topo_kick_fase,
                                         "intervalo_topo_kick": intervalo_topo_kick_fase,
-                                        "prof_sapata_calc": None,
-                                        "criterio": "Não atingido até o fim dos dados de perfilagem."
+                                        "prof_sapata_calc": float(prof_sapata_nova),
+                                        "criterio": criterio_sapata
                                     })
-                                    break
 
-                                idx_stop, prof_sapata_nova, criterio_sapata = min(candidatos, key=lambda x: x[1])
+                                    prof_sapata_atual = float(prof_sapata_nova)
 
-                                rho_kt.loc[idx_stop:] = np.nan
-                                delta_rho_kt.loc[idx_stop:] = np.nan
+                                    if prof_sapata_atual >= prof_final_poco:
+                                        break
 
-                                mask_preencher = rho_kt.notna()
-                                rho_kt_acumulado.loc[mask_preencher] = rho_kt.loc[mask_preencher]
-                                delta_rho_kt_acumulado.loc[mask_preencher] = delta_rho_kt.loc[mask_preencher]
+                                for col in ["ρkt", "Δρkt"]:
+                                    if col in df_sapata.columns:
+                                        df_sapata.drop(columns=[col], inplace=True)
 
-                                curvas_kt_plot.append({
-                                    "bha": bha_fase,
-                                    "prof": df_sapata.loc[mask_preencher, "Profundidade (m)"].to_numpy(dtype=float),
-                                    "rho_kt": rho_kt.loc[mask_preencher].to_numpy(dtype=float)
-                                })
+                                df_sapata.insert(
+                                    loc=df_sapata.columns.get_loc('Gradiente de Fratura (lb/gal)') + 1,
+                                    column='ρkt',
+                                    value=rho_kt_acumulado
+                                )
 
-                                diametro_sapata = mapa_sapata_por_bha.get(bha_fase)
-                                nome_sapata = f'Sapata {diametro_sapata}' if diametro_sapata is not None else "Sapata"
+                                df_sapata.insert(
+                                    loc=df_sapata.columns.get_loc('ρkt') + 1,
+                                    column='Δρkt',
+                                    value=delta_rho_kt_acumulado
+                                )
 
-                                st.session_state.curvas_kt_plot = curvas_kt_plot
+                                sapatas_plot = []
 
-                                sapatas_calculadas.append({
-                                    "prof": float(prof_sapata_nova),
-                                    "nome": nome_sapata,
-                                    "cor": "black",
-                                    "bha": bha_fase,
-                                    "criterio": criterio_sapata,
-                                    "prof_ref_fratura": float(prof_ref_fratura_fase),
-                                    "grad_fratura_ref": float(grad_fratura_ref_fase),
-                                    "prof_sapata_informada": float(prof_sapata_atual),
-                                    "altura_kick": float(altura_kick_fase),
-                                    "elemento_topo_kick": elemento_topo_kick_fase,
-                                    "intervalo_topo_kick": intervalo_topo_kick_fase
-                                })
-
-                                historico_fases.append({
-                                    "bha": bha_fase,
-                                    "prof_sapata_informada": float(prof_sapata_atual),
-                                    "prof_ref_fratura": float(prof_ref_fratura_fase),
-                                    "grad_fratura_ref": float(grad_fratura_ref_fase),
-                                    "altura_kick": float(altura_kick_fase),
-                                    "elemento_topo_kick": elemento_topo_kick_fase,
-                                    "intervalo_topo_kick": intervalo_topo_kick_fase,
-                                    "prof_sapata_calc": float(prof_sapata_nova),
-                                    "criterio": criterio_sapata
-                                })
-
-                                prof_sapata_atual = float(prof_sapata_nova)
-
-                                if prof_sapata_atual >= prof_final_poco:
-                                    break
-
-                            for col in ["ρkt", "Δρkt"]:
-                                if col in df_sapata.columns:
-                                    df_sapata.drop(columns=[col], inplace=True)
-
-                            df_sapata.insert(
-                                loc=df_sapata.columns.get_loc('Gradiente de Fratura (lb/gal)') + 1,
-                                column='ρkt',
-                                value=rho_kt_acumulado
-                            )
-
-                            df_sapata.insert(
-                                loc=df_sapata.columns.get_loc('ρkt') + 1,
-                                column='Δρkt',
-                                value=delta_rho_kt_acumulado
-                            )
-
-                            sapatas_plot = []
-
-                            if "prc" in st.session_state and pd.notna(st.session_state.prc):
-                                sapatas_plot.append({
-                                    "prof": float(st.session_state.prc),
-                                    "nome": "Sapata do Condutor",
-                                    "cor": "black"
-                                })
-
-                            if prof_sapata_superficie is not None and pd.notna(prof_sapata_superficie):
-                                sapatas_plot.append({
-                                    "prof": float(prof_sapata_superficie),
-                                    "nome": "Sapata do Rev. de Sup.",
-                                    "cor": "black"
-                                })
-
-                            for sap in sapatas_calculadas:
-                                if sap["prof"] is not None and pd.notna(sap["prof"]):
+                                if "prc" in st.session_state and pd.notna(st.session_state.prc):
                                     sapatas_plot.append({
-                                        "prof": float(sap["prof"]),
-                                        "nome": sap["nome"],
-                                        "cor": sap["cor"]
+                                        "prof": float(st.session_state.prc),
+                                        "nome": "Sapata do Condutor",
+                                        "cor": "black"
                                     })
 
-                            prof_sapata_kick = sapatas_calculadas[-1]["prof"] if sapatas_calculadas else None
-                            criterio_sapata = sapatas_calculadas[-1]["criterio"] if sapatas_calculadas else None
+                                if prof_sapata_superficie is not None and pd.notna(prof_sapata_superficie):
+                                    sapatas_plot.append({
+                                        "prof": float(prof_sapata_superficie),
+                                        "nome": "Sapata do Rev. de Sup.",
+                                        "cor": "black"
+                                    })
 
-                            if historico_fases:
-                                st.markdown("#### Resumo das fases")
+                                for sap in sapatas_calculadas:
+                                    if sap["prof"] is not None and pd.notna(sap["prof"]):
+                                        sapatas_plot.append({
+                                            "prof": float(sap["prof"]),
+                                            "nome": sap["nome"],
+                                            "cor": sap["cor"]
+                                        })
 
-                                for i, fase in enumerate(historico_fases, start=1):
-                                    prof_calc_txt = (
-                                        f'{fase["prof_sapata_calc"]:.2f} m'
-                                        if fase["prof_sapata_calc"] is not None and pd.notna(fase["prof_sapata_calc"])
-                                        else "Não atingido até o fim dos dados de perfilagem."
-                                    )
+                                prof_sapata_kick = sapatas_calculadas[-1]["prof"] if sapatas_calculadas else None
+                                criterio_sapata = sapatas_calculadas[-1]["criterio"] if sapatas_calculadas else None
 
-                                    intervalo_topo_txt = (
-                                        f' · {fase["intervalo_topo_kick"]}'
-                                        if fase["intervalo_topo_kick"]
-                                        else ""
-                                    )
+                                if historico_fases:
+                                    st.markdown("#### Resumo das fases")
 
-                                    with st.expander(f'Fase {fase["bha"]}', expanded=True):
-                                        c1, c2 = st.columns(2)
-
-                                        with c1:
-                                            st.caption("Profundidade da sapata")
-                                            st.write(f'**{prof_calc_txt}**')
-
-                                            st.caption("Gradiente de fratura na sapata")
-                                            st.write(f'**{fase["grad_fratura_ref"]:.2f} lb/gal**')
-
-                                        with c2:
-                                            st.caption("Altura do kick")
-                                            st.write(f'**{fase["altura_kick"]:.2f} m**')
-
-                                            st.caption("Topo do kick")
-                                            st.write(f'**{fase["elemento_topo_kick"]}{intervalo_topo_txt}**')
-
-                                        st.markdown(
-                                            f"""
-                                            <span>
-                                                <b>Critério:</b>
-                                                <span style="color: red;">{fase["criterio"]}</span>
-                                            </span>
-                                            """,
-                                            unsafe_allow_html=True
+                                    for i, fase in enumerate(historico_fases, start=1):
+                                        prof_calc_txt = (
+                                            f'{fase["prof_sapata_calc"]:.2f} m'
+                                            if fase["prof_sapata_calc"] is not None and pd.notna(fase["prof_sapata_calc"])
+                                            else "Não atingido até o fim dos dados de perfilagem."
                                         )
 
-                            st.dataframe(df_sapata, use_container_width=True, hide_index=True)
+                                        intervalo_topo_txt = (
+                                            f' · {fase["intervalo_topo_kick"]}'
+                                            if fase["intervalo_topo_kick"]
+                                            else ""
+                                        )
+
+                                        with st.expander(f'Fase {fase["bha"]}', expanded=True):
+                                            c1, c2 = st.columns(2)
+
+                                            with c1:
+                                                st.caption("Profundidade da sapata")
+                                                st.write(f'**{prof_calc_txt}**')
+
+                                                st.caption("Gradiente de fratura na sapata")
+                                                st.write(f'**{fase["grad_fratura_ref"]:.2f} lb/gal**')
+
+                                            with c2:
+                                                st.caption("Altura do kick")
+                                                st.write(f'**{fase["altura_kick"]:.2f} m**')
+
+                                                st.caption("Topo do kick")
+                                                st.write(f'**{fase["elemento_topo_kick"]}{intervalo_topo_txt}**')
+
+                                            st.markdown(
+                                                f"""
+                                                <span>
+                                                    <b>Critério:</b>
+                                                    <span style="color: red;">{fase["criterio"]}</span>
+                                                </span>
+                                                """,
+                                                unsafe_allow_html=True
+                                            )
+
+                                st.dataframe(df_sapata, use_container_width=True, hide_index=True)
+
+                            else:
+                                df_sapata = df_sapata.copy()
+
+                                if "gf_kt (lb/gal)" in df_sapata.columns:
+                                    df_sapata.drop(columns=["gf_kt (lb/gal)"], inplace=True)
+
+                                df_sapata["gf_kt (lb/gal)"] = np.nan
+
+                                mapa_sapata_por_bha = {
+                                    '17 1/2"': '13 3/8"',
+                                    '12 1/4"': '9 5/8"',
+                                    '8 1/2"': '7"',
+                                    '6 1/8"': '5 1/2"'
+                                }
+
+                                ordem_bha_baixo_cima = ['6 1/8"', '8 1/2"', '12 1/4"', '17 1/2"']
+
+                                bhas_disponiveis = [bha for bha in ordem_bha_baixo_cima if bha in bha_opcoes]
+
+                                if not bhas_disponiveis:
+                                    st.warning("Nenhum BHA válido encontrado para o cálculo Baixo para Cima.")
+                                    st.session_state.sapatas_kick_b2c = []
+                                    st.session_state.curvas_kt_b2c = []
+                                    st.session_state.historico_fases_b2c = []
+                                    st.session_state.df_sapata_kt = df_sapata.copy()
+
+                                else:
+                                    sapatas_calculadas = []
+                                    historico_fases = []
+                                    curvas_kt_plot = []
+                                    profundidade_minima_sapata = float(st.session_state.prs)
+                                    profundidade_limite_superior = float(
+                                        pd.to_numeric(df_sapata["Profundidade (m)"], errors="coerce").max()
+                                    )
+                                    idx_sapata_anterior = None
+                                    cores_fases = ["red", "orange", "gold", "magenta", "purple", "cyan"]
+                                    for i_bha, bha_fase in enumerate(bhas_disponiveis):
+                                        if profundidade_limite_superior <= profundidade_minima_sapata:
+                                            break
+
+                                        chave_final_fase = f'df_bha_final_{bha_fase}'
+
+                                        if chave_final_fase in st.session_state and isinstance(
+                                                st.session_state[chave_final_fase], pd.DataFrame):
+
+                                            df_bha_fase = st.session_state[chave_final_fase].copy()
+
+                                        else:
+                                            diametro_poco_por_bha = {
+                                                '17 1/2"': 17.5,
+                                                '12 1/4"': 12.25,
+                                                '8 1/2"': 8.5,
+                                                '6 1/8"': 6.125,
+                                            }
+
+                                            if bha_fase not in diametro_poco_por_bha:
+                                                st.warning(f"Diâmetro do poço não mapeado para o BHA {bha_fase}.")
+
+                                                continue
+
+                                            diametro_poco_m_fase = diametro_poco_por_bha[bha_fase] * 0.0254
+                                            df_bha_fase = calcular_bha(bha_opcoes[bha_fase].copy(),
+                                                                       diametro_poco_m_fase)
+                                        try:
+                                            altura_kick_fase, elemento_topo_kick_fase, intervalo_topo_kick_fase = calcular_altura_kick_por_bha(
+                                                df_bha_fase,
+                                                st.session_state.vk
+                                            )
+
+                                        except Exception as e:
+                                            st.warning(
+                                                f"Não foi possível calcular a altura do kick para o BHA {bha_fase}: {e}")
+                                            continue
+
+                                        prof_col = pd.to_numeric(df_sapata["Profundidade (m)"], errors="coerce")
+                                        mask_intervalo = (
+                                                (prof_col >= profundidade_minima_sapata) &
+                                                (prof_col <= profundidade_limite_superior)
+                                        )
+
+                                        df_intervalo = df_sapata.loc[mask_intervalo].copy()
+
+                                        if df_intervalo.empty or len(df_intervalo) < 2:
+                                            break
+
+                                        df_intervalo = df_intervalo.sort_values("Profundidade (m)").copy()
+                                        prof = pd.to_numeric(df_intervalo["Profundidade (m)"], errors="coerce")
+
+                                        gf_limite = pd.to_numeric(
+                                            df_intervalo["Gradiente de Fratura - Margem (lb/gal)"],
+                                            errors="coerce"
+                                        )
+
+                                        if i_bha == 0:
+                                            idx_ref = prof_col.idxmax()
+
+                                        else:
+                                            idx_ref = idx_sapata_anterior
+                                        prof_ref = float(df_sapata.loc[idx_ref, "Profundidade (m)"])
+                                        gpp_ref = float(
+                                            df_sapata.loc[idx_ref, "Gradiente de Pressão de Poros + Margem (lb/gal)"])
+
+                                        gf_kt = (
+
+                                                ((prof_ref / prof) * (
+                                                            float(st.session_state.mskt) + float(st.session_state.ms)))
+
+                                                + ((float(altura_kick_fase) / prof) * (
+                                                    gpp_ref - float(st.session_state.dk)))
+
+                                                + gpp_ref
+
+                                        )
+
+                                        df_intervalo["gf_kt (lb/gal)"] = gf_kt
+                                        df_sapata.loc[df_intervalo.index, "gf_kt (lb/gal)"] = df_intervalo[
+                                            "gf_kt (lb/gal)"]
+
+                                        cond_critica = gf_kt >= gf_limite
+                                        profundidade_sapata_nova = None
+                                        idx_sapata = None
+                                        if cond_critica.any():
+                                            idx_critico = cond_critica[cond_critica].index[-1]
+                                            pos_critico = df_intervalo.index.get_loc(idx_critico)
+                                            if pos_critico < len(df_intervalo.index) - 1:
+                                                idx_sapata = df_intervalo.index[pos_critico + 1]
+                                            else:
+                                                idx_sapata = idx_critico
+                                            profundidade_sapata_nova = float(
+                                                df_sapata.loc[idx_sapata, "Profundidade (m)"])
+                                            criterio_sapata = "Kick tolerance atingido."
+                                        else:
+                                            profundidade_sapata_nova = profundidade_minima_sapata
+                                            idx_sapata = prof_col.sub(profundidade_sapata_nova).abs().idxmin()
+                                            criterio_sapata = "Não atingido até o revestimento de superfície."
+
+                                        if profundidade_sapata_nova < profundidade_minima_sapata:
+                                            profundidade_sapata_nova = profundidade_minima_sapata
+                                            idx_sapata = prof_col.sub(profundidade_sapata_nova).abs().idxmin()
+
+                                        mask_plot_fase = (
+                                                (pd.to_numeric(df_intervalo["Profundidade (m)"],
+                                                               errors="coerce") >= profundidade_sapata_nova) &
+                                                (pd.to_numeric(df_intervalo["Profundidade (m)"],
+                                                               errors="coerce") <= profundidade_limite_superior)
+                                        )
+
+                                        df_plot_fase = df_intervalo.loc[mask_plot_fase].copy()
+                                        cor_fase = cores_fases[i_bha % len(cores_fases)]
+                                        curvas_kt_plot.append({
+                                            "bha": bha_fase,
+                                            "prof": df_plot_fase["Profundidade (m)"].tolist(),
+                                            "gf_kt": df_plot_fase["gf_kt (lb/gal)"].tolist(),
+                                            "cor": cor_fase
+                                        })
+
+                                        grad_fratura_ref = float(
+                                            df_sapata.loc[idx_sapata, "Gradiente de Fratura - Margem (lb/gal)"])
+                                        sapatas_calculadas.append({
+                                            "prof": profundidade_sapata_nova,
+                                            "label": mapa_sapata_por_bha.get(bha_fase, "Revestimento"),
+                                            "bha": bha_fase,
+                                            "criterio": criterio_sapata,
+                                            "cor": cor_fase
+                                        })
+                                        historico_fases.append({
+                                            "bha": bha_fase,
+                                            "prof_sapata_calc": profundidade_sapata_nova,
+                                            "grad_fratura_ref": grad_fratura_ref,
+                                            "altura_kick": float(altura_kick_fase),
+                                            "elemento_topo_kick": elemento_topo_kick_fase,
+                                            "intervalo_topo_kick": intervalo_topo_kick_fase,
+                                            "criterio": criterio_sapata,
+                                            "prof_ref": prof_ref,
+                                            "gpp_ref": gpp_ref,
+                                            "cor": cor_fase
+                                        })
+
+                                        idx_sapata_anterior = idx_sapata
+                                        if profundidade_sapata_nova <= profundidade_minima_sapata:
+                                            break
+                                        profundidade_limite_superior = profundidade_sapata_nova
+
+                                    st.session_state.sapatas_kick_b2c = sapatas_calculadas
+                                    st.session_state.curvas_kt_b2c = curvas_kt_plot
+                                    st.session_state.historico_fases_b2c = historico_fases
+                                    st.session_state.df_sapata_kt = df_sapata.copy()
+
+                                    sapatas_plot = []
+
+                                    # Condutor
+                                    if "prc" in st.session_state and pd.notna(st.session_state.prc):
+                                        od_revest_condutor = st.session_state.get("odrc", '20"')
+                                        sapatas_plot.append({
+                                            "prof": float(st.session_state.prc),
+                                            "nome": f"Sapata {od_revest_condutor}",
+                                            "cor": "black"
+                                        })
+
+                                    # Superfície
+                                    if "prs" in st.session_state and pd.notna(st.session_state.prs):
+                                        od_revest_superficie = st.session_state.get("odrs", '13 3/8"')
+                                        sapatas_plot.append({
+                                            "prof": float(st.session_state.prs),
+                                            "nome": f"Sapata {od_revest_superficie}",
+                                            "cor": "black"
+                                        })
+
+                                    if st.session_state.metodo_kt == "Baixo para Cima":
+                                        sapatas_calc_b2c = st.session_state.get("sapatas_kick_b2c", [])
+                                        bha_state = st.session_state.get("bha", [])
+
+                                        for i, s_calc in enumerate(sapatas_calc_b2c):
+                                            prof = s_calc.get("prof", None)
+                                            bha_fase = s_calc.get("bha", f"Fase {i + 1}")
+
+                                            if prof is None or pd.isna(prof):
+                                                continue
+
+                                            try:
+                                                od_bha = bha_state[i]["od"]
+                                                nome_sapata = f'Sapata {od_bha}"' if isinstance(od_bha, (
+                                                int, float)) else f"Sapata {od_bha}"
+                                            except Exception:
+                                                nome_sapata = f"Sapata {bha_fase}"
+
+                                            sapatas_plot.append({
+                                                "prof": float(prof),
+                                                "nome": nome_sapata,
+                                                "cor": "black"
+                                            })
+
+                                    if historico_fases:
+                                        st.markdown("#### Resumo das fases")
+                                        for fase in historico_fases:
+                                            prof_calc_txt = (
+                                                f'{fase["prof_sapata_calc"]:.2f} m'
+                                                if fase["prof_sapata_calc"] is not None and pd.notna(
+                                                    fase["prof_sapata_calc"])
+                                                else "Não calculado"
+                                            )
+                                            intervalo_topo_txt = (
+                                                f' · {fase["intervalo_topo_kick"]}'
+                                                if fase["intervalo_topo_kick"]
+                                                else ""
+                                            )
+                                            with st.expander(f'Fase {fase["bha"]}', expanded=True):
+                                                c1, c2 = st.columns(2)
+                                                with c1:
+                                                    st.caption("Profundidade da sapata")
+                                                    st.write(f'**{prof_calc_txt}**')
+                                                    st.caption("Gradiente de fratura")
+                                                    st.write(f'**{fase["grad_fratura_ref"]:.2f} lb/gal**')
+                                                    st.caption("Profundidade da Sapata")
+                                                    st.write(f'**{fase["prof_ref"]:.2f} m**')
+
+                                                with c2:
+                                                    st.caption("Altura do kick")
+                                                    st.write(f'**{fase["altura_kick"]:.2f} m**')
+                                                    st.caption("Gradiente de Pressão de Poros")
+                                                    st.write(f'**{fase["gpp_ref"]:.2f} lb/gal**')
+                                                    st.caption("Topo do kick")
+                                                    st.write(f'**{fase["elemento_topo_kick"]}{intervalo_topo_txt}**')
+
+                                                st.markdown(
+                                                    f"""
+                                                    <span>
+                                                        <b>Critério:</b>
+                                                        <span style="color: red;">{fase["criterio"]}</span>
+                                                    </span>
+                                                    """,
+                                                    unsafe_allow_html=True
+                                                )
+
+                                    st.dataframe(df_sapata, use_container_width=True, hide_index=True)
 
                 with col2:
                     with st.container(border=True):
@@ -12478,24 +12767,61 @@ def geo_page():
                             zorder=5
                         )
 
-                        curvas_kt_plot = st.session_state.get("curvas_kt_plot", [])
+                        if st.session_state.metodo_kt == "Cima para Baixo":
+                            curvas_kt_plot = st.session_state.get("curvas_kt_plot", [])
 
-                        for curva in curvas_kt_plot:
-                            bha_curva = curva["bha"]
-                            prof_plot = pd.to_numeric(pd.Series(curva["prof"]), errors="coerce")
-                            rho_plot = pd.to_numeric(pd.Series(curva["rho_kt"]), errors="coerce")
-                            mask_ok = prof_plot.notna() & rho_plot.notna()
+                            for curva in curvas_kt_plot:
+                                bha_curva = curva["bha"]
+                                prof_plot = pd.to_numeric(pd.Series(curva["prof"]), errors="coerce")
+                                rho_plot = pd.to_numeric(pd.Series(curva["rho_kt"]), errors="coerce")
+                                mask_ok = prof_plot.notna() & rho_plot.notna()
 
-                            if mask_ok.any():
-                                ax.plot(
-                                    rho_plot[mask_ok],
-                                    prof_plot[mask_ok],
-                                    linestyle="-",
-                                    color="purple",
-                                    linewidth=2,
-                                    label=f"Kick Tolerance - {bha_curva}",
-                                    zorder=5
-                                )
+                                if mask_ok.any():
+                                    ax.plot(
+                                        rho_plot[mask_ok],
+                                        prof_plot[mask_ok],
+                                        linestyle="-",
+                                        color="purple",
+                                        linewidth=2,
+                                        label=f"Kick Tolerance - {bha_curva}",
+                                        zorder=5
+                                    )
+
+
+
+
+                        else:
+
+                            curvas_kt_plot = st.session_state.get("curvas_kt_b2c", [])
+
+                            for i, curva in enumerate(curvas_kt_plot):
+
+                                bha_curva = curva.get("bha", f"Fase {i + 1}")
+
+                                prof_plot = pd.to_numeric(pd.Series(curva.get("prof", [])), errors="coerce")
+
+                                rho_plot = pd.to_numeric(pd.Series(curva.get("gf_kt", [])), errors="coerce")
+
+                                mask_ok = prof_plot.notna() & rho_plot.notna()
+
+                                if mask_ok.any():
+                                    ax.plot(
+
+                                        rho_plot[mask_ok],
+
+                                        prof_plot[mask_ok],
+
+                                        linestyle="-",
+
+                                        color="purple",
+
+                                        linewidth=2,
+
+                                        label=f"Kick Tolerance - {bha_curva}",
+
+                                        zorder=5
+
+                                    )
 
                         # Configurações do gráfico
                         ax.set_title('Kick Tolerance', fontsize=14, fontweight='bold')
@@ -12521,22 +12847,13 @@ def geo_page():
                         # =========================
                         x_right = ax.get_xlim()[1] - 0.01 * (ax.get_xlim()[1] - ax.get_xlim()[0])
 
-                        # Recupera os ODs selecionados pelo usuário
-                        od_revest_condutor = st.session_state.get("odrc", '20"')
-                        od_revest_superficie = st.session_state.get("odrs", '13 3/8"')
-
-                        for i, s in enumerate(sapatas_plot):
-                            # Define o nome mostrado no gráfico com base na ordem das duas primeiras sapatas
-                            if i == 0:
-                                nome_sapata = f'Sapata {od_revest_condutor}'
-                            elif i == 1:
-                                nome_sapata = f'Sapata {od_revest_superficie}'
-                            else:
-                                nome_sapata = s["nome"]
+                        for s in sapatas_plot:
+                            nome_sapata = s.get("nome", "Sapata")
+                            cor_sapata = s.get("cor", "black")
 
                             ax.axhline(
                                 y=s["prof"],
-                                color=s["cor"],
+                                color=cor_sapata,
                                 linestyle="--",
                                 linewidth=2,
                                 zorder=6,
@@ -12547,14 +12864,14 @@ def geo_page():
                                 x=x_right,
                                 y=s["prof"] - 18,
                                 s=f'{nome_sapata}: {s["prof"]:.2f} m',
-                                color=s["cor"],
+                                color=cor_sapata,
                                 fontsize=9,
                                 va="center",
                                 ha="right",
                                 bbox=dict(
                                     boxstyle="round,pad=0.2",
                                     facecolor="white",
-                                    edgecolor=s["cor"],
+                                    edgecolor=cor_sapata,
                                     alpha=0.9
                                 ),
                                 zorder=7
