@@ -4595,12 +4595,18 @@ def _asp_preparar_dados(df):
 
 def _asp_montar_df_esquematico_kt():
     """
-    Monta automaticamente o dataframe do esquemático usando dados do próprio SYGA:
-    - prc / odrc: revestimento condutor
-    - prs / odrs: revestimento de superfície
-    - sapatas_kick_c2b ou sapatas_kick_b2c: sapatas calculadas
-    - condicao_ultima_fase_b2c == 'Poço aberto': adiciona poço aberto na última fase
+    Monta automaticamente o dataframe do esquemático usando como fonte principal
+    as mesmas sapatas plotadas no gráfico de Kick Tolerance.
+
+    Fonte de verdade:
+    - st.session_state.sapatas_plot_kt
+
+    Regra:
+    - Se a sapata aparece no gráfico de KT, aparece no esquemático.
+    - Se não aparece no gráfico de KT, não é adicionada manualmente aqui.
+    - O trecho de poço aberto é criado apenas do último revestimento até o final do perfil.
     """
+
     rows = []
 
     mapa_sapata_por_bha = {
@@ -4608,6 +4614,15 @@ def _asp_montar_df_esquematico_kt():
         '12 1/4"': '9 5/8"',
         '8 1/2"': '7"',
         '6 1/8"': '5 1/2"',
+    }
+
+    mapa_rev_para_bha_aberto = {
+        30.0: '26"',
+        20.0: '17 1/2"',
+        13.375: '12 1/4"',
+        9.625: '8 1/2"',
+        7.0: '6 1/8"',
+        5.5: None,
     }
 
     def add_revestido(nome_fase, diam_furo, diam_rev, prof):
@@ -4652,71 +4667,83 @@ def _asp_montar_df_esquematico_kt():
             "profundidade": prof,
         })
 
-    # ==============================
-    # Fase 0 - Revestimento condutor
-    # ==============================
-    if "prc" in st.session_state and pd.notna(st.session_state.prc):
-        od_condutor_txt = st.session_state.get("odrc", '30"')
-        od_condutor = _asp_pol_para_float(od_condutor_txt)
-        diam_fase_condutor = _asp_diam_fase_por_revestimento(od_condutor)
+    def inferir_bha_aberto_por_ultimo_revestimento(df_auto_local):
+        if df_auto_local.empty or "diam_rev" not in df_auto_local.columns:
+            return None
 
-        add_revestido(
-            nome_fase="Fase 0",
-            diam_furo=diam_fase_condutor,
-            diam_rev=od_condutor,
-            prof=st.session_state.prc
+        df_rev_local = df_auto_local.dropna(subset=["diam_rev"]).copy()
+
+        if df_rev_local.empty:
+            return None
+
+        df_rev_local = (
+            df_rev_local
+            .sort_values("profundidade")
+            .reset_index(drop=True)
         )
 
-    # ==============================
-    # Fase 1 - Revestimento de superfície
-    # ==============================
-    if "prs" in st.session_state and pd.notna(st.session_state.prs):
-        od_superficie_txt = st.session_state.get("odrs", '20"')
-        od_superficie = _asp_pol_para_float(od_superficie_txt)
-        diam_fase_superficie = _asp_diam_fase_por_revestimento(od_superficie)
+        ultimo_rev = float(df_rev_local.iloc[-1]["diam_rev"])
 
-        add_revestido(
-            nome_fase="Fase 1",
-            diam_furo=diam_fase_superficie,
-            diam_rev=od_superficie,
-            prof=st.session_state.prs
+        chave = min(
+            mapa_rev_para_bha_aberto.keys(),
+            key=lambda x: abs(x - ultimo_rev)
         )
 
-    # ==============================
-    # Sapatas calculadas pelo KT
-    # ==============================
-    metodo_kt = st.session_state.get("metodo_kt", "Cima para Baixo")
+        if abs(chave - ultimo_rev) <= 0.05:
+            return mapa_rev_para_bha_aberto[chave]
 
-    if metodo_kt == "Cima para Baixo":
-        sapatas_calc = st.session_state.get("sapatas_kick_c2b", [])
-    else:
-        sapatas_calc = st.session_state.get("sapatas_kick_b2c", [])
+        return None
 
-    for i, sap in enumerate(sapatas_calc, start=2):
-        prof = sap.get("prof", None)
+    def inferir_diametros_da_sapata(sapata):
+        nome = str(sapata.get("nome", ""))
+        tipo = str(sapata.get("tipo", "")).lower().strip()
+        bha = sapata.get("bha", None)
+
+        diam_rev = _asp_pol_para_float(nome)
+
+        if pd.isna(diam_rev):
+            if "condutor" in tipo or "condutor" in nome.lower():
+                diam_rev = _asp_pol_para_float(st.session_state.get("odrc", None))
+
+            elif "superficie" in tipo or "superfície" in tipo or "superfície" in nome.lower():
+                diam_rev = _asp_pol_para_float(st.session_state.get("odrs", None))
+
+        if pd.isna(diam_rev) and bha in mapa_sapata_por_bha:
+            diam_rev = _asp_pol_para_float(mapa_sapata_por_bha[bha])
+
+        diam_furo = _asp_pol_para_float(bha)
+
+        if pd.isna(diam_furo) and not pd.isna(diam_rev):
+            diam_furo = _asp_diam_fase_por_revestimento(diam_rev)
+
+        return diam_furo, diam_rev
+
+    # ======================================================
+    # Fonte principal: mesmas sapatas usadas no gráfico do KT
+    # ======================================================
+    sapatas_plot = st.session_state.get("sapatas_plot_kt", [])
+
+    if not isinstance(sapatas_plot, list):
+        sapatas_plot = []
+
+    for sapata in sapatas_plot:
+        try:
+            prof = sapata.get("prof", None)
+        except AttributeError:
+            continue
 
         if prof is None or pd.isna(prof):
             continue
 
-        bha = sap.get("bha", None)
+        prof = float(prof)
 
-        # Diâmetro da fase: vem do BHA, ex.: 17 1/2"
-        diam_furo = _asp_pol_para_float(bha)
-
-        # Diâmetro do revestimento: tenta pegar pelo nome da sapata.
-        # Ex.: 'Sapata 13 3/8"'
-        nome_sapata = sap.get("nome", "")
-        diam_rev = _asp_pol_para_float(nome_sapata)
-
-        # Fallback: usa o mapa BHA -> revestimento
-        if pd.isna(diam_rev) and bha in mapa_sapata_por_bha:
-            diam_rev = _asp_pol_para_float(mapa_sapata_por_bha[bha])
+        diam_furo, diam_rev = inferir_diametros_da_sapata(sapata)
 
         if pd.isna(diam_furo) or pd.isna(diam_rev):
             continue
 
         add_revestido(
-            nome_fase=f"Fase {i}",
+            nome_fase=f"Fase {len(rows)}",
             diam_furo=diam_furo,
             diam_rev=diam_rev,
             prof=prof
@@ -4734,204 +4761,39 @@ def _asp_montar_df_esquematico_kt():
         .reset_index(drop=True)
     )
 
-    # Garante que as fases começam no condutor como Fase 0
     df_auto["fase"] = [f"Fase {i}" for i in range(len(df_auto))]
 
-    # ==============================
-    # Poço aberto somente na última fase
-    # ==============================
+    # ======================================================
+    # Poço aberto final
+    # ======================================================
     prof_final = _asp_profundidade_final_poco()
 
-    mapa_rev_para_bha_aberto = {
-        30.0: '26"',
-        20.0: '17 1/2"',
-        13.375: '12 1/4"',
-        9.625: '8 1/2"',
-        7.0: '6 1/8"',
-        5.5: None,
-    }
-    def _inferir_bha_poco_aberto_por_ultimo_revestimento(df_auto_local):
-        """
-        Infere o diâmetro da próxima fase aberta a partir do último revestimento assentado.
-
-        Ex.:
-        última sapata 20"      -> poço aberto 17 1/2"
-        última sapata 13 3/8"  -> poço aberto 12 1/4"
-        última sapata 9 5/8"   -> poço aberto 8 1/2"
-        última sapata 7"       -> poço aberto 6 1/8"
-        """
-        if df_auto_local.empty or "diam_rev" not in df_auto_local.columns:
-            return None
-
-        df_rev_local = df_auto_local.dropna(subset=["diam_rev"]).copy()
-
-        if df_rev_local.empty:
-            return None
-
-        df_rev_local = df_rev_local.sort_values("profundidade").reset_index(drop=True)
-
-        ultimo_rev = float(df_rev_local.iloc[-1]["diam_rev"])
-
-        chave = min(
-            mapa_rev_para_bha_aberto.keys(),
-            key=lambda x: abs(x - ultimo_rev)
-        )
-
-        if abs(chave - ultimo_rev) <= 0.05:
-            return mapa_rev_para_bha_aberto[chave]
-
-        return None
-    def _asp_adicionar_sapata_final_se_necessario(df_auto_local, prof_sapata, bha_fase):
-        """
-        Adiciona uma sapata/revestimento final no esquemático,
-        quando o usuário define manualmente a profundidade da última sapata.
-        """
-        if prof_sapata is None or pd.isna(prof_sapata):
-            return df_auto_local
-
-        if bha_fase is None:
-            return df_auto_local
-
-        prof_sapata = float(prof_sapata)
-
-        if prof_sapata <= 0:
-            return df_auto_local
-
-        if not df_auto_local.empty:
-            prof_ultima = float(df_auto_local["profundidade"].max())
-
-            # Evita duplicar sapata se ela já existir no dataframe
-            if np.isclose(prof_sapata, prof_ultima, atol=1e-6) or prof_sapata < prof_ultima:
-                return df_auto_local
-
-        diam_furo = _asp_pol_para_float(bha_fase)
-
-        diam_rev = np.nan
-        if bha_fase in mapa_sapata_por_bha:
-            diam_rev = _asp_pol_para_float(mapa_sapata_por_bha[bha_fase])
-
-        if pd.isna(diam_furo) or pd.isna(diam_rev):
-            return df_auto_local
-
-        df_sapata_final = pd.DataFrame([{
-            "fase": f"Fase {len(df_auto_local)}",
-            "tipo_trecho": "Revestido",
-            "diam_furo": float(diam_furo),
-            "diam_rev": float(diam_rev),
-            "profundidade": prof_sapata,
-        }])
-
-        return pd.concat([df_auto_local, df_sapata_final], ignore_index=True)
-    def _asp_adicionar_poco_aberto_final(df_auto_local, prof_final_local, bha_aberto):
-        """
-        Adiciona trecho em poço aberto da última sapata até o fundo dos dados.
-        """
-        if prof_final_local is None or pd.isna(prof_final_local):
-            return df_auto_local
-
-        if df_auto_local.empty:
-            return df_auto_local
-
-        if bha_aberto is None:
-            return df_auto_local
-
-        prof_final_local = float(prof_final_local)
-        prof_ultima_sapata = float(df_auto_local["profundidade"].max())
-
-        if prof_final_local <= prof_ultima_sapata:
-            return df_auto_local
-
-        diam_furo_aberto = _asp_pol_para_float(bha_aberto)
-
-        if pd.isna(diam_furo_aberto):
-            return df_auto_local
-
-        df_aberto = pd.DataFrame([{
-            "fase": f"Fase {len(df_auto_local)}",
-            "tipo_trecho": "Poço aberto",
-            "diam_furo": float(diam_furo_aberto),
-            "diam_rev": np.nan,
-            "profundidade": prof_final_local,
-        }])
-
-        return pd.concat([df_auto_local, df_aberto], ignore_index=True)
     if prof_final is not None and not df_auto.empty:
         prof_final = float(prof_final)
+        prof_ultima_sapata = float(df_auto["profundidade"].max())
 
-        if metodo_kt == "Cima para Baixo":
-            condicao_c2b = st.session_state.get(
-                "condicao_ultima_fase_c2b",
-                "Poço aberto"
+        if prof_final > prof_ultima_sapata:
+            bha_aberto = inferir_bha_aberto_por_ultimo_revestimento(df_auto)
+
+            if bha_aberto is None:
+                curvas_kt = st.session_state.get("curvas_kt_plot", [])
+
+                if not curvas_kt:
+                    curvas_kt = st.session_state.get("curvas_kt_b2c", [])
+
+                if curvas_kt:
+                    bha_aberto = curvas_kt[-1].get("bha", None)
+
+            add_poco_aberto(
+                nome_fase=f"Fase {len(df_auto)}",
+                diam_furo=bha_aberto,
+                prof=prof_final
             )
 
-            if condicao_c2b == "Sapata definida":
-                # Primeiro, assenta a última sapata definida pelo usuário.
-                bha_sapata_final = _inferir_bha_poco_aberto_por_ultimo_revestimento(df_auto)
+    df_auto = pd.DataFrame(rows)
 
-                if bha_sapata_final is None:
-                    curvas_c2b = st.session_state.get("curvas_kt_plot", [])
-                    if curvas_c2b:
-                        bha_sapata_final = curvas_c2b[-1].get("bha", None)
-
-                df_auto = _asp_adicionar_sapata_final_se_necessario(
-                    df_auto_local=df_auto,
-                    prof_sapata=st.session_state.get("suf_c2b", None),
-                    bha_fase=bha_sapata_final
-                )
-
-                # Depois, da última sapata até o fundo, entra como poço aberto.
-                bha_aberto = _inferir_bha_poco_aberto_por_ultimo_revestimento(df_auto)
-
-            else:
-                # Sem última sapata: da sapata anterior até o fundo é poço aberto.
-                bha_aberto = _inferir_bha_poco_aberto_por_ultimo_revestimento(df_auto)
-
-                if bha_aberto is None:
-                    curvas_c2b = st.session_state.get("curvas_kt_plot", [])
-                    if curvas_c2b:
-                        bha_aberto = curvas_c2b[-1].get("bha", None)
-
-            df_auto = _asp_adicionar_poco_aberto_final(
-                df_auto_local=df_auto,
-                prof_final_local=prof_final,
-                bha_aberto=bha_aberto
-            )
-
-        else:
-            condicao_b2c = st.session_state.get(
-                "condicao_ultima_fase_b2c",
-                "Sapata definida"
-            )
-
-            bha_final_b2c = st.session_state.get("bha_escolhido", None)
-
-            if bha_final_b2c is None:
-                curvas_b2c = st.session_state.get("curvas_kt_b2c", [])
-                if curvas_b2c:
-                    bha_final_b2c = curvas_b2c[0].get("bha", None)
-
-            if condicao_b2c == "Sapata definida":
-                # Garante que a sapata definida pelo usuário apareça no esquemático.
-                df_auto = _asp_adicionar_sapata_final_se_necessario(
-                    df_auto_local=df_auto,
-                    prof_sapata=st.session_state.get("suf", None),
-                    bha_fase=bha_final_b2c
-                )
-
-                # Da profundidade dessa sapata até o fundo dos dados, entra como poço aberto.
-                df_auto = _asp_adicionar_poco_aberto_final(
-                    df_auto_local=df_auto,
-                    prof_final_local=prof_final,
-                    bha_aberto=bha_final_b2c
-                )
-
-            else:
-                # Sem sapata final: da sapata anterior até o fundo é poço aberto.
-                df_auto = _asp_adicionar_poco_aberto_final(
-                    df_auto_local=df_auto,
-                    prof_final_local=prof_final,
-                    bha_aberto=bha_final_b2c
-                )
+    if df_auto.empty:
+        return df_auto
 
     df_auto = (
         df_auto
@@ -15964,8 +15826,11 @@ def geo_page():
                                             if sap["prof"] is not None and pd.notna(sap["prof"]):
                                                 sapatas_plot.append({
                                                     "prof": float(sap["prof"]),
-                                                    "nome": sap["nome"],
-                                                    "cor": sap["cor"]
+                                                    "nome": sap.get("nome", "Sapata"),
+                                                    "cor": sap.get("cor", "black"),
+                                                    "bha": sap.get("bha", None),
+                                                    "criterio": sap.get("criterio", ""),
+                                                    "tipo": "calculada"
                                                 })
 
                                         st.session_state.sapatas_kick_c2b = sapatas_calculadas
@@ -15973,6 +15838,8 @@ def geo_page():
                                         st.session_state.curvas_kt_plot = curvas_kt_plot
                                         st.session_state.df_sapata_kt = df_sapata.copy()
                                         st.session_state.sapatas_plot_kt = sapatas_plot
+                                        st.session_state.fig_esquematico_asp = None
+                                        st.session_state.df_esquematico_asp = None
                                         st.session_state.pendencia_ajuste_arenito = None
                                         st.session_state.recalcular_sapatas = False
 
@@ -16426,7 +16293,10 @@ def geo_page():
                                                 sapatas_plot.append({
                                                     "prof": float(prof),
                                                     "nome": f"Sapata {label_sapata}",
-                                                    "cor": "black"
+                                                    "cor": "black",
+                                                    "bha": s_calc.get("bha", None),
+                                                    "criterio": s_calc.get("criterio", ""),
+                                                    "tipo": "calculada"
                                                 })
 
                                             st.session_state.sapatas_plot_kt = sapatas_plot
