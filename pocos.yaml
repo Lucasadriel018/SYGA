@@ -1,53 +1,24 @@
 pocos:
-#  - nome: "23 DD"
-#    zona_utm: 25
-#    hem: "Sul"
-#    coordenadas:
-#      easting: 198496.802
-#      northing: 8933377.034
-#    profundidade_medida_m: 1000
-#    profundidade_vertical_m: 1000
-#    peso_eq_lb_gal: 13
-#
-#  - nome: "Teste2"
-#    zona_utm: 25
-#    hem: "Sul"
-#    coordenadas:
-#      easting: 103216.06
-#      northing: 9430656.83
-#    profundidade_medida_m: 2000.0
-#    profundidade_vertical_m: 2000.0
-#    peso_eq_lb_gal: 16.00
-
+#Alagoas
   - nome: "1-BRSA-1315-AL"
     zona_utm: 24
     hem: "Sul"
     coordenadas:
-      easting: 811448.59
-      northing: 8910687.71
-    profundidade_medida_m: 2901.00
-    profundidade_vertical_m: 2901.00
-    peso_eq_lb_gal: 15.20
-
-  - nome: "1-BRSA-1327D-AL"
-    zona_utm: 24
-    hem: "Sul"
-    coordenadas:
-      easting: 845706.67
-      northing: 8938308.69
-    profundidade_medida_m: 2502.00
-    profundidade_vertical_m: 2305.20
-    peso_eq_lb_gal: 16.00
+      easting: 811447.0
+      northing: 8910690.4
+    profundidade_medida_m: 2901.0
+    profundidade_vertical_m: 2901.0
+    peso_eq_lb_gal: 15.2
 
   - nome: "1-BRSA-1337-AL"
-    zona_utm: 24
+    zona_utm: 25
     hem: "Sul"
     coordenadas:
-      easting: 881174.9
-      northing: 8972164.96
-    profundidade_medida_m: 2405.00
-    profundidade_vertical_m: 2391.80
-    peso_eq_lb_gal: 14.00
+      easting: 221916.59
+      northing: 8973049.11
+    profundidade_medida_m: 2405.0
+    profundidade_vertical_m: 2391.8
+    peso_eq_lb_gal: 14.0
 
   - nome: "1-BRSA-266D-AL"
     zona_utm: 24
@@ -55,39 +26,29 @@ pocos:
     coordenadas:
       easting: 822713.64
       northing: 8907449.55
-    profundidade_medida_m: 1020.00
-    profundidade_vertical_m: 905.00
-    peso_eq_lb_gal: 9.80
+    profundidade_medida_m: 1020.0
+    profundidade_vertical_m: 905.0
+    peso_eq_lb_gal: 9.8
 
   - nome: "1-BRSA-266D-AL"
     zona_utm: 24
     hem: "Sul"
     coordenadas:
-      easting: 822713.6
-      northing: 8907449.52
-    profundidade_medida_m: 2217.00
-    profundidade_vertical_m: 1873.00
-    peso_eq_lb_gal: 20.40
+      easting: 822713.64
+      northing: 8907449.55
+    profundidade_medida_m: 2217.0
+    profundidade_vertical_m: 1873.0
+    peso_eq_lb_gal: 20.4
 
   - nome: "1-BRSA-313D-AL"
     zona_utm: 24
     hem: "Sul"
     coordenadas:
-      easting: 821745.49
-      northing: 8922062.11
-    profundidade_medida_m: 2713.00
-    profundidade_vertical_m: 2198.80
-    peso_eq_lb_gal: 18.80
-
-  - nome: "1-BRSA-313D-AL"
-    zona_utm: 24
-    hem: "Sul"
-    coordenadas:
-      easting: 821745.49
-      northing: 8922062.11
-    profundidade_medida_m: 1188.00
-    profundidade_vertical_m: 1119.30
-    peso_eq_lb_gal: 18.80
+      easting: 821749.6
+      northing: 8922057.49
+    profundidade_medida_m: 1188.0
+    profundidade_vertical_m: 1119.3
+    peso_eq_lb_gal: 18.8
 
   - nome: "1-BRSA-344-AL"
     zona_utm: 24
@@ -95,49 +56,29 @@ pocos:
     coordenadas:
       easting: 825675.5
       northing: 8909029.19
-    profundidade_medida_m: 1801.00
-    profundidade_vertical_m: 1800.70
-    peso_eq_lb_gal: 13.90
-
-  - nome: "1-BRSA-344-AL"
-    zona_utm: 24
-    hem: "Sul"
-    coordenadas:
-      easting: 825675.5
-      northing: 8909029.19
-    profundidade_medida_m: 3717.00
-    profundidade_vertical_m: 3715.30
-    peso_eq_lb_gal: 11.70
-
-  - nome: "1-BRSA-355D-AL"
-    zona_utm: 24
-    hem: "Sul"
-    coordenadas:
-      easting: 821516.78
-      northing: 8913921.26
-    profundidade_medida_m: 1644.00
-    profundidade_vertical_m: 1526.60
-    peso_eq_lb_gal: 18.10
+    profundidade_medida_m: 3717.0
+    profundidade_vertical_m: 3715.3
+    peso_eq_lb_gal: 11.7
 
   - nome: "1-BRSA-361D-AL"
-    zona_utm: 24
+    zona_utm: 25
     hem: "Sul"
     coordenadas:
-      easting: 849058.15
-      northing: 8927206.63
-    profundidade_medida_m: 1716.00
-    profundidade_vertical_m: 1716.00
-    peso_eq_lb_gal: 14.00
+      easting: 190582.92
+      northing: 8927556.33
+    profundidade_medida_m: 1716.0
+    profundidade_vertical_m: 1716.0
+    peso_eq_lb_gal: 14.0
 
   - nome: "1-BRSA-361D-AL"
-    zona_utm: 24
+    zona_utm: 25
     hem: "Sul"
     coordenadas:
-      easting: 849058.15
-      northing: 8927206.63
-    profundidade_medida_m: 2901.00
-    profundidade_vertical_m: 2901.00
-    peso_eq_lb_gal: 19.00
+      easting: 190582.92
+      northing: 8927556.33
+    profundidade_medida_m: 2901.0
+    profundidade_vertical_m: 2901.0
+    peso_eq_lb_gal: 19.0
 
   - nome: "1-BRSA-390D-AL"
     zona_utm: 24
@@ -145,9 +86,9 @@ pocos:
     coordenadas:
       easting: 822332.51
       northing: 8915448.12
-    profundidade_medida_m: 1854.00
-    profundidade_vertical_m: 1854.00
-    peso_eq_lb_gal: 14.00
+    profundidade_medida_m: 1854.0
+    profundidade_vertical_m: 1854.0
+    peso_eq_lb_gal: 14.0
 
   - nome: "1-BRSA-410D-AL"
     zona_utm: 24
@@ -155,69 +96,49 @@ pocos:
     coordenadas:
       easting: 821516.54
       northing: 8913921.11
-    profundidade_medida_m: 2242.00
-    profundidade_vertical_m: 2117.80
-    peso_eq_lb_gal: 16.00
-
-  - nome: "1-BRSA-513D-AL"
-    zona_utm: 24
-    hem: "Sul"
-    coordenadas:
-      easting: 819851.02
-      northing: 8922465.58
-    profundidade_medida_m: 1721.00
-    profundidade_vertical_m: 1701.90
-    peso_eq_lb_gal: 16.90
-
-  - nome: "1-BRSA-513D-AL"
-    zona_utm: 24
-    hem: "Sul"
-    coordenadas:
-      easting: 819851.02
-      northing: 8922465.58
-    profundidade_medida_m: 3608.00
-    profundidade_vertical_m: 3333.00
-    peso_eq_lb_gal: 16.90
+    profundidade_medida_m: 3375.0
+    profundidade_vertical_m: 3236.7
+    peso_eq_lb_gal: 114.6
 
   - nome: "1-BRSA-941D-AL"
     zona_utm: 24
     hem: "Sul"
     coordenadas:
-      easting: 804873.54
-      northing: 8882583.66
-    profundidade_medida_m: 857.00
-    profundidade_vertical_m: 855.00
-    peso_eq_lb_gal: 17.00
+      easting: 804873.22
+      northing: 8882582.44
+    profundidade_medida_m: 857.0
+    profundidade_vertical_m: 855.0
+    peso_eq_lb_gal: 17.0
 
   - nome: "1-IMET-17-AL"
-    zona_utm: 24
+    zona_utm: 25
     hem: "Sul"
     coordenadas:
-      easting: 888897.28
-      northing: 8975388.83
-    profundidade_medida_m: 390.00
-    profundidade_vertical_m: 390.00
-    peso_eq_lb_gal: 25.40
+      easting: 229560.01
+      northing: 8976386.99
+    profundidade_medida_m: 390.0
+    profundidade_vertical_m: 390.0
+    peso_eq_lb_gal: 25.4
 
   - nome: "1-IMET-18-AL"
-    zona_utm: 24
+    zona_utm: 25
     hem: "Sul"
     coordenadas:
-      easting: 893643.29
-      northing: 8996974.42
-    profundidade_medida_m: 300.00
-    profundidade_vertical_m: 300.00
-    peso_eq_lb_gal: 24.70
+      easting: 233941.0
+      northing: 8998026.99
+    profundidade_medida_m: 300.0
+    profundidade_vertical_m: 300.0
+    peso_eq_lb_gal: 24.7
 
   - nome: "1-IMET-19-AL"
-    zona_utm: 24
+    zona_utm: 25
     hem: "Sul"
     coordenadas:
-      easting: 902810.48
-      northing: 8995472.18
-    profundidade_medida_m: 162.00
-    profundidade_vertical_m: 162.00
-    peso_eq_lb_gal: 24.50
+      easting: 243121.5
+      northing: 8996677.83
+    profundidade_medida_m: 162.0
+    profundidade_vertical_m: 162.0
+    peso_eq_lb_gal: 24.5
 
   - nome: "1-INT-1-AL"
     zona_utm: 24
@@ -225,169 +146,69 @@ pocos:
     coordenadas:
       easting: 806313.74
       northing: 8904949.38
-    profundidade_medida_m: 87.00
-    profundidade_vertical_m: 87.00
-    peso_eq_lb_gal: 12.60
-
-  - nome: "1-INT-1-AL"
-    zona_utm: 24
-    hem: "Sul"
-    coordenadas:
-      easting: 806313.74
-      northing: 8904949.38
-    profundidade_medida_m: 339.00
-    profundidade_vertical_m: 339.00
-    peso_eq_lb_gal: 11.70
-
-  - nome: "3-BRSA-1263D-AL"
-    zona_utm: 24
-    hem: "Sul"
-    coordenadas:
-      easting: 819544.98
-      northing: 8923481.01
-    profundidade_medida_m: 2243.00
-    profundidade_vertical_m: 2187.60
-    peso_eq_lb_gal: 17.20
-
-  - nome: "3-BRSA-1263D-AL"
-    zona_utm: 24
-    hem: "Sul"
-    coordenadas:
-      easting: 819544.98
-      northing: 8923481.01
-    profundidade_medida_m: 3425.00
-    profundidade_vertical_m: 3321.80
-    peso_eq_lb_gal: 18.10
+    profundidade_medida_m: 339.0
+    profundidade_vertical_m: 339.0
+    peso_eq_lb_gal: 11.7
 
   - nome: "3-BRSA-1283-AL"
-    zona_utm: 24
+    zona_utm: 25
     hem: "Sul"
     coordenadas:
-      easting: 840208.94
-      northing: 8936676.53
-    profundidade_medida_m: 3289.00
-    profundidade_vertical_m: 3289.00
-    peso_eq_lb_gal: 15.30
+      easting: 181567.66
+      northing: 8936845.32
+    profundidade_medida_m: 3289.0
+    profundidade_vertical_m: 3289.0
+    peso_eq_lb_gal: 15.3
 
   - nome: "3-BRSA-1283-AL"
-    zona_utm: 24
+    zona_utm: 25
     hem: "Sul"
     coordenadas:
-      easting: 840208.94
-      northing: 8936676.53
-    profundidade_medida_m: 4377.00
-    profundidade_vertical_m: 4375.30
-    peso_eq_lb_gal: 19.00
+      easting: 181567.66
+      northing: 8936845.32
+    profundidade_medida_m: 4377.0
+    profundidade_vertical_m: 4375.3
+    peso_eq_lb_gal: 19.0
 
   - nome: "3-BRSA-395D-AL"
     zona_utm: 24
     hem: "Sul"
     coordenadas:
-      easting: 818576.18
-      northing: 8910229.58
-    profundidade_medida_m: 3276.00
-    profundidade_vertical_m: 3049.40
-    peso_eq_lb_gal: 16.20
-
-  - nome: "3-BRSA-395D-AL"
-    zona_utm: 24
-    hem: "Sul"
-    coordenadas:
-      easting: 818576.18
-      northing: 8910229.58
-    profundidade_medida_m: 1320.00
-    profundidade_vertical_m: 1319.70
-    peso_eq_lb_gal: 14.00
-
-  - nome: "3-BRSA-430D-AL"
-    zona_utm: 24
-    hem: "Sul"
-    coordenadas:
-      easting: 817046.13
-      northing: 8912602.02
-    profundidade_medida_m: 3496.00
-    profundidade_vertical_m: 2861.60
-    peso_eq_lb_gal: 15.80
+      easting: 818729.67
+      northing: 8910134.21
+    profundidade_medida_m: 1320.0
+    profundidade_vertical_m: 1319.7
+    peso_eq_lb_gal: 14.0
 
   - nome: "3-BRSA-582D-AL"
-    zona_utm: 24
+    zona_utm: 25
     hem: "Sul"
     coordenadas:
-      easting: 835573.94
-      northing: 8924033.37
-    profundidade_medida_m: 1340.00
-    profundidade_vertical_m: 1302.10
-    peso_eq_lb_gal: 14.50
-
-  - nome: "3-BRSA-638D-AL"
-    zona_utm: 24
-    hem: "Sul"
-    coordenadas:
-      easting: 819696.5
-      northing: 8921948.07
-    profundidade_medida_m: 3630.00
-    profundidade_vertical_m: 3509.30
-    peso_eq_lb_gal: 19.00
-
-  - nome: "3-BRSA-638D-AL"
-    zona_utm: 24
-    hem: "Sul"
-    coordenadas:
-      easting: 819696.5
-      northing: 8921948.07
-    profundidade_medida_m: 3630.00
-    profundidade_vertical_m: 3509.30
-    peso_eq_lb_gal: 19.00
-
-  - nome: "3-BRSA-737D-AL"
-    zona_utm: 24
-    hem: "Sul"
-    coordenadas:
-      easting: 817326.64
-      northing: 8907016.04
-    profundidade_medida_m: 2659.00
-    profundidade_vertical_m: 2494.10
-    peso_eq_lb_gal: 15.20
+      easting: 177159.74
+      northing: 8924146.04
+    profundidade_medida_m: 1340.0
+    profundidade_vertical_m: 1302.1
+    peso_eq_lb_gal: 14.5
 
   - nome: "4-BRSA-1309-AL"
-    zona_utm: 24
-    hem: "Sul"
-    coordenadas:
-      easting: 842429.55
-      northing: 8935866.31
-    profundidade_medida_m: 3364.00
-    profundidade_vertical_m: 3380.00
-    peso_eq_lb_gal: 16.20
-
-  - nome: "5-BRSA-774-AL"
     zona_utm: 25
     hem: "Sul"
     coordenadas:
-      easting: 177606.42
-      northing: 8923685.77
-    profundidade_medida_m: 1300.00
-    profundidade_vertical_m: 1299.70
-    peso_eq_lb_gal: 14.10
-
-  - nome: "5-BRSA-774-AL"
-    zona_utm: 25
-    hem: "Sul"
-    coordenadas:
-      easting: 177606.42
-      northing: 8923685.77
-    profundidade_medida_m: 3160.00
-    profundidade_vertical_m: 3158.70
-    peso_eq_lb_gal: 16.00
+      easting: 183805.0
+      northing: 8936095.91
+    profundidade_medida_m: 3364.0
+    profundidade_vertical_m: 3380.0
+    peso_eq_lb_gal: 16.2
 
   - nome: "6-BRSA-437D-AL"
-    zona_utm: 24
+    zona_utm: 25
     hem: "Sul"
     coordenadas:
-      easting: 838449.12
-      northing: 8940255.21
-    profundidade_medida_m: 2650.00
-    profundidade_vertical_m: 2493.00
-    peso_eq_lb_gal: 17.70
+      easting: 179749.24
+      northing: 8940413.83
+    profundidade_medida_m: 2650.0
+    profundidade_vertical_m: 2493.0
+    peso_eq_lb_gal: 17.7
 
   - nome: "6-BRSA-950DP-AL"
     zona_utm: 24
@@ -395,6 +216,1547 @@ pocos:
     coordenadas:
       easting: 804873.22
       northing: 8882582.44
-    profundidade_medida_m: 857.00
-    profundidade_vertical_m: 855.00
-    peso_eq_lb_gal: 17.00
+    profundidade_medida_m: 857.0
+    profundidade_vertical_m: 855.0
+    peso_eq_lb_gal: 17.0
+
+#Sergipe
+  - nome: "1-BRSA-1291D-SE"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 709202.02
+      northing: 8811829.94
+    profundidade_medida_m: 202.0
+    profundidade_vertical_m: 200.8
+    peso_eq_lb_gal: 15.0
+
+  - nome: "1-BRSA-645-SE"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 732098.34
+      northing: 8835646.4
+    profundidade_medida_m: 1771.0
+    profundidade_vertical_m: 1770.2
+    peso_eq_lb_gal: 14.1
+
+  - nome: "1-BRSA-691-SE"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 735657.23
+      northing: 8836341.52
+    profundidade_medida_m: 2509.0
+    profundidade_vertical_m: 2505.8
+    peso_eq_lb_gal: 22.0
+
+  - nome: "3-BRSA-1093-SE"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 711730.27
+      northing: 8822012.94
+    profundidade_medida_m: 885.0
+    profundidade_vertical_m: 885.0
+    peso_eq_lb_gal: 13.3
+
+  - nome: "3-BRSA-1134-SE"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 714025.66
+      northing: 8808209.59
+    profundidade_medida_m: 927.0
+    profundidade_vertical_m: 927.0
+    peso_eq_lb_gal: 12.7
+
+  - nome: "3-BRSA-1198D-SE"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 698892.78
+      northing: 8812981.7
+    profundidade_medida_m: 570.0
+    profundidade_vertical_m: 570.0
+    peso_eq_lb_gal: 12.7
+
+  - nome: "3-BRSA-778-SE"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 706265.2
+      northing: 8811279.8
+    profundidade_medida_m: 717.0
+    profundidade_vertical_m: 716.2
+    peso_eq_lb_gal: 14.0
+
+  - nome: "3-BRSA-786-SE"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 708081.57
+      northing: 8819714.1
+    profundidade_medida_m: 725.0
+    profundidade_vertical_m: 724.2
+    peso_eq_lb_gal: 14.0
+
+  - nome: "4-BRSA-35D-SE"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 777947.64
+      northing: 8841887.48
+    profundidade_medida_m: 799.0
+    profundidade_vertical_m: 794.0
+    peso_eq_lb_gal: 12.6
+
+  - nome: "7-CL-62D-SE"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 708515.76
+      northing: 8827840.94
+    profundidade_medida_m: 180.0
+    profundidade_vertical_m: 177.0
+    peso_eq_lb_gal: 14.0
+
+  - nome: "8-SZ-531D-SE"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 708453.21
+      northing: 8824137.05
+    profundidade_medida_m: 642.0
+    profundidade_vertical_m: 590.0
+    peso_eq_lb_gal: 15.2
+
+  - nome: "8-SZ-545D-SE"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 709230.38
+      northing: 8823966.02
+    profundidade_medida_m: 200.0
+    profundidade_vertical_m: 199.5
+    peso_eq_lb_gal: 16.2
+
+  - nome: "8-SZ-582D-SE"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 709596.73
+      northing: 8823991.67
+    profundidade_medida_m: 204.0
+    profundidade_vertical_m: 203.5
+    peso_eq_lb_gal: 17.0
+#Recôncavo
+  - nome: "1-ALV-3D-BA"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 577898.46
+      northing: 8622354.89
+    profundidade_medida_m: 155.0
+    profundidade_vertical_m: 150.0
+    peso_eq_lb_gal: 15.6
+
+  - nome: "1-MPE-1-BA"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 563858.55
+      northing: 8637366.95
+    profundidade_medida_m: 608.0
+    profundidade_vertical_m: 608.0
+    peso_eq_lb_gal: 17.5
+
+  - nome: "1-STAR-26-BA"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 561834.72
+      northing: 8631708.95
+    profundidade_medida_m: 1795.0
+    profundidade_vertical_m: 1795.0
+    peso_eq_lb_gal: 14.3
+
+  - nome: "1-WW-13-BA"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 552588.25
+      northing: 8650531.62
+    profundidade_medida_m: 0.0
+    profundidade_vertical_m: 123.0
+    peso_eq_lb_gal: 14.0
+
+  - nome: "1-WW-8-BA"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 624766.22
+      northing: 8694339.06
+    profundidade_medida_m: 0.0
+    profundidade_vertical_m: 106.0
+    peso_eq_lb_gal: 14.1
+
+  - nome: "3-GTE-3D-BA"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 579004.44
+      northing: 8635282.98
+    profundidade_medida_m: 1803.0
+    profundidade_vertical_m: 1798.0
+    peso_eq_lb_gal: 15.4
+
+  - nome: "3-GTE-4D-BA"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 578482.59
+      northing: 8633865.34
+    profundidade_medida_m: 511.0
+    profundidade_vertical_m: 511.0
+    peso_eq_lb_gal: 14.7
+
+  - nome: "3-MPE-6-BA"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 563660.86
+      northing: 8637055.96
+    profundidade_medida_m: 1020.0
+    profundidade_vertical_m: 0.0
+    peso_eq_lb_gal: 16.9
+
+  - nome: "4-BRSA-1274D-BA"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 551169.02
+      northing: 8613197.46
+    profundidade_medida_m: 2052.0
+    profundidade_vertical_m: 2052.0
+    peso_eq_lb_gal: 29.7
+
+  - nome: "4-BRSA-94-BA"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 581800.51
+      northing: 8638514.58
+    profundidade_medida_m: 1300.0
+    profundidade_vertical_m: 1298.8
+    peso_eq_lb_gal: 7.0
+
+  - nome: "9-FBM-277-BA"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 621996.64
+      northing: 8682272.24
+    profundidade_medida_m: 781.0
+    profundidade_vertical_m: 781.0
+    peso_eq_lb_gal: 18.1
+#Tucano
+  - nome: "1-ALV-12-BA"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 553784.27
+      northing: 8662821.85
+    profundidade_medida_m: 223.0
+    profundidade_vertical_m: 223.0
+    peso_eq_lb_gal: 11.8
+#São Francisco
+  - nome: "1-BRSA-948-MG"
+    zona_utm: 23
+    hem: "Sul"
+    coordenadas:
+      easting: 373046.92
+      northing: 8083471.68
+    profundidade_medida_m: 3590.0
+    profundidade_vertical_m: 3590.0
+    peso_eq_lb_gal: 17.9
+
+  - nome: "1-ORT-1-MG"
+    zona_utm: 23
+    hem: "Sul"
+    coordenadas:
+      easting: 440657.98
+      northing: 7938547.18
+    profundidade_medida_m: 590.0
+    profundidade_vertical_m: 586.6
+    peso_eq_lb_gal: 19.4
+
+  - nome: "1-PTRA-19-MG"
+    zona_utm: 23
+    hem: "Sul"
+    coordenadas:
+      easting: 380014.66
+      northing: 8026473.83
+    profundidade_medida_m: 167.0
+    profundidade_vertical_m: 167.0
+    peso_eq_lb_gal: 12.9
+
+  - nome: "1-PTRA-26-MG"
+    zona_utm: 23
+    hem: "Sul"
+    coordenadas:
+      easting: 324080.13
+      northing: 7954658.72
+    profundidade_medida_m: 1492.0
+    profundidade_vertical_m: 1492.0
+    peso_eq_lb_gal: 17.5
+
+  - nome: "4-PTRA-23-MG"
+    zona_utm: 23
+    hem: "Sul"
+    coordenadas:
+      easting: 355294.77
+      northing: 7939414.06
+    profundidade_medida_m: 168.0
+    profundidade_vertical_m: 168.0
+    peso_eq_lb_gal: 42.7
+
+  - nome: "4-PTRA-23-MG"
+    zona_utm: 23
+    hem: "Sul"
+    coordenadas:
+      easting: 355294.77
+      northing: 7939414.06
+    profundidade_medida_m: 1240.0
+    profundidade_vertical_m: 1240.0
+    peso_eq_lb_gal: 19.3
+#Solimões
+  - nome: "1-BRSA-1311-AM"
+    zona_utm: 20
+    hem: "Sul"
+    coordenadas:
+      easting: 248875.06
+      northing: 9474982.69
+    profundidade_medida_m: 1817.0
+    profundidade_vertical_m: 1817.0
+    peso_eq_lb_gal: 14.9
+
+  - nome: "1-BRSA-1311-AM"
+    zona_utm: 20
+    hem: "Sul"
+    coordenadas:
+      easting: 248875.06
+      northing: 9474982.69
+    profundidade_medida_m: 3042.0
+    profundidade_vertical_m: 3042.0
+    peso_eq_lb_gal: 15.0
+
+  - nome: "3-BRSA-1113D-AM"
+    zona_utm: 20
+    hem: "Sul"
+    coordenadas:
+      easting: 228808.4
+      northing: 9489125.61
+    profundidade_medida_m: 3068.0
+    profundidade_vertical_m: 2919.1
+    peso_eq_lb_gal: 15.3
+
+  - nome: "3-BRSA-515-AM"
+    zona_utm: 20
+    hem: "Sul"
+    coordenadas:
+      easting: 252333.07
+      northing: 9467565.79
+    profundidade_medida_m: 788.0
+    profundidade_vertical_m: 0.0
+    peso_eq_lb_gal: 12.1
+
+  - nome: "3-BRSA-565D-AM"
+    zona_utm: 20
+    hem: "Sul"
+    coordenadas:
+      easting: 260717.94
+      northing: 9458704.84
+    profundidade_medida_m: 765.0
+    profundidade_vertical_m: 765.0
+    peso_eq_lb_gal: 13.0
+
+  - nome: "3BRSA515AM"
+    zona_utm: 20
+    hem: "Sul"
+    coordenadas:
+      easting: 252392.49
+      northing: 9467606.64
+    profundidade_medida_m: 788.0
+    profundidade_vertical_m: 0.0
+    peso_eq_lb_gal: 12.1
+
+  - nome: "4-BRSA-1252-AM"
+    zona_utm: 20
+    hem: "Sul"
+    coordenadas:
+      easting: 236383.7
+      northing: 9481504.01
+    profundidade_medida_m: 3445.0
+    profundidade_vertical_m: 3445.0
+    peso_eq_lb_gal: 15.0
+#São Luis
+  - nome: "2-ANP-5-MA"
+    zona_utm: 23
+    hem: "Sul"
+    coordenadas:
+      easting: 398336.89
+      northing: 9751774.79
+    profundidade_medida_m: 1510.0
+    profundidade_vertical_m: 1510.0
+    peso_eq_lb_gal: 20.1
+
+  - nome: "2-ANP-5-MA"
+    zona_utm: 23
+    hem: "Sul"
+    coordenadas:
+      easting: 398336.89
+      northing: 9751774.79
+    profundidade_medida_m: 2910.0
+    profundidade_vertical_m: 2910.0
+    peso_eq_lb_gal: 20.1
+#Rio do Peixe
+  - nome: "1-BRSA-909-PB"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 550422.93
+      northing: 9255398.57
+    profundidade_medida_m: 385.0
+    profundidade_vertical_m: 384.8
+    peso_eq_lb_gal: 20.4
+#Parecis
+  - nome: "1-BRSA-1204-MT"
+    zona_utm: 21
+    hem: "Sul"
+    coordenadas:
+      easting: 669197.61
+      northing: 8470389.38
+    profundidade_medida_m: 1500.0
+    profundidade_vertical_m: 1500.0
+    peso_eq_lb_gal: 16.1
+
+  - nome: "1-BRSA-1204-MT"
+    zona_utm: 21
+    hem: "Sul"
+    coordenadas:
+      easting: 669197.61
+      northing: 8470389.38
+    profundidade_medida_m: 3867.0
+    profundidade_vertical_m: 3867.0
+    peso_eq_lb_gal: 16.8
+
+  - nome: "1-BRSA-1204-MT"
+    zona_utm: 21
+    hem: "Sul"
+    coordenadas:
+      easting: 669197.61
+      northing: 8470389.38
+    profundidade_medida_m: 6057.0
+    profundidade_vertical_m: 6057.0
+    peso_eq_lb_gal: 21.8
+
+  - nome: "2-ANP-4-MT"
+    zona_utm: 21
+    hem: "Sul"
+    coordenadas:
+      easting: 391764.81
+      northing: 8654155.01
+    profundidade_medida_m: 1390.0
+    profundidade_vertical_m: 1390.0
+    peso_eq_lb_gal: 18.3
+
+  - nome: "2-ANP-4A-MT"
+    zona_utm: 21
+    hem: "Sul"
+    coordenadas:
+      easting: 391764.78
+      northing: 8654154.98
+    profundidade_medida_m: 1390.0
+    profundidade_vertical_m: 1390.0
+    peso_eq_lb_gal: 18.3
+#Potiguar
+  - nome: "1-BRSA-1038-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 697374.44
+      northing: 9409812.84
+    profundidade_medida_m: 370.0
+    profundidade_vertical_m: 370.0
+    peso_eq_lb_gal: 22.0
+
+  - nome: "1-BRSA-1044-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 695985.04
+      northing: 9413774.77
+    profundidade_medida_m: 910.0
+    profundidade_vertical_m: 910.0
+    peso_eq_lb_gal: 14.5
+
+  - nome: "1-BRSA-1048-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 696893.34
+      northing: 9410824.25
+    profundidade_medida_m: 895.0
+    profundidade_vertical_m: 895.0
+    peso_eq_lb_gal: 14.5
+
+  - nome: "1-BRSA-1270D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 727535.21
+      northing: 9409620.37
+    profundidade_medida_m: 1911.0
+    profundidade_vertical_m: 1861.4
+    peso_eq_lb_gal: 15.8
+
+  - nome: "1-BRSA-1335-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 731123.88
+      northing: 9407438.5
+    profundidade_medida_m: 788.0
+    profundidade_vertical_m: 788.0
+    peso_eq_lb_gal: 16.2
+
+  - nome: "1-BRSA-195-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 673573.88
+      northing: 9412342.51
+    profundidade_medida_m: 1345.0
+    profundidade_vertical_m: 122.0
+    peso_eq_lb_gal: 23.6
+
+  - nome: "1-BRSA-245-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 667269.77
+      northing: 9411641.05
+    profundidade_medida_m: 1225.0
+    profundidade_vertical_m: 1224.6
+    peso_eq_lb_gal: 16.4
+
+  - nome: "1-BRSA-276-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 706774.38
+      northing: 9404925.2
+    profundidade_medida_m: 2655.0
+    profundidade_vertical_m: 2615.9
+    peso_eq_lb_gal: 15.7
+
+  - nome: "1-BRSA-288A-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 712884.41
+      northing: 9432034.7
+    profundidade_medida_m: 2652.0
+    profundidade_vertical_m: 2652.0
+    peso_eq_lb_gal: 17.6
+
+  - nome: "1-BRSA-29-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 651034.01
+      northing: 9386720.48
+    profundidade_medida_m: 597.0
+    profundidade_vertical_m: 597.0
+    peso_eq_lb_gal: 18.5
+
+  - nome: "1-BRSA-320-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 698515.64
+      northing: 9425661.06
+    profundidade_medida_m: 1680.0
+    profundidade_vertical_m: 1680.0
+    peso_eq_lb_gal: 21.3
+
+  - nome: "1-BRSA-326-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 690289.29
+      northing: 9421759.82
+    profundidade_medida_m: 1540.0
+    profundidade_vertical_m: 1540.0
+    peso_eq_lb_gal: 27.2
+
+  - nome: "1-BRSA-351D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 625863.85
+      northing: 9401385.66
+    profundidade_medida_m: 2102.0
+    profundidade_vertical_m: 2092.7
+    peso_eq_lb_gal: 16.3
+
+  - nome: "1-BRSA-354-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 647466.77
+      northing: 9391517.4
+    profundidade_medida_m: 1437.0
+    profundidade_vertical_m: 1436.4
+    peso_eq_lb_gal: 25.3
+
+  - nome: "1-BRSA-368-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 678394.94
+      northing: 9383229.82
+    profundidade_medida_m: 1808.0
+    profundidade_vertical_m: 1806.8
+    peso_eq_lb_gal: 21.5
+
+  - nome: "1-BRSA-382D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 633455.43
+      northing: 9400436.63
+    profundidade_medida_m: 1696.0
+    profundidade_vertical_m: 1696.0
+    peso_eq_lb_gal: 14.0
+
+  - nome: "1-BRSA-382D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 633455.43
+      northing: 9400436.63
+    profundidade_medida_m: 3296.0
+    profundidade_vertical_m: 3296.0
+    peso_eq_lb_gal: 15.5
+
+  - nome: "1-BRSA-456-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 697957.65
+      northing: 9399799.97
+    profundidade_medida_m: 2650.0
+    profundidade_vertical_m: 2597.6
+    peso_eq_lb_gal: 18.6
+
+  - nome: "1-BRSA-489D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 636803.82
+      northing: 9390976.01
+    profundidade_medida_m: 3443.0
+    profundidade_vertical_m: 3417.8
+    peso_eq_lb_gal: 22.0
+
+  - nome: "1-BRSA-489D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 636803.82
+      northing: 9390976.01
+    profundidade_medida_m: 4609.0
+    profundidade_vertical_m: 4579.1
+    peso_eq_lb_gal: 21.9
+
+  - nome: "1-BRSA-511-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 696898.66
+      northing: 9420230.72
+    profundidade_medida_m: 2605.0
+    profundidade_vertical_m: 2605.0
+    peso_eq_lb_gal: 14.3
+
+  - nome: "1-BRSA-518-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 727138.37
+      northing: 9425441.71
+    profundidade_medida_m: 1396.0
+    profundidade_vertical_m: 1396.0
+    peso_eq_lb_gal: 16.7
+
+  - nome: "1-BRSA-521-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 702288.2
+      northing: 9417051.28
+    profundidade_medida_m: 2405.0
+    profundidade_vertical_m: 2405.0
+    peso_eq_lb_gal: 15.7
+
+  - nome: "1-BRSA-531-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 731892.67
+      northing: 9420360.76
+    profundidade_medida_m: 2259.0
+    profundidade_vertical_m: 2253.9
+    peso_eq_lb_gal: 15.8
+
+  - nome: "1-BRSA-544D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 673659.18
+      northing: 9380515.33
+    profundidade_medida_m: 1860.0
+    profundidade_vertical_m: 1433.8
+    peso_eq_lb_gal: 17.0
+
+  - nome: "1-BRSA-549-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 727329.57
+      northing: 9421202.96
+    profundidade_medida_m: 2292.0
+    profundidade_vertical_m: 2292.0
+    peso_eq_lb_gal: 18.7
+
+  - nome: "1-BRSA-558-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 687441.86
+      northing: 9394575.68
+    profundidade_medida_m: 2838.0
+    profundidade_vertical_m: 2821.3
+    peso_eq_lb_gal: 17.9
+
+  - nome: "1-BRSA-567-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 753165.51
+      northing: 9407066.11
+    profundidade_medida_m: 474.0
+    profundidade_vertical_m: 474.0
+    peso_eq_lb_gal: 14.5
+
+  - nome: "1-BRSA-571-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 690852.25
+      northing: 9464510.98
+    profundidade_medida_m: 994.0
+    profundidade_vertical_m: 994.0
+    peso_eq_lb_gal: 18.9
+
+  - nome: "1-BRSA-602-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 788816.39
+      northing: 9424741.22
+    profundidade_medida_m: 791.0
+    profundidade_vertical_m: 791.0
+    peso_eq_lb_gal: 17.8
+
+  - nome: "1-BRSA-673-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 649460.23
+      northing: 9390112.48
+    profundidade_medida_m: 2505.0
+    profundidade_vertical_m: 2498.0
+    peso_eq_lb_gal: 17.3
+
+  - nome: "1-BRSA-675-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 684349.66
+      northing: 9394145.97
+    profundidade_medida_m: 2227.0
+    profundidade_vertical_m: 2225.3
+    peso_eq_lb_gal: 20.2
+
+  - nome: "1-BRSA-680-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 666736.84
+      northing: 9406947.98
+    profundidade_medida_m: 2115.0
+    profundidade_vertical_m: 2109.8
+    peso_eq_lb_gal: 19.8
+
+  - nome: "1-BRSA-687-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 674035.11
+      northing: 9407297.81
+    profundidade_medida_m: 2024.0
+    profundidade_vertical_m: 2022.5
+    peso_eq_lb_gal: 12.3
+
+  - nome: "1-BRSA-753D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 633518.98
+      northing: 9398699.87
+    profundidade_medida_m: 3570.0
+    profundidade_vertical_m: 3329.2
+    peso_eq_lb_gal: 16.1
+
+  - nome: "1-BRSA-762D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 651912.06
+      northing: 9399932.89
+    profundidade_medida_m: 3351.0
+    profundidade_vertical_m: 3004.1
+    peso_eq_lb_gal: 13.7
+
+  - nome: "1-BRSA-764-CE"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 620572.31
+      northing: 9402400.31
+    profundidade_medida_m: 1742.0
+    profundidade_vertical_m: 1742.0
+    peso_eq_lb_gal: 19.1
+
+  - nome: "1-BRSA-927-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 669110.48
+      northing: 9419012.79
+    profundidade_medida_m: 1014.0
+    profundidade_vertical_m: 1013.9
+    peso_eq_lb_gal: 16.3
+
+  - nome: "1-BRSA-970-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 647095.28
+      northing: 9408016.32
+    profundidade_medida_m: 297.0
+    profundidade_vertical_m: 297.0
+    peso_eq_lb_gal: 23.4
+
+  - nome: "1-MSV-1-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 634659.86
+      northing: 9390333.49
+    profundidade_medida_m: 660.0
+    profundidade_vertical_m: 9.62
+    peso_eq_lb_gal: 20.2
+
+  - nome: "1-PTX-3-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 657061.14
+      northing: 9411845.91
+    profundidade_medida_m: 414.0
+    profundidade_vertical_m: 414.0
+    peso_eq_lb_gal: 21.4
+
+  - nome: "1-PTX-4-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 648796.79
+      northing: 9415512.93
+    profundidade_medida_m: 235.0
+    profundidade_vertical_m: 235.0
+    peso_eq_lb_gal: 18.2
+
+  - nome: "1-RTL-1-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 715034.77
+      northing: 9403022.3
+    profundidade_medida_m: 884.0
+    profundidade_vertical_m: 9.62
+    peso_eq_lb_gal: 19.8
+
+  - nome: "1-TCPT-1-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 700971.52
+      northing: 9406894.02
+    profundidade_medida_m: 501.0
+    profundidade_vertical_m: 501.0
+    peso_eq_lb_gal: 18.6
+
+  - nome: "1-VSP-1-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 712866.26
+      northing: 9414957.32
+    profundidade_medida_m: 320.0
+    profundidade_vertical_m: 9.62
+    peso_eq_lb_gal: 18.9
+
+  - nome: "3-BRSA-1062-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 766732.75
+      northing: 9416710.09
+    profundidade_medida_m: 192.0
+    profundidade_vertical_m: 192.0
+    peso_eq_lb_gal: 15.8
+
+  - nome: "3-BRSA-1068-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 638095.83
+      northing: 9391155.3
+    profundidade_medida_m: 680.0
+    profundidade_vertical_m: 680.0
+    peso_eq_lb_gal: 21.5
+
+  - nome: "3-BRSA-1068-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 638095.83
+      northing: 9391155.3
+    profundidade_medida_m: 3404.0
+    profundidade_vertical_m: 3404.0
+    peso_eq_lb_gal: 20.4
+
+  - nome: "3-BRSA-1074-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 681883.64
+      northing: 9392980.68
+    profundidade_medida_m: 410.0
+    profundidade_vertical_m: 410.0
+    peso_eq_lb_gal: 18.8
+
+  - nome: "3-BRSA-1097-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 700318.57
+      northing: 9409782.14
+    profundidade_medida_m: 345.0
+    profundidade_vertical_m: 345.0
+    peso_eq_lb_gal: 16.6
+
+  - nome: "3-BRSA-1147-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 718784.18
+      northing: 9403174.9
+    profundidade_medida_m: 451.0
+    profundidade_vertical_m: 451.0
+    peso_eq_lb_gal: 19.3
+
+  - nome: "3-BRSA-1149-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 767211.77
+      northing: 9416360.99
+    profundidade_medida_m: 200.0
+    profundidade_vertical_m: 200.0
+    peso_eq_lb_gal: 25.7
+
+  - nome: "3-BRSA-1199-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 687467.31
+      northing: 9429050.9
+    profundidade_medida_m: 367.0
+    profundidade_vertical_m: 367.0
+    peso_eq_lb_gal: 23.7
+
+  - nome: "3-BRSA-1340-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 736317.0
+      northing: 9407159.01
+    profundidade_medida_m: 511.0
+    profundidade_vertical_m: 511.0
+    peso_eq_lb_gal: 20.1
+
+  - nome: "3-BRSA-1364-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 729018.33
+      northing: 9400450.23
+    profundidade_medida_m: 449.0
+    profundidade_vertical_m: 449.0
+    peso_eq_lb_gal: 27.8
+
+  - nome: "3-BRSA-167-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 650994.91
+      northing: 9391133.09
+    profundidade_medida_m: 1354.0
+    profundidade_vertical_m: 1354.0
+    peso_eq_lb_gal: 17.1
+
+  - nome: "3-BRSA-330-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 681696.13
+      northing: 9417164.4
+    profundidade_medida_m: 310.0
+    profundidade_vertical_m: 310.0
+    peso_eq_lb_gal: 16.9
+
+  - nome: "3-BRSA-333-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 676671.58
+      northing: 9415636.68
+    profundidade_medida_m: 1233.0
+    profundidade_vertical_m: 1233.0
+    peso_eq_lb_gal: 36.8
+
+  - nome: "3-BRSA-345-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 709191.89
+      northing: 9436196.08
+    profundidade_medida_m: 2121.0
+    profundidade_vertical_m: 2118.8
+    peso_eq_lb_gal: 13.1
+
+  - nome: "3-BRSA-393-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 712518.07
+      northing: 9436518.0
+    profundidade_medida_m: 1989.0
+    profundidade_vertical_m: 1989.0
+    peso_eq_lb_gal: 18.2
+
+  - nome: "3-BRSA-432-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 713212.05
+      northing: 9437402.53
+    profundidade_medida_m: 1973.0
+    profundidade_vertical_m: 1972.7
+    peso_eq_lb_gal: 14.9
+
+  - nome: "3-BRSA-434-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 679543.97
+      northing: 9383289.65
+    profundidade_medida_m: 921.0
+    profundidade_vertical_m: 921.0
+    peso_eq_lb_gal: 20.0
+
+  - nome: "3-BRSA-473-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 712407.1
+      northing: 9431817.36
+    profundidade_medida_m: 2967.0
+    profundidade_vertical_m: 2965.5
+    peso_eq_lb_gal: 15.0
+
+  - nome: "3-BRSA-477-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 676915.71
+      northing: 9382948.76
+    profundidade_medida_m: 1025.0
+    profundidade_vertical_m: 1023.8
+    peso_eq_lb_gal: 21.6
+
+  - nome: "3-BRSA-525D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 638609.4
+      northing: 9397411.41
+    profundidade_medida_m: 3528.0
+    profundidade_vertical_m: 3250.1
+    peso_eq_lb_gal: 15.6
+
+  - nome: "3-BRSA-575-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 746970.36
+      northing: 9403968.09
+    profundidade_medida_m: 441.0
+    profundidade_vertical_m: 441.0
+    peso_eq_lb_gal: 19.3
+
+  - nome: "3-BRSA-608-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 698794.0
+      northing: 9400367.13
+    profundidade_medida_m: 2358.0
+    profundidade_vertical_m: 2304.5
+    peso_eq_lb_gal: 18.5
+
+  - nome: "3-BRSA-630-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 629891.12
+      northing: 9401621.64
+    profundidade_medida_m: 2240.0
+    profundidade_vertical_m: 2239.8
+    peso_eq_lb_gal: 14.6
+
+  - nome: "3-BRSA-648-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 686012.68
+      northing: 9417657.47
+    profundidade_medida_m: 1561.0
+    profundidade_vertical_m: 1560.7
+    peso_eq_lb_gal: 22.3
+
+  - nome: "3-BRSA-649-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 702262.73
+      northing: 9415514.13
+    profundidade_medida_m: 1365.0
+    profundidade_vertical_m: 1364.9
+    peso_eq_lb_gal: 18.3
+
+  - nome: "3-BRSA-649-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 702262.73
+      northing: 9415514.13
+    profundidade_medida_m: 2262.0
+    profundidade_vertical_m: 2258.0
+    peso_eq_lb_gal: 16.7
+
+  - nome: "3-BRSA-651-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 692384.5
+      northing: 9419045.22
+    profundidade_medida_m: 1941.0
+    profundidade_vertical_m: 1939.8
+    peso_eq_lb_gal: 21.3
+
+  - nome: "3-BRSA-695-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 702342.18
+      northing: 9417901.33
+    profundidade_medida_m: 2876.0
+    profundidade_vertical_m: 2857.4
+    peso_eq_lb_gal: 15.0
+
+  - nome: "3-BRSA-700D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 628476.75
+      northing: 9401249.15
+    profundidade_medida_m: 2657.0
+    profundidade_vertical_m: 2435.4
+    peso_eq_lb_gal: 17.5
+
+  - nome: "3-BRSA-705-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 717129.13
+      northing: 9441612.97
+    profundidade_medida_m: 1942.0
+    profundidade_vertical_m: 1940.7
+    peso_eq_lb_gal: 16.6
+
+  - nome: "3-BRSA-725-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 698719.64
+      northing: 9426647.53
+    profundidade_medida_m: 2333.0
+    profundidade_vertical_m: 2333.0
+    peso_eq_lb_gal: 16.6
+
+  - nome: "3-BRSA-745-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 726149.81
+      northing: 9420888.22
+    profundidade_medida_m: 2485.0
+    profundidade_vertical_m: 2485.0
+    peso_eq_lb_gal: 14.9
+
+  - nome: "3-BRSA-759-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 731084.9
+      northing: 9422313.19
+    profundidade_medida_m: 2818.0
+    profundidade_vertical_m: 2811.6
+    peso_eq_lb_gal: 11.5
+
+  - nome: "3-BRSA-775-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 695458.84
+      northing: 9398124.85
+    profundidade_medida_m: 2110.0
+    profundidade_vertical_m: 2055.3
+    peso_eq_lb_gal: 19.8
+
+  - nome: "3-BRSA-776-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 642722.68
+      northing: 9395757.96
+    profundidade_medida_m: 3702.0
+    profundidade_vertical_m: 3701.8
+    peso_eq_lb_gal: 15.0
+
+  - nome: "3-BRSA-776-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 642722.68
+      northing: 9395757.96
+    profundidade_medida_m: 4455.0
+    profundidade_vertical_m: 4454.7
+    peso_eq_lb_gal: 19.0
+
+  - nome: "3-BRSA-800-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 715715.55
+      northing: 9441895.41
+    profundidade_medida_m: 1897.0
+    profundidade_vertical_m: 1897.0
+    peso_eq_lb_gal: 15.4
+
+  - nome: "3-BRSA-822-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 786494.31
+      northing: 9424176.5
+    profundidade_medida_m: 706.0
+    profundidade_vertical_m: 706.0
+    peso_eq_lb_gal: 14.5
+
+  - nome: "3-BRSA-825D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 635766.29
+      northing: 9399241.21
+    profundidade_medida_m: 3174.0
+    profundidade_vertical_m: 3092.0
+    peso_eq_lb_gal: 17.5
+
+  - nome: "3-BRSA-827-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 699418.97
+      northing: 9426173.22
+    profundidade_medida_m: 1865.0
+    profundidade_vertical_m: 1864.9
+    peso_eq_lb_gal: 19.5
+
+  - nome: "3-BRSA-834-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 733093.75
+      northing: 9423191.82
+    profundidade_medida_m: 2124.0
+    profundidade_vertical_m: 2122.7
+    peso_eq_lb_gal: 14.8
+
+  - nome: "3-BRSA-842-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 711805.85
+      northing: 9435999.5
+    profundidade_medida_m: 1999.0
+    profundidade_vertical_m: 1999.0
+    peso_eq_lb_gal: 14.0
+
+  - nome: "3-BRSA-844D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 656949.8
+      northing: 9388716.39
+    profundidade_medida_m: 2135.0
+    profundidade_vertical_m: 1967.2
+    peso_eq_lb_gal: 16.6
+
+  - nome: "3-BRSA-857-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 711005.44
+      northing: 9437705.72
+    profundidade_medida_m: 2121.0
+    profundidade_vertical_m: 2121.0
+    peso_eq_lb_gal: 13.7
+
+  - nome: "3-BRSA-859D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 632882.47
+      northing: 9397419.67
+    profundidade_medida_m: 2500.0
+    profundidade_vertical_m: 2500.0
+    peso_eq_lb_gal: 22.0
+
+  - nome: "3-BRSA-859D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 632882.47
+      northing: 9397419.67
+    profundidade_medida_m: 4152.0
+    profundidade_vertical_m: 4147.5
+    peso_eq_lb_gal: 20.0
+
+  - nome: "3-BRSA-874-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 670632.58
+      northing: 9381243.01
+    profundidade_medida_m: 907.0
+    profundidade_vertical_m: 907.0
+    peso_eq_lb_gal: 9.3
+
+  - nome: "3-BRSA-893-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 651108.75
+      northing: 9399488.74
+    profundidade_medida_m: 2858.0
+    profundidade_vertical_m: 2855.5
+    peso_eq_lb_gal: 15.0
+
+  - nome: "3-BRSA-913D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 626045.05
+      northing: 9399615.38
+    profundidade_medida_m: 2869.0
+    profundidade_vertical_m: 2855.8
+    peso_eq_lb_gal: 22.9
+
+  - nome: "3-BRSA-979-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 682668.16
+      northing: 9394183.42
+    profundidade_medida_m: 1633.0
+    profundidade_vertical_m: 1633.0
+    peso_eq_lb_gal: 20.4
+
+  - nome: "4-BRSA-1111-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 677159.62
+      northing: 9383380.6
+    profundidade_medida_m: 1359.0
+    profundidade_vertical_m: 1357.2
+    peso_eq_lb_gal: 18.0
+
+  - nome: "4-BRSA-1169D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 639584.51
+      northing: 9398218.39
+    profundidade_medida_m: 39.0
+    profundidade_vertical_m: 39.0
+    peso_eq_lb_gal: 18.0
+
+  - nome: "4-BRSA-1169D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 639584.51
+      northing: 9398218.39
+    profundidade_medida_m: 1002.0
+    profundidade_vertical_m: 1002.0
+    peso_eq_lb_gal: 18.0
+
+  - nome: "4-BRSA-537-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 694448.08
+      northing: 9398552.68
+    profundidade_medida_m: 2677.0
+    profundidade_vertical_m: 2635.8
+    peso_eq_lb_gal: 19.0
+
+  - nome: "4-BRSA-634D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 629709.45
+      northing: 9401151.55
+    profundidade_medida_m: 2358.0
+    profundidade_vertical_m: 2348.8
+    peso_eq_lb_gal: 15.4
+
+  - nome: "4-BRSA-814D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 627415.63
+      northing: 9399502.5
+    profundidade_medida_m: 3287.0
+    profundidade_vertical_m: 3194.7
+    peso_eq_lb_gal: 13.1
+
+  - nome: "4-BRSA-837D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 627147.67
+      northing: 9400653.29
+    profundidade_medida_m: 2621.0
+    profundidade_vertical_m: 2551.3
+    peso_eq_lb_gal: 20.6
+
+  - nome: "4-BRSA-937D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 628952.27
+      northing: 9400565.88
+    profundidade_medida_m: 1090.0
+    profundidade_vertical_m: 1090.0
+    peso_eq_lb_gal: 15.2
+
+  - nome: "4-BRSA-953-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 711439.22
+      northing: 9433702.12
+    profundidade_medida_m: 745.0
+    profundidade_vertical_m: 745.0
+    peso_eq_lb_gal: 19.4
+
+  - nome: "6-BRSA-105D-RN"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 640475.04
+      northing: 9396874.03
+    profundidade_medida_m: 4095.0
+    profundidade_vertical_m: 4068.3
+    peso_eq_lb_gal: 15.6
+#Espírito Santo
+  - nome: "6-BRSA-1167-ES"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 412537.61
+      northing: 7831109.9
+    profundidade_medida_m: 1016.0
+    profundidade_vertical_m: 1016.0
+    peso_eq_lb_gal: 15.3
+
+  - nome: "6-BRSA-1167-ES"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 412537.61
+      northing: 7831109.9
+    profundidade_medida_m: 2302.0
+    profundidade_vertical_m: 2302.0
+    peso_eq_lb_gal: 15.3
+
+  - nome: "1-BIO-1-ES"
+    zona_utm: 24
+    hem: "Sul"
+    coordenadas:
+      easting: 420941.99
+      northing: 420941.99
+    profundidade_medida_m: 1331.0
+    profundidade_vertical_m: 1331.0
+    peso_eq_lb_gal: 15.1
