@@ -750,6 +750,40 @@ def tensoes():
             st.rerun()
 
 
+def interpolar_direcao_sh(df_ref: pd.DataFrame, profundidades: pd.Series) -> pd.Series:
+    df_ref = df_ref.copy()
+
+    df_ref["Profundidade (m)"] = pd.to_numeric(df_ref["Profundidade (m)"], errors="coerce")
+    df_ref["Direção SH"] = pd.to_numeric(df_ref["Direção SH"], errors="coerce")
+
+    df_ref = (
+        df_ref
+        .dropna(subset=["Profundidade (m)", "Direção SH"])
+        .sort_values("Profundidade (m)")
+        .drop_duplicates(subset=["Profundidade (m)"], keep="last")
+    )
+
+    prof = pd.to_numeric(profundidades, errors="coerce").to_numpy(dtype=float)
+
+    if df_ref.empty:
+        return pd.Series(np.zeros(len(prof)), index=profundidades.index)
+
+    if len(df_ref) == 1:
+        valor = float(df_ref["Direção SH"].iloc[0]) % 360
+        return pd.Series(np.full(len(prof), valor), index=profundidades.index)
+
+    x = df_ref["Profundidade (m)"].to_numpy(dtype=float)
+    ang = np.radians(df_ref["Direção SH"].to_numpy(dtype=float) % 360)
+
+    sin_i = np.interp(prof, x, np.sin(ang))
+    cos_i = np.interp(prof, x, np.cos(ang))
+
+    direcao = np.degrees(np.arctan2(sin_i, cos_i)) % 360
+
+    return pd.Series(direcao, index=profundidades.index)
+
+
+
 @st.dialog("Relação das tensões horizontais", width="large")
 def rel_hor():
     with st.container(border=True):
@@ -2179,6 +2213,173 @@ def _ler_trajetoria_do_xlsm(wb, modo: str) -> pd.DataFrame:
     return df
 
 
+def _calcular_trajetoria_min_curvatura(df_traj: pd.DataFrame) -> pd.DataFrame:
+    df = df_traj.copy()
+
+    df = df.rename(columns={
+        "Profundidade": "MD",
+        "Inc (°)": "Inc",
+        "Azi (°)": "Azi"
+    })
+
+    colunas_req = ["MD", "Inc", "Azi"]
+    faltantes = [c for c in colunas_req if c not in df.columns]
+    if faltantes:
+        raise ValueError(f"Colunas ausentes na trajetória: {', '.join(faltantes)}")
+
+    for c in colunas_req:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    df = df.dropna(subset=colunas_req).sort_values("MD").reset_index(drop=True)
+
+    if df.empty:
+        raise ValueError("Trajetória vazia após limpeza dos dados.")
+
+    if (df["MD"].diff().fillna(1) <= 0).any():
+        raise ValueError("A coluna MD da trajetória deve ser estritamente crescente.")
+
+    MD = df["MD"].to_numpy(dtype=float)
+    Inc = np.radians(df["Inc"].to_numpy(dtype=float))
+    Azi = np.radians(df["Azi"].to_numpy(dtype=float))
+
+    Easting = [0.0]
+    Northing = [0.0]
+    TVD = [0.0]
+    DLS_list = []
+
+    for i in range(1, len(MD)):
+        dMD = MD[i] - MD[i - 1]
+
+        cosDL = (
+            np.sin(Inc[i - 1]) * np.sin(Inc[i]) * np.cos(Azi[i] - Azi[i - 1])
+            + np.cos(Inc[i - 1]) * np.cos(Inc[i])
+        )
+        cosDL = np.clip(cosDL, -1.0, 1.0)
+
+        DL = np.arccos(cosDL)
+        RF = 1.0 if DL < 1e-8 else (2.0 / DL) * np.tan(DL / 2.0)
+
+        DLS = np.degrees(DL) * 30.0 / dMD if dMD != 0 else 0.0
+        DLS_list.append(float(DLS))
+
+        dN = 0.5 * dMD * (
+            np.sin(Inc[i - 1]) * np.cos(Azi[i - 1])
+            + np.sin(Inc[i]) * np.cos(Azi[i])
+        ) * RF
+
+        dE = 0.5 * dMD * (
+            np.sin(Inc[i - 1]) * np.sin(Azi[i - 1])
+            + np.sin(Inc[i]) * np.sin(Azi[i])
+        ) * RF
+
+        dTVD = 0.5 * dMD * (
+            np.cos(Inc[i - 1]) + np.cos(Inc[i])
+        ) * RF
+
+        Easting.append(Easting[-1] + dE)
+        Northing.append(Northing[-1] + dN)
+        TVD.append(TVD[-1] + dTVD)
+
+    East_arr = np.asarray(Easting, dtype=float)
+    North_arr = np.asarray(Northing, dtype=float)
+    afast_h = np.sqrt(East_arr ** 2 + North_arr ** 2)
+
+    return pd.DataFrame({
+        "MD": MD,
+        "Inclinação (°)": np.degrees(Inc),
+        "Azimute (°)": np.degrees(Azi),
+        "Easting": Easting,
+        "Northing": Northing,
+        "TVD": TVD,
+        "Dogleg Severity (°/30m)": [0.0] + DLS_list,
+        "Afastamento Horizontal (m)": afast_h,
+    })
+
+
+def _limitar_perfilagem_ao_tvd_final(
+    df_full: pd.DataFrame,
+    tvd_final: float,
+    col_tvd: str = "Profundidade"
+) -> pd.DataFrame:
+    df = df_full.copy()
+    df.columns = [str(c).strip() for c in df.columns]
+
+    if col_tvd not in df.columns:
+        raise ValueError(f"A coluna '{col_tvd}' não existe na aba Perfilagens.")
+
+    df[col_tvd] = pd.to_numeric(df[col_tvd], errors="coerce")
+    df = df.dropna(subset=[col_tvd]).sort_values(col_tvd).reset_index(drop=True)
+
+    if df.empty:
+        raise ValueError("A aba Perfilagens ficou vazia após limpar a coluna de profundidade.")
+
+    tvd_final = float(tvd_final)
+
+    if tvd_final <= df[col_tvd].min():
+        raise ValueError(
+            f"O TVD final do poço ({tvd_final:.2f} m) é menor ou igual ao início da perfilagem "
+            f"({df[col_tvd].min():.2f} m)."
+        )
+
+    # Se a perfilagem já termina antes do poço, não corta nada
+    if df[col_tvd].max() <= tvd_final:
+        return df.reset_index(drop=True)
+
+    # Tenta converter colunas numéricas que vieram como texto
+    for col in df.columns:
+        if col == col_tvd:
+            continue
+
+        serie_num = pd.to_numeric(df[col], errors="coerce")
+
+        # Só substitui se houver pelo menos algum valor numérico real
+        if serie_num.notna().sum() > 0:
+            df[col] = serie_num
+
+    df_cortado = df[df[col_tvd] <= tvd_final].copy()
+
+    # Garante uma linha exatamente no TVD final
+    prof_ultima = float(df_cortado[col_tvd].iloc[-1])
+
+    if not np.isclose(prof_ultima, tvd_final):
+        linha_final = {}
+
+        for col in df.columns:
+            if col == col_tvd:
+                linha_final[col] = tvd_final
+
+            elif pd.api.types.is_numeric_dtype(df[col]):
+                df_valid = df[[col_tvd, col]].dropna()
+
+                if len(df_valid) >= 2:
+                    linha_final[col] = float(np.interp(
+                        tvd_final,
+                        df_valid[col_tvd].to_numpy(dtype=float),
+                        df_valid[col].to_numpy(dtype=float)
+                    ))
+                elif len(df_valid) == 1:
+                    linha_final[col] = df_valid[col].iloc[0]
+                else:
+                    linha_final[col] = np.nan
+
+            else:
+                valores_anteriores = df.loc[df[col_tvd] <= tvd_final, col].dropna()
+                linha_final[col] = (
+                    valores_anteriores.iloc[-1]
+                    if not valores_anteriores.empty
+                    else np.nan
+                )
+
+        df_cortado = pd.concat(
+            [df_cortado, pd.DataFrame([linha_final])],
+            ignore_index=True
+        )
+
+    df_cortado = df_cortado.sort_values(col_tvd).reset_index(drop=True)
+
+    return df_cortado
+
+
 def _gerar_df_interp_a_partir_df1_df2(df1: pd.DataFrame, df2: pd.DataFrame) -> pd.DataFrame:
     """
     Replica a lógica do seu direcional(): interpola Inc/Azi da df2 para as profundidades de df1.
@@ -2218,7 +2419,9 @@ def _gerar_df_interp_a_partir_df1_df2(df1: pd.DataFrame, df2: pd.DataFrame) -> p
         md1 = md1_original.copy()
 
     inc_interp = np.interp(md1, md2_sorted, inc2_sorted)
-    azi_interp = np.interp(md1, md2_sorted, azi2_sorted)
+    idx = np.searchsorted(md2_sorted, md1, side="right") - 1
+    idx = np.clip(idx, 0, len(azi2_sorted) - 1)
+    azi_interp = azi2_sorted[idx]
 
     df_interp = pd.DataFrame({
         "Profundidade": md1,
@@ -7017,7 +7220,7 @@ def gerar_relatorio_pdf():
                     left=left_margin,
                     right=right_margin,
                     top=y,
-                    bottom=footer_y + 20,
+                    bottom=footer_y,
                     titulo=None,
                     scale=1.5
                 )
@@ -8252,9 +8455,68 @@ def geo_page():
 
                         # Carregar os dados da aba selecionada
                         df_full = pd.read_excel(uploaded_file, sheet_name=sheet_name)
+                        df_full.columns = [str(c).strip() for c in df_full.columns]
 
-                        # Aplicar o intervalo (step)
+                        # Colunas obrigatórias
+                        colunas_obrigatorias = [
+                            "Profundidade",
+                            "MD",
+                            "Perfil de densidade",
+                            "Perfil sônico",
+                            "Perfil Raio Gama"
+                        ]
+
+                        colunas_faltantes = [c for c in colunas_obrigatorias if c not in df_full.columns]
+
+                        if colunas_faltantes:
+                            st.error(
+                                "❌ O arquivo enviado não contém todas as colunas obrigatórias.\n\n"
+                                f"**Colunas ausentes:** {', '.join(colunas_faltantes)}"
+                            )
+                            st.stop()
+
+                        # Lê a trajetória antes de cortar a perfilagem
+                        df2 = _ler_trajetoria_do_xlsm(
+                            st.session_state.wb,
+                            st.session_state.traj_modo
+                        )
+                        st.session_state.df2 = df2
+
+                        # Calcula a trajetória por mínima curvatura
+                        df_out_traj = _calcular_trajetoria_min_curvatura(df2)
+                        st.session_state.df_out_traj = df_out_traj.copy()
+
+                        # TVD final do poço
+                        tvd_final_poco = float(df_out_traj["TVD"].iloc[-1])
+                        st.session_state.tvd_final_poco = tvd_final_poco
+
+                        linhas_antes = len(df_full)
+
+                        # Limita a perfilagem ao TVD final do poço
+                        df_full = _limitar_perfilagem_ao_tvd_final(
+                            df_full,
+                            tvd_final=tvd_final_poco,
+                            col_tvd="Profundidade"
+                        )
+
+                        linhas_depois = len(df_full)
+
+                        # Aplicar o intervalo step depois do corte
                         df = df_full.iloc[::step].reset_index(drop=True)
+
+                        # Garantir que o último registro cortado está no df
+                        if not df_full.iloc[-1].equals(df.iloc[-1]):
+                            df = pd.concat([df, df_full.iloc[[-1]]], ignore_index=True)
+
+                        st.session_state.df1 = df
+
+                        with col2:
+                            st.write("")
+                            st.write("")
+                            st.markdown(f"**Total de linhas carregadas:** {len(df)}")
+
+                        st.write("Dados Importados:")
+                        st.dataframe(df, use_container_width=True, hide_index=True)
 
                         # Garantir que o último registro original está no df
                         if not df_full.iloc[-1].equals(df.iloc[-1]):
@@ -8281,16 +8543,6 @@ def geo_page():
                             st.stop()
                         else:
                             st.session_state.df1 = df
-
-                        # Atualiza a segunda coluna com a contagem de linhas
-                        with col2:
-                            st.write("")
-                            st.write("")
-                            st.markdown(f"**Total de linhas carregadas:** {len(df)}")
-
-                        # Mostrar a tabela resultante
-                        st.write("Dados Importados:")
-                        st.dataframe(df, use_container_width=True, hide_index=True)
 
                     except Exception as e:
                         st.error(f"Erro ao processar o arquivo: {e}")
@@ -8367,13 +8619,17 @@ def geo_page():
                         st.session_state.df_eventos = pd.DataFrame(columns=["MD Inicial", "MD Final", "Evento"])
 
                     try:
-                        # 1) lê trajetória do próprio XLSM obrigatório
-                        df2 = _ler_trajetoria_do_xlsm(st.session_state.wb, st.session_state.traj_modo)
-                        st.session_state.df2 = df2
+                        if "df2" not in st.session_state or not isinstance(st.session_state.df2, pd.DataFrame):
+                            df2 = _ler_trajetoria_do_xlsm(
+                                st.session_state.wb,
+                                st.session_state.traj_modo
+                            )
+                            st.session_state.df2 = df2
 
-                        # 2) gera df_interp imediatamente
-                        st.session_state.df_interp = _gerar_df_interp_a_partir_df1_df2(st.session_state.df1,
-                                                                                       st.session_state.df2)
+                        st.session_state.df_interp = _gerar_df_interp_a_partir_df1_df2(
+                            st.session_state.df1,
+                            st.session_state.df2
+                        )
 
                     except Exception as e:
                         st.error(f"Não foi possível carregar/interpolar trajetória pela aba 'Trajetória': {e}")
@@ -11269,7 +11525,6 @@ def geo_page():
         with tb[1]:
             if uploaded_file:
                 try:
-                    st.dataframe(st.session_state.df_gfs, use_container_width=True, hide_index=True)
                     st.dataframe(df_pp, use_container_width=True, hide_index=True)
                     st.dataframe(st.session_state.df_perm_nao_perm, use_container_width=True)
                 except Exception as e:
@@ -12030,9 +12285,10 @@ def geo_page():
                             linha_extrapolada = pd.Series(False, index=df.index)
 
                         if "suavi_s" not in st.session_state:
-                            st.session_state.suavi_s = False
+                            st.session_state.suavi_s = True
                         if st.session_state.suavi_s:
                             sonico = suavizar(profundidade, sonico)
+                            densidade = suavizar(profundidade, densidade)
 
                         df_tvp = pd.DataFrame({
                             'Profundidade (m)': profundidade,
@@ -12081,7 +12337,7 @@ def geo_page():
                                             df_pp,
                                             st.session_state.tise,
                                             on="Profundidade (m)",
-                                            direction="backward"  # pega o valor anterior ou igual
+                                            direction="backward"
                                         )
                                         dir_H = df_pp['Direção SH']
                                         dir_h = df_pp['Direção SH'] + 90
@@ -12145,6 +12401,7 @@ def geo_page():
                                 "suav_tsb": False,
                                 "suav_csa": False,
                                 "suav_csb": False,
+                                "suavi_s": True,
                             }
 
                             PLOT_ALL_TRUE = {
@@ -12215,9 +12472,9 @@ def geo_page():
                                     ],
                                 ),
                                 (
-                                    "##### Suavizar Perfil Sônico",
+                                    "##### Suavizar Perfilagens",
                                     [
-                                        ("Suavizar Sônico", "suavi_s", False),
+                                        ("Perfis suavizados", "suavi_s", True),
                                     ],
                                 ),
                             ]
@@ -12558,40 +12815,40 @@ def geo_page():
                                         df_tvp.insert(
                                             loc=7,
                                             column='DTS',
-                                            value=((1 / (((0.8042 * (
+                                            value=round(((1 / (((0.8042 * (
                                                     ((1000000 / df_tvp['Perfil sônico (µs/pé)']) / 3.281) / 1000)) -
-                                                          0.8559) * 1000)) * 1000000) / 3.281
+                                                          0.8559) * 1000)) * 1000000) / 3.281,2)
                                         )
 
                                         df_tvp.insert(
                                             loc=8,
                                             column='Poisson',
-                                            value=(0.5 * (df_tvp['DTS'] / df_tvp['Perfil sônico (µs/pé)']) ** 2 - 1) / (
-                                                    (df_tvp['DTS'] / df_tvp['Perfil sônico (µs/pé)']) ** 2 - 1)
+                                            value=round((0.5 * (df_tvp['DTS'] / df_tvp['Perfil sônico (µs/pé)']) ** 2 - 1) / (
+                                                    (df_tvp['DTS'] / df_tvp['Perfil sônico (µs/pé)']) ** 2 - 1),2)
                                         )
                                         if st.session_state.ucs == 'Lacy':
                                             df_tvp.insert(
                                                 loc=9,
                                                 column='G dinam (MMpsi)',
-                                                value=(1.34 * 10 ** 10 * df_tvp['Perfil de densidade (g/cm³)'] / (
-                                                        df_tvp['DTS'] ** 2)) / 10 ** 6
+                                                value=round((1.34 * 10 ** 10 * df_tvp['Perfil de densidade (g/cm³)'] / (
+                                                        df_tvp['DTS'] ** 2)) / 10 ** 6,2)
                                             )
                                             df_tvp.insert(
                                                 loc=10,
                                                 column='E dinâmico (MMpsi)',
-                                                value=2 * df_tvp['G dinam (MMpsi)'] * (1 + df_tvp['Poisson'])
+                                                value=round(2 * df_tvp['G dinam (MMpsi)'] * (1 + df_tvp['Poisson']),2)
                                             )
                                             df_tvp.insert(
                                                 loc=11,
                                                 column='E estático (MMpsi)',
-                                                value=0.018 * (df_tvp['E dinâmico (MMpsi)'] ** 2) + 0.422 * df_tvp[
-                                                    'E dinâmico (MMpsi)']
+                                                value=round(0.018 * (df_tvp['E dinâmico (MMpsi)'] ** 2) + 0.422 * df_tvp[
+                                                    'E dinâmico (MMpsi)'],2)
                                             )
                                             df_tvp.insert(
                                                 loc=12,
                                                 column='UCS (psi)',
-                                                value=(0.2787 * df_tvp['E estático (MMpsi)'] ** 2 + 2.458 * df_tvp[
-                                                    'E estático (MMpsi)']) * 1000
+                                                value=round((0.2787 * df_tvp['E estático (MMpsi)'] ** 2 + 2.458 * df_tvp[
+                                                    'E estático (MMpsi)']) * 1000,2)
                                             )
                                         else:
                                             df_tvp.insert(
@@ -12602,17 +12859,17 @@ def geo_page():
                                             df_tvp.insert(
                                                 loc=10,
                                                 column='UCS (psi)',
-                                                value=145.0377 * 1.9e-20 * (
+                                                value=round(145.0377 * 1.9e-20 * (
                                                         1000 * df_tvp['Perfil de densidade (g/cm³)']) ** 2 * (
                                                               304800 / df_tvp['Perfil sônico (µs/pé)']) ** 4 *
                                                       ((1 + df_tvp['Poisson']) / (1 - df_tvp['Poisson'])) ** 2 * (
                                                               1 - 2 * df_tvp['Poisson']) * (
-                                                              1 + 0.79 * df_tvp['Vsh'])
+                                                              1 + 0.79 * df_tvp['Vsh']),2)
                                             )
                                         # Calcula So original
+                                        #PRECISA SER EM RADIANOS ?
                                         df_tvp["So (psi)"] = (df_tvp['UCS (psi)'] *
-                                                              (1 - np.sin(np.radians(st.session_state.phi)))) / \
-                                                             (2 * np.cos(np.radians(st.session_state.phi)))
+                                                              (1 - np.sin(np.radians(st.session_state.phi)))) / (2 * np.cos(np.radians(st.session_state.phi)))
 
                                         # Se existir dados de litologia, substitui intervalos
                                         if "dados_lito" in st.session_state and not st.session_state.dados_lito.empty:
@@ -12646,67 +12903,73 @@ def geo_page():
                                             rel_sh = df_tvp["SH% Sobrecarga"].fillna(0.61)
                                             rel_shmin = df_tvp["Sh% Sobrecarga"].fillna(0.6)
 
-                                            r1 = rel_sh * df_tvp['Gradiente de Sobrecarga (lb/gal)']
-                                            r2 = rel_shmin * df_tvp['Gradiente de Sobrecarga (lb/gal)']
+                                            r1 = rel_sh * df_tvp['Gradiente de Sobrecarga (lb/gal)'] * 0.1704 * df_tvp["Profundidade (m)"]
+                                            r2 = rel_shmin * df_tvp['Gradiente de Sobrecarga (lb/gal)'] * 0.1704 * df_tvp["Profundidade (m)"]
                                         else:
-                                            r1 = 0.61 * df_tvp['Gradiente de Sobrecarga (lb/gal)']
-                                            r2 = 0.6 * df_tvp['Gradiente de Sobrecarga (lb/gal)']
+                                            r1 = 0.61 * df_tvp['Gradiente de Sobrecarga (lb/gal)'] * 0.1704 * df_tvp["Profundidade (m)"]
+                                            r2 = 0.6 * df_tvp['Gradiente de Sobrecarga (lb/gal)'] * 0.1704 * df_tvp["Profundidade (m)"]
 
                                         # Inserindo a coluna no DataFrame
                                         df_tvp.insert(
                                             loc=df_tvp.columns.get_loc('So (psi)') + 1,
-                                            column='SH (lb/gal)',
-                                            value=r1
+                                            column='SH (psi)',
+                                            value=round(r1,2)
                                         )
 
                                         df_tvp.insert(
-                                            loc=df_tvp.columns.get_loc('SH (lb/gal)') + 1,
+                                            loc=df_tvp.columns.get_loc('SH (psi)') + 1,
                                             column='Direção SH',
                                             value=dir_H
                                         )
 
                                         df_tvp.insert(
                                             loc=df_tvp.columns.get_loc('Direção SH') + 1,
-                                            column='Sh (lb/gal)',
-                                            value=r2
+                                            column='Sh (psi)',
+                                            value=round(r2,2)
                                         )
 
                                         df_tvp.insert(
-                                            loc=df_tvp.columns.get_loc('Sh (lb/gal)') + 1,
+                                            loc=df_tvp.columns.get_loc('Sh (psi)') + 1,
                                             column='Direção Sh',
                                             value=dir_h
                                         )
 
-                                        #Eixos invertidos, por isso foi somado 90°
-
                                         df_tvp.insert(
                                             loc=df_tvp.columns.get_loc('Direção Sh') + 1,
+                                            column='Sv (psi)',
+                                            value=df_tvp['Gradiente de Sobrecarga (lb/gal)'] * 0.1704 * df_tvp['Profundidade (m)']
+                                        )
+
+                                        #Eixos invertidos, por isso foi somado 90°
+
+                                        lxxl = np.cos(np.radians(df_tvp['Azi']- df_tvp['Direção SH'])) * np.cos(np.radians(df_tvp['Inc']))
+                                        lyxl = -np.sin(np.radians(df_tvp['Azi']- df_tvp['Direção SH']))
+                                        lzxl = np.cos(np.radians(df_tvp['Azi']- df_tvp['Direção SH'])) * np.sin(np.radians(df_tvp['Inc']))
+
+                                        lxyl = np.sin(np.radians(df_tvp['Azi']- df_tvp['Direção SH'])) * np.cos(np.radians(df_tvp['Inc']))
+                                        lyyl = np.cos(np.radians(df_tvp['Azi']- df_tvp['Direção SH']))
+                                        lzyl = np.sin(np.radians(df_tvp['Azi']- df_tvp['Direção SH'])) * np.sin(np.radians(df_tvp['Inc']))
+
+                                        lxzl = -np.sin(np.radians(df_tvp['Inc']))
+                                        lyzl = 0
+                                        lzzl = np.cos(np.radians(df_tvp['Inc']))
+
+                                        df_tvp.insert(
+                                            loc=df_tvp.columns.get_loc('Sv (psi)') + 1,
                                             column='τxy',
-                                            value=round(((np.cos(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'] + 90)) * np.cos(np.radians(df_tvp['Inc'])) *
-                                                    -np.sin(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'] + 90))) * df_tvp['SH (lb/gal)'] +
-                                                   (np.sin(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'] + 90)) * np.cos(np.radians(df_tvp['Inc'])) *
-                                                    np.cos(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'] + 90))) * df_tvp['Sh (lb/gal)']),0)
+                                            value=round((lxxl * lyxl * df_tvp['SH (psi)']) + (lxyl * lyyl * df_tvp['Sh (psi)']) + (lxzl * lyzl * df_tvp['Sv (psi)']),2)
                                         )
 
                                         df_tvp.insert(
                                             loc=df_tvp.columns.get_loc('τxy') + 1,
                                             column='τyz',
-                                            value=round(((-np.sin(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'] + 90)) * np.cos(np.radians(df_tvp['Azi'])) *
-                                                    np.sin(np.radians(df_tvp['Inc'])) * df_tvp['SH (lb/gal)']) +
-                                                   (np.cos(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'] + 90)) * np.sin(np.radians(df_tvp['Azi'])) *
-                                                    np.sin(np.radians(df_tvp['Inc'])) * df_tvp['Sh (lb/gal)'])),2)
+                                            value=round((lyxl * lzxl * df_tvp['SH (psi)']) + (lyyl * lzyl * df_tvp['Sh (psi)']) + (lyzl * lzzl * df_tvp['Sv (psi)']),2)
                                         )
 
                                         df_tvp.insert(
                                             loc=df_tvp.columns.get_loc('τyz') + 1,
                                             column='τzx',
-                                            value=round(((np.cos(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'] + 90)) * np.sin(np.radians(df_tvp['Inc'])) *
-                                                    np.cos(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'] + 90)) * np.cos(np.radians(df_tvp['Inc'])) *
-                                                    df_tvp['SH (lb/gal)']) + (np.sin(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'] + 90)) *
-                                                    np.sin(np.radians(df_tvp['Inc'] )) * np.sin(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'] + 90)) *
-                                                    np.cos(np.radians(df_tvp['Inc'])) * df_tvp['Sh (lb/gal)']) +
-                                                    (np.cos(np.radians(df_tvp['Inc'])) * -np.sin(np.radians(df_tvp['Inc'])) *
-                                                     df_tvp['Gradiente de Sobrecarga (lb/gal)'])),2)
+                                            value=round((lzxl * lxxl * df_tvp['SH (psi)']) + (lzyl * lxyl * df_tvp['Sh (psi)']) + (lzzl * lxzl * df_tvp['Sv (psi)']),2)
                                         )
 
                                         thetaA = np.degrees(np.arctan(df_tvp['τyz'] / df_tvp['τzx']))
@@ -12728,14 +12991,13 @@ def geo_page():
                                             loc=df_tvp.columns.get_loc('θB (°)') + 1,
                                             column='τθa',
                                             value=round(2 * (df_tvp['τyz'] * np.cos(np.radians(df_tvp['θA (°)'])) - df_tvp[
-                                                'τzx'] * np.sin(np.radians(df_tvp['θA (°)']))),0)
+                                                'τzx'] * np.sin(np.radians(df_tvp['θA (°)']))),2)
                                         )
 
-                                        # ==== Inicialmente Pw = 8.8 ====
                                         df_tvp.insert(
                                             loc=df_tvp.columns.get_loc('τθa') + 1,
                                             column='Pw',
-                                            value=st.session_state.ppg
+                                            value=round(st.session_state.ppg * 0.1704 * df_tvp['Profundidade (m)'],2)
                                         )
                                         df_tvp.insert(
                                             loc=df_tvp.columns.get_loc('Pw') + 1,
@@ -12751,178 +13013,176 @@ def geo_page():
                                         df_tvp.insert(
                                             loc=df_tvp.columns.get_loc('r') + 1,
                                             column='σx',
-                                            value=((np.cos(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'] + 90)) * np.cos(np.radians(df_tvp['Inc'])))**2 *
-                                                   df_tvp['SH (lb/gal)'] + (np.sin(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'] + 90)) *
-                                                   np.cos(np.radians(df_tvp['Inc'])))**2 * df_tvp['Sh (lb/gal)'] +
-                                                   (np.sin(np.radians(df_tvp['Inc'])))**2 * df_tvp['Gradiente de Sobrecarga (lb/gal)'])
+                                            value=round(((lxxl**2)*df_tvp['SH (psi)']) + ((lxyl**2)*df_tvp['Sh (psi)']) + ((lxzl**2)*df_tvp['Sv (psi)']),2)
                                         )
 
                                         df_tvp.insert(
                                             loc=df_tvp.columns.get_loc('σx') + 1,
                                             column='σy',
-                                            value=((-np.sin(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'] + 90)))**2 * df_tvp['SH (lb/gal)'] +
-                                                   (np.cos(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'] + 90)))**2 * df_tvp['Sh (lb/gal)'])
+                                            value=round(((lyxl**2)*df_tvp['SH (psi)']) + ((lyyl**2)*df_tvp['Sh (psi)']) + ((lyzl**2)*df_tvp['Sv (psi)']),2)
                                         )
 
                                         df_tvp.insert(
                                             loc=df_tvp.columns.get_loc('σy') + 1,
+                                            column='σz',
+                                            value=round(((lzxl**2)*df_tvp['SH (psi)']) + ((lzyl**2)*df_tvp['Sh (psi)']) + ((lzzl**2)*df_tvp['Sv (psi)']),2)
+                                        )
+
+                                        C1 = (df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2)
+                                        C2 = (df_tvp['rw'] ** 4) / (df_tvp['r'] ** 4)
+
+                                        df_tvp.insert(
+                                            loc=df_tvp.columns.get_loc('σz') + 1,
                                             column='σr',
-                                            value=(0.5 * (df_tvp['σx'] + df_tvp['σy']) * (
-                                                    1 - ((df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2)))) +
-                                                  (0.5 * (df_tvp['σx'] - df_tvp['σy']) * (
-                                                          1 - (4 * (df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2)) +
-                                                          (3 * (df_tvp['rw'] ** 4) / (df_tvp['r'] ** 4))) * np.cos(
-                                                      np.radians((2 * df_tvp['θA (°)'])))) +
-                                                  (df_tvp['τxy'] * (
-                                                          1 - (4 * (df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2)) + (
-                                                          3 * (df_tvp['rw'] ** 4) /
-                                                          (df_tvp['r'] ** 4)) * np.sin(
-                                                      np.radians(2 * df_tvp['θA (°)']))) + (
-                                                           (df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2)) * df_tvp['Pw'])
+                                            value=round((((((df_tvp['σx'] + df_tvp['σy']) / 2) * ( 1 - C1)) + (((df_tvp['σx'] + df_tvp['σy']) / 2)*(1 +
+                                                (3 * C2) - (4 * C1))*(np.cos(np.radians(2*df_tvp['θA (°)']))))+((df_tvp['τxy'])*((1 + (3 * C2) - (4 *
+                                                C1)))*(np.sin(np.radians(2*df_tvp['θA (°)'])))) + (df_tvp['Pw']*C1)))/(0.1704* df_tvp['Profundidade (m)']),2)
                                         )
 
                                         df_tvp.insert(
                                             loc=df_tvp.columns.get_loc('σr') + 1,
                                             column='σθA',
-                                            value=(0.5 * (df_tvp['σx'] + df_tvp['σy']) * (
-                                                    1 + (df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2))) +
-                                                  (-0.5 * (df_tvp['σx'] - df_tvp['σy']) * (
-                                                          1 + 3 * ((df_tvp['rw'] ** 4) / (df_tvp['r'] ** 4))) *
-                                                   np.cos(np.radians(2 * df_tvp['θA (°)']))) -
-                                                  (df_tvp['τxy'] * (
-                                                          1 + (3 * (df_tvp['rw'] ** 4) / (df_tvp['r'] ** 4))) * np.sin(
-                                                      np.radians(2 * df_tvp['θA (°)']))) -
-                                                  ((df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2)) * df_tvp['Pw']
+                                            value=round((((df_tvp['σx'] + df_tvp['σy']) / 2)*(1+C1)-(((df_tvp['σx'] - df_tvp['σy']) / 2)*(1+(3*C2))*(np.cos(
+                                                np.radians(2*df_tvp['θA (°)']))))-((df_tvp['τxy'])*((1 + (3 * C2) - (4 * C1)))*(np.sin(np.radians(2*df_tvp['θA (°)']))))-
+                                                   (df_tvp['Pw']*C1))/(0.1704* df_tvp['Profundidade (m)']),2)
                                         )
 
                                         df_tvp.insert(
                                             loc=df_tvp.columns.get_loc('σθA') + 1,
                                             column='σθB',
-                                            value=(0.5 * (df_tvp['σx'] + df_tvp['σy']) * (
-                                                    1 + (df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2))) +
-                                                  (-0.5 * (df_tvp['σx'] - df_tvp['σy']) * (
-                                                          1 + 3 * ((df_tvp['rw'] ** 4) / (df_tvp['r'] ** 4))) *
-                                                   np.cos(np.radians(2 * df_tvp['θB (°)']))) -
-                                                  (df_tvp['τxy'] * (
-                                                          1 + (3 * (df_tvp['rw'] ** 4) / (df_tvp['r'] ** 4))) * np.sin(
-                                                      np.radians(2 * df_tvp['θB (°)']))) -
-                                                  ((df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2)) * df_tvp['Pw']
+                                            value=round((((df_tvp['σx'] + df_tvp['σy']) / 2)*(1+C1)-(((df_tvp['σx'] - df_tvp['σy']) / 2)*(1+(3*C2))*(np.cos(
+                                                np.radians(2*df_tvp['θB (°)']))))-((df_tvp['τxy'])*((1 + (3 * C2) - (4 * C1)))*(np.sin(np.radians(2*df_tvp['θB (°)']))))-
+                                                   (df_tvp['Pw']*C1))/(0.1704* df_tvp['Profundidade (m)']),2)
                                         )
 
                                         df_tvp.insert(
                                             loc=df_tvp.columns.get_loc('σθB') + 1,
                                             column='σa',
-                                            value=((np.cos(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'] + 90)) * np.sin(np.radians(df_tvp['Inc'])))**2 *
-                                                   df_tvp['SH (lb/gal)'] + (np.sin(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'] + 90)) *
-                                                   np.sin(np.radians(df_tvp['Inc'])))**2 * df_tvp['Sh (lb/gal)'] +
-                                                   (np.cos(np.radians(df_tvp['Inc'])))**2 * df_tvp['Gradiente de Sobrecarga (lb/gal)'])
+                                            value=round(((np.cos(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'])) * np.sin(np.radians(df_tvp['Inc'])))**2 *
+                                                   df_tvp['SH (psi)'] + (np.sin(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'])) *
+                                                   np.sin(np.radians(df_tvp['Inc'])))**2 * df_tvp['Sh (psi)'] +
+                                                   (np.cos(np.radians(df_tvp['Inc'])))**2 * df_tvp['Gradiente de Sobrecarga (lb/gal)']),2)
                                         )
 
                                         df_tvp.insert(
                                             loc=df_tvp.columns.get_loc('σa') + 1,
                                             column='σr efetivo (psi)',
-                                            value=(df_tvp['σr'] - df_tvp[
+                                            value=round((df_tvp['σr'] - df_tvp[
                                                 'Gradiente de Pressão de Poros (lb/gal)']) * 0.1704 *
-                                                  df_tvp['Profundidade (m)']
+                                                  df_tvp['Profundidade (m)'],2)
                                         )
 
                                         df_tvp.insert(
                                             loc=df_tvp.columns.get_loc('σr efetivo (psi)') + 1,
                                             column='σθA efetivo (psi)',
-                                            value=(df_tvp['σθA'] - df_tvp[
+                                            value=round((df_tvp['σθA'] - df_tvp[
                                                 'Gradiente de Pressão de Poros (lb/gal)']) * 0.1704 *
-                                                  df_tvp['Profundidade (m)']
+                                                  df_tvp['Profundidade (m)'],2)
                                         )
 
                                         df_tvp.insert(
                                             loc=df_tvp.columns.get_loc('σθA efetivo (psi)') + 1,
                                             column='σθB efetivo (psi)',
-                                            value=(df_tvp['σθB'] - df_tvp[
+                                            value=round((df_tvp['σθB'] - df_tvp[
                                                 'Gradiente de Pressão de Poros (lb/gal)']) * 0.1704 *
-                                                  df_tvp['Profundidade (m)']
+                                                  df_tvp['Profundidade (m)'],2)
                                         )
 
                                         # ==== Pw que zera cada tensão efetiva ====
-                                        coef_r = (df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2)
-                                        coef_t = -(df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2)
+                                        k = 0.1704 * df_tvp['Profundidade (m)']
+                                        C1 = (df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2)
 
-                                        sigma_r_sem_pw = df_tvp['σr'] - coef_r * df_tvp['Pw']
-                                        sigma_ta_sem_pw = df_tvp['σθA'] - coef_t * df_tvp['Pw']
-                                        sigma_tb_sem_pw = df_tvp['σθB'] - coef_t * df_tvp['Pw']
+                                        coef_ok = np.where(C1 != 0, C1, np.nan)
 
-                                        df_tvp['Tração Inferior'] = (df_tvp[
-                                                                         'Gradiente de Pressão de Poros (lb/gal)'])
+                                        sigma_r_sem_pw = df_tvp['σr'] - (C1 / k) * df_tvp['Pw']
+                                        sigma_ta_sem_pw = df_tvp['σθA'] + (C1 / k) * df_tvp['Pw']
+                                        sigma_tb_sem_pw = df_tvp['σθB'] + (C1 / k) * df_tvp['Pw']
 
-                                        df_tvp['Tração Superior (σθA)'] = (df_tvp[
-                                                                               'Gradiente de Pressão de Poros (lb/gal)'] - sigma_ta_sem_pw) / coef_t
-                                        df_tvp['Tração Superior (σθB)'] = (df_tvp[
-                                                                               'Gradiente de Pressão de Poros (lb/gal)'] - sigma_tb_sem_pw) / coef_t
+                                        Pp = df_tvp['Gradiente de Pressão de Poros (lb/gal)']
+
+                                        df_tvp['Tração Inferior'] = np.round(
+                                            (Pp - sigma_r_sem_pw) / coef_ok,
+                                            2
+                                        )
+
+                                        df_tvp['Tração Superior (σθA)'] = np.round(
+                                            (sigma_ta_sem_pw - Pp) / coef_ok,
+                                            2
+                                        )
+
+                                        df_tvp['Tração Superior (σθB)'] = np.round(
+                                            (sigma_tb_sem_pw - Pp) / coef_ok,
+                                            2
+                                        )
 
                                         # ================== Pw na falha por compressão ==================
                                         phi_rad = np.radians(st.session_state.phi)
-                                        t = np.tan(phi_rad)
+                                        m = np.tan(phi_rad)
 
-                                        coef_base = (df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2)  # (rw^2/r^2)
-                                        Kdepth = 0.1704 * df_tvp['Profundidade (m)']  # psi por (lb/gal)
-                                        coef_psi = Kdepth * coef_base  # coeficiente do termo linear de Pw já em psi
-
+                                        Kdepth = 0.1704 * df_tvp['Profundidade (m)']
+                                        Pp_grad = df_tvp['Gradiente de Pressão de Poros (lb/gal)']
+                                        Pp_psi = Pp_grad * Kdepth
+                                        S0 = df_tvp['So (psi)']
                                         def sigma_r_sem_pw(theta_deg):
                                             th = np.radians(2 * theta_deg)
-                                            return (0.5 * (df_tvp['σx'] + df_tvp['σy']) * (1 - coef_base)
-                                                    + 0.5 * (df_tvp['σx'] - df_tvp['σy']) * (
-                                                            1 - 4 * coef_base + 3 * (coef_base ** 2)) * np.cos(th)
-                                                    + df_tvp['τxy'] * (
-                                                            1 - 4 * coef_base + 3 * (coef_base ** 2)) * np.sin(th))
-
+                                            return (
+                                                    ((df_tvp['σx'] + df_tvp['σy']) / 2) * (1 - C1)
+                                                    + ((df_tvp['σx'] - df_tvp['σy']) / 2) * (
+                                                                1 + 3 * C2 - 4 * C1) * np.cos(th)
+                                                    + df_tvp['τxy'] * (1 + 3 * C2 - 4 * C1) * np.sin(th)
+                                            )
                                         def sigma_t_sem_pw(theta_deg):
                                             th = np.radians(2 * theta_deg)
-                                            return (0.5 * (df_tvp['σx'] + df_tvp['σy']) * (1 + coef_base)
-                                                    - 0.5 * (df_tvp['σx'] - df_tvp['σy']) * (
-                                                            1 + 3 * (coef_base ** 2)) * np.cos(
-                                                        th)
-                                                    + df_tvp['τxy'] * (1 + 3 * (coef_base ** 2)) * np.sin(th))
+                                            return (
+                                                    ((df_tvp['σx'] + df_tvp['σy']) / 2) * (1 + C1)
+                                                    - ((df_tvp['σx'] - df_tvp['σy']) / 2) * (1 + 3 * C2) * np.cos(th)
+                                                    - df_tvp['τxy'] * (1 + 3 * C2 - 4 * C1) * np.sin(th)
+                                            )
+                                        def calcular_pesos_tangencia(theta_deg):
+                                            Ar = sigma_r_sem_pw(theta_deg)
+                                            At = sigma_t_sem_pw(theta_deg)
 
-                                        Ar_A = sigma_r_sem_pw(df_tvp['θA (°)'])
-                                        At_A = sigma_t_sem_pw(df_tvp['θA (°)'])
-                                        Ar_B = sigma_r_sem_pw(df_tvp['θB (°)'])
-                                        At_B = sigma_t_sem_pw(df_tvp['θB (°)'])
-                                        Pp = df_tvp['Gradiente de Pressão de Poros (lb/gal)']
+                                            centro = 0.5 * (At + Ar) - Pp_psi
+                                            raio_sem_pw = 0.5 * (At - Ar)
 
-                                        C_A_psi = Kdepth * (0.5 * (At_A + Ar_A) - Pp)
-                                        R0_A_psi = Kdepth * (0.5 * (At_A - Ar_A))
+                                            distancia_reta = np.abs(m * centro + S0) / np.sqrt(m ** 2 + 1)
 
-                                        C_B_psi = Kdepth * (0.5 * (At_B + Ar_B) - Pp)
-                                        R0_B_psi = Kdepth * (0.5 * (At_B - Ar_B))
+                                            den = C1 * Kdepth
+                                            den = np.where(den != 0, den, np.nan)
 
-                                        S0 = df_tvp['So (psi)']
+                                            peso_1 = (raio_sem_pw - distancia_reta) / den
+                                            peso_2 = (raio_sem_pw + distancia_reta) / den
 
-                                        K_A = (t * C_A_psi + S0) ** 2 / (1 + t ** 2)
-                                        K_B = (t * C_B_psi + S0) ** 2 / (1 + t ** 2)
+                                            peso_inf = np.minimum(peso_1, peso_2)
+                                            peso_sup = np.maximum(peso_1, peso_2)
 
-                                        sqrtK_A = np.sqrt(np.maximum(K_A, 0))
-                                        sqrtK_B = np.sqrt(np.maximum(K_B, 0))
+                                            return peso_inf, peso_sup
+                                        Pw_A_inf, Pw_A_sup = calcular_pesos_tangencia(df_tvp['θA (°)'])
+                                        Pw_B_inf, Pw_B_sup = calcular_pesos_tangencia(df_tvp['θB (°)'])
 
-                                        den_ok = np.where(coef_psi != 0, coef_psi, np.nan)
+                                        df_tvp.insert(
+                                            loc=df_tvp.columns.get_loc('Tração Superior (σθB)') + 1,
+                                            column='Comp Inferior σθA',
+                                            value=np.round(Pw_A_inf, 2)
+                                        )
 
-                                        Pw_A_1 = (R0_A_psi - sqrtK_A) / den_ok
-                                        Pw_A_2 = (R0_A_psi + sqrtK_A) / den_ok
-                                        Pw_B_1 = (R0_B_psi - sqrtK_B) / den_ok
-                                        Pw_B_2 = (R0_B_psi + sqrtK_B) / den_ok
+                                        df_tvp.insert(
+                                            loc=df_tvp.columns.get_loc('Comp Inferior σθA') + 1,
+                                            column='Comp Superior σθA',
+                                            value=np.round(Pw_A_sup, 2)
+                                        )
 
-                                        Pw_A_inf = np.minimum(Pw_A_1, Pw_A_2)
-                                        Pw_A_sup = np.maximum(Pw_A_1, Pw_A_2)
-                                        Pw_B_inf = np.minimum(Pw_B_1, Pw_B_2)
-                                        Pw_B_sup = np.maximum(Pw_B_1, Pw_B_2)
+                                        df_tvp.insert(
+                                            loc=df_tvp.columns.get_loc('Comp Superior σθA') + 1,
+                                            column='Comp Inferior σθB',
+                                            value=np.round(Pw_B_inf, 2)
+                                        )
 
-                                        # Adiciona as colunas ao DataFrame
-                                        df_tvp.insert(loc=df_tvp.columns.get_loc('Tração Superior (σθB)') + 1,
-                                                      column='Comp Inferior σθA', value=Pw_A_inf)
-                                        df_tvp.insert(loc=df_tvp.columns.get_loc('Comp Inferior σθA') + 1,
-                                                      column='Comp Superior σθA', value=Pw_A_sup)
-                                        df_tvp.insert(loc=df_tvp.columns.get_loc('Comp Superior σθA') + 1,
-                                                      column='Comp Inferior σθB', value=Pw_B_inf)
-                                        df_tvp.insert(loc=df_tvp.columns.get_loc('Comp Inferior σθB') + 1,
-                                                      column='Comp Superior σθB', value=Pw_B_sup)
+                                        df_tvp.insert(
+                                            loc=df_tvp.columns.get_loc('Comp Inferior σθB') + 1,
+                                            column='Comp Superior σθB',
+                                            value=np.round(Pw_B_sup, 2)
+                                        )
 
                                         cols_tracao = [
                                             'Tração Inferior',
@@ -12975,61 +13235,40 @@ def geo_page():
                                                     peso_fluido = linha['Comp Superior σθB']
 
                                                 # Atualiza Pw no dataframe
-                                                df_tvp['Pw'] = peso_fluido
+                                                df_tvp['Pw'] = peso_fluido*0.1704*df_tvp['Profundidade (m)']
 
                                                 # ==== Recalcular todas as tensões com o novo Pw ====
                                                 # σr
-                                                df_tvp['σr'] = ((0.5 * (df_tvp['σx'] + df_tvp['σy']) * (
-                                                    1 - ((df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2)))) +
-                                                  (0.5 * (df_tvp['σx'] - df_tvp['σy']) * (
-                                                          1 - (4 * (df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2)) +
-                                                          (3 * (df_tvp['rw'] ** 4) / (df_tvp['r'] ** 4))) * np.cos(
-                                                      np.radians((2 * df_tvp['θA (°)'])))) +
-                                                  (df_tvp['τxy'] * (
-                                                          1 - (4 * (df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2)) + (
-                                                          3 * (df_tvp['rw'] ** 4) /
-                                                          (df_tvp['r'] ** 4)) * np.sin(
-                                                      np.radians(2 * df_tvp['θA (°)']))) + (
-                                                           (df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2)) * df_tvp['Pw']))
+                                                df_tvp['σr'] = round((((((df_tvp['σx'] + df_tvp['σy']) / 2) * ( 1 - C1)) + (((df_tvp['σx'] + df_tvp['σy']) / 2)*(1 +
+                                                (3 * C2) - (4 * C1))*(np.cos(np.radians(2*df_tvp['θA (°)']))))+((df_tvp['τxy'])*((1 + (3 * C2) - (4 *
+                                                C1)))*(np.sin(np.radians(2*df_tvp['θA (°)'])))) + (df_tvp['Pw']*C1)))/(0.1704* df_tvp['Profundidade (m)']),2)
 
                                                 # σθA
-                                                df_tvp['σθA'] = ((0.5 * (df_tvp['σx'] + df_tvp['σy']) * (
-                                                    1 + (df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2))) +
-                                                  (-0.5 * (df_tvp['σx'] - df_tvp['σy']) * (
-                                                          1 + 3 * ((df_tvp['rw'] ** 4) / (df_tvp['r'] ** 4))) *
-                                                   np.cos(np.radians(2 * df_tvp['θA (°)']))) -
-                                                  (df_tvp['τxy'] * (
-                                                          1 + (3 * (df_tvp['rw'] ** 4) / (df_tvp['r'] ** 4))) * np.sin(
-                                                      np.radians(2 * df_tvp['θA (°)']))) -
-                                                  ((df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2)) * df_tvp['Pw'])
+                                                df_tvp['σθA'] = round((((df_tvp['σx'] + df_tvp['σy']) / 2)*(1+C1)-(((df_tvp['σx'] - df_tvp['σy']) / 2)*(1+(3*C2))*(np.cos(
+                                                np.radians(2*df_tvp['θA (°)']))))-((df_tvp['τxy'])*((1 + (3 * C2) - (4 * C1)))*(np.sin(np.radians(2*df_tvp['θA (°)']))))-
+                                                   (df_tvp['Pw']*C1))/(0.1704* df_tvp['Profundidade (m)']),2)
 
                                                 # σθB
-                                                df_tvp['σθB'] = ((0.5 * (df_tvp['σx'] + df_tvp['σy']) * (
-                                                    1 + (df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2))) +
-                                                  (-0.5 * (df_tvp['σx'] - df_tvp['σy']) * (
-                                                          1 + 3 * ((df_tvp['rw'] ** 4) / (df_tvp['r'] ** 4))) *
-                                                   np.cos(np.radians(2 * df_tvp['θB (°)']))) -
-                                                  (df_tvp['τxy'] * (
-                                                          1 + (3 * (df_tvp['rw'] ** 4) / (df_tvp['r'] ** 4))) * np.sin(
-                                                      np.radians(2 * df_tvp['θB (°)']))) -
-                                                  ((df_tvp['rw'] ** 2) / (df_tvp['r'] ** 2)) * df_tvp['Pw'])
+                                                df_tvp['σθB'] = round((((df_tvp['σx'] + df_tvp['σy']) / 2)*(1+C1)-(((df_tvp['σx'] - df_tvp['σy']) / 2)*(1+(3*C2))*(np.cos(
+                                                np.radians(2*df_tvp['θB (°)']))))-((df_tvp['τxy'])*((1 + (3 * C2) - (4 * C1)))*(np.sin(np.radians(2*df_tvp['θB (°)']))))-
+                                                   (df_tvp['Pw']*C1))/(0.1704* df_tvp['Profundidade (m)']),2)
 
                                                 # σa
-                                                df_tvp['σa'] = ((np.cos(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'] + 90)) * np.sin(np.radians(df_tvp['Inc'])))**2 *
-                                                   df_tvp['SH (lb/gal)'] + (np.sin(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'] + 90)) *
-                                                   np.sin(np.radians(df_tvp['Inc'])))**2 * df_tvp['Sh (lb/gal)'] +
+                                                df_tvp['σa'] = ((np.cos(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'])) * np.sin(np.radians(df_tvp['Inc'])))**2 *
+                                                   df_tvp['SH (psi)'] + (np.sin(np.radians(df_tvp['Azi'] - df_tvp['Direção SH'])) *
+                                                   np.sin(np.radians(df_tvp['Inc'])))**2 * df_tvp['Sh (psi)'] +
                                                    (np.cos(np.radians(df_tvp['Inc'])))**2 * df_tvp['Gradiente de Sobrecarga (lb/gal)'])
 
                                                 # Recalcular tensões efetivas
-                                                df_tvp['σr efetivo (psi)'] = (df_tvp['σr'] - df_tvp[
-                                                    'Gradiente de Pressão de Poros (lb/gal)']) * 0.1704 * df_tvp[
-                                                                                 'Profundidade (m)']
-                                                df_tvp['σθA efetivo (psi)'] = (df_tvp['σθA'] - df_tvp[
-                                                    'Gradiente de Pressão de Poros (lb/gal)']) * 0.1704 * df_tvp[
-                                                                                  'Profundidade (m)']
-                                                df_tvp['σθB efetivo (psi)'] = (df_tvp['σθB'] - df_tvp[
-                                                    'Gradiente de Pressão de Poros (lb/gal)']) * 0.1704 * df_tvp[
-                                                                                  'Profundidade (m)']
+                                                df_tvp['σr efetivo (psi)'] = round((df_tvp['σr'] - df_tvp[
+                                                'Gradiente de Pressão de Poros (lb/gal)']) * 0.1704 *
+                                                  df_tvp['Profundidade (m)'],2)
+                                                df_tvp['σθA efetivo (psi)'] = round((df_tvp['σθA'] - df_tvp[
+                                                'Gradiente de Pressão de Poros (lb/gal)']) * 0.1704 *
+                                                  df_tvp['Profundidade (m)'],2)
+                                                df_tvp['σθB efetivo (psi)'] = round((df_tvp['σθB'] - df_tvp[
+                                                'Gradiente de Pressão de Poros (lb/gal)']) * 0.1704 *
+                                                  df_tvp['Profundidade (m)'],2)
 
                                             # Atualiza as variáveis para uso posterior
                                             linha = df_tvp.loc[st.session_state.y == profundidade_proxima].iloc[0]
@@ -13129,27 +13368,6 @@ def geo_page():
                                                 'Gradiente de Pressão de Poros (lb/gal)']
                                             df_suav['Tração Inferior'] = suavizar(df_tvp['Profundidade (m)'],
                                                                                   df_tvp['Tração Inferior'])
-                                            # df_suav['Comp Inferior σθA'] = suavizar(df_tvp['Profundidade (m)'],
-                                            #                                         df_tvp['Comp Inferior σθA'])
-                                            # df_suav['Comp Inferior σθB'] = suavizar(df_tvp['Profundidade (m)'],
-                                            #                                         df_tvp['Comp Inferior σθB'])
-                                            # df_suav['Max Inferior'] = df_suav[
-                                            #     ['Gradiente de Pressão de Poros (lb/gal)', 'Tração Inferior',
-                                            #      'Comp Inferior σθA', 'Comp Inferior σθB']].max(axis=1)
-                                            # df_suav['Tração Superior (σθA)'] = suavizar(
-                                            #     df_tvp['Profundidade (m)'],
-                                            #     df_tvp['Tração Superior (σθA)'])
-                                            # df_suav['Tração Superior (σθB)'] = suavizar(
-                                            #     df_tvp['Profundidade (m)'],
-                                            #     df_tvp['Tração Superior (σθB)'])
-                                            # df_suav['Comp Superior σθA'] = suavizar(df_tvp['Profundidade (m)'],
-                                            #                                         df_tvp['Comp Superior σθA'])
-                                            # df_suav['Comp Superior σθB'] = suavizar(df_tvp['Profundidade (m)'],
-                                            #                                         df_tvp['Comp Superior σθB'])
-                                            # df_suav['Min Superior'] = df_suav[
-                                            #     ['Tração Superior (σθA)', 'Tração Superior (σθB)',
-                                            #      'Comp Superior σθA',
-                                            #      'Comp Superior σθB']].min(axis=1)
                                             df_suav['Comp Inferior σθA'] = suavizar_somente_validos(
                                                 df_tvp['Profundidade (m)'],
                                                 df_tvp['Comp Inferior σθA'],
@@ -13230,14 +13448,14 @@ def geo_page():
                                                     fs = float(st.session_state.fs)
 
                                                     x_max_inf = pd.Series(
-                                                        df_suav['Max Inferior'] if st.session_state.suav_max_inf else
+                                                        df_tvp['Max Inferior'] if st.session_state.suav_max_inf else
                                                         df_tvp['Max Inferior'],
                                                         index=df_tvp.index,
                                                         dtype=float
                                                     )
 
                                                     x_min_sup = pd.Series(
-                                                        df_suav['Min Superior'] if st.session_state.suav_min_sup else
+                                                        df_tvp['Min Superior'] if st.session_state.suav_min_sup else
                                                         df_tvp['Min Superior'],
                                                         index=df_tvp.index,
                                                         dtype=float
@@ -13308,89 +13526,73 @@ def geo_page():
                                                                 unsafe_allow_html=True
                                                             )
 
-                                                    # # Verificação de estabilidade com base na janela operacional gerada
-                                                    # if max_inferior < peso_fluido < min_superior:
-                                                    #     st.markdown(
-                                                    #         """
-                                                    #         <div style="
-                                                    #             display: flex;
-                                                    #             justify-content: center;
-                                                    #             margin-top: 0px;
-                                                    #         ">
-                                                    #             <div style="
-                                                    #                 color: green;
-                                                    #                 font-weight: bold;
-                                                    #                 border: 2px solid black;
-                                                    #                 border-radius: 10px;
-                                                    #                 padding: 10px 10px;
-                                                    #             ">
-                                                    #                 Poço Estável
-                                                    #             </div>
-                                                    #         </div>
-                                                    #         """,
-                                                    #         unsafe_allow_html=True
-                                                    #     )
-                                                    # else:
-                                                    #     st.markdown(
-                                                    #         """
-                                                    #         <div style="
-                                                    #             display: flex;
-                                                    #             justify-content: center;
-                                                    #             margin-top: 3px;
-                                                    #         ">
-                                                    #             <div style="
-                                                    #                 color: red;
-                                                    #                 font-weight: bold;
-                                                    #                 border: 2px solid black;
-                                                    #                 border-radius: 10px;
-                                                    #                 padding: 10px 10px;
-                                                    #             ">
-                                                    #                 Poço Instável
-                                                    #             </div>
-                                                    #         </div>
-                                                    #         """,
-                                                    #         unsafe_allow_html=True
-                                                    #     )
+                                            mapa_colunas_falha = {
+                                                "Tração Inferior": "Tração Inferior",
+                                                "Tração Superior σθA": "Tração Superior (σθA)",
+                                                "Tração Superior σθB": "Tração Superior (σθB)",
+                                                "Comp Inferior σθA": "Comp Inferior σθA",
+                                                "Comp Superior σθA": "Comp Superior σθA",
+                                                "Comp Inferior σθB": "Comp Inferior σθB",
+                                                "Comp Superior σθB": "Comp Superior σθB",
+                                            }
+                                            def valor_na_curva(df_plot, coluna, profundidade):
+                                                base = df_plot[["Profundidade (m)", coluna]].dropna().sort_values(
+                                                    "Profundidade (m)")
 
+                                                if base.empty:
+                                                    return np.nan
+
+                                                return np.interp(
+                                                    profundidade,
+                                                    base["Profundidade (m)"],
+                                                    base[coluna]
+                                                )
                                             with colu2:
                                                 titulo_peso = (
-                                                    "Peso do Fluido Escolhido"
+                                                    "Peso do Fluido:"
                                                     if opcao_tracao == "Peso de Fluido Escolhido"
-                                                    else f"Peso que gera a falha por {opcao_tracao.lower()}"
+                                                    else f"Falha por {opcao_tracao.lower()}"
                                                 )
 
-                                                with colu2:
-                                                    titulo_peso = (
-                                                        "Peso do Fluido:"
-                                                        if opcao_tracao == "Peso de Fluido Escolhido"
-                                                        else f"Falha por {opcao_tracao.lower()}"
-                                                    )
+                                                coluna_ponto = mapa_colunas_falha.get(opcao_tracao)
 
-                                                    st.markdown(
-                                                        f"""
-                                                        <div style="
-                                                            display: flex;
-                                                            justify-content: center;
-                                                            margin-top: 0px;
-                                                        ">
-                                                            <div style="
-                                                                color: black;
-                                                                font-weight: bold;
-                                                                border: 2px solid black;
-                                                                border-radius: 10px;
-                                                                padding: 6px 10px;
-                                                                text-align: center;
-                                                                line-height: 1.2;
-                                                                font-size: 13px;
-                                                                min-width: 200px;
-                                                            ">
-                                                                {titulo_peso}<br>
-                                                                <span style="color: red; font-size: 16px;">{float(peso_fluido):.2f}</span> lb/gal
-                                                            </div>
-                                                        </div>
-                                                        """,
-                                                        unsafe_allow_html=True
+                                                if coluna_ponto is not None and coluna_ponto in df_tvp.columns:
+                                                    peso_card = valor_na_curva(
+                                                        df_tvp,
+                                                        coluna_ponto,
+                                                        profundidade_proxima
                                                     )
+                                                else:
+                                                    peso_card = peso_fluido
+
+                                                if pd.isna(peso_card):
+                                                    peso_card = peso_fluido
+
+                                                st.markdown(
+                                                    f"""
+                                                    <div style="
+                                                        display: flex;
+                                                        justify-content: center;
+                                                        margin-top: 0px;
+                                                    ">
+                                                        <div style="
+                                                            color: black;
+                                                            font-weight: bold;
+                                                            border: 2px solid black;
+                                                            border-radius: 10px;
+                                                            padding: 6px 10px;
+                                                            text-align: center;
+                                                            line-height: 1.2;
+                                                            font-size: 13px;
+                                                            min-width: 200px;
+                                                        ">
+                                                            {titulo_peso}<br>
+                                                            <span style="color: red; font-size: 16px;">{float(peso_card):.2f}</span> lb/gal
+                                                        </div>
+                                                    </div>
+                                                    """,
+                                                    unsafe_allow_html=True
+                                                )
 
                                             centro_A = (sr_ef + sta_ef) / 2
                                             raio_A = abs(sta_ef - sr_ef) / 2
@@ -13548,23 +13750,18 @@ def geo_page():
                                             st.session_state.pop('xb', None)
                                             st.session_state.pop('yb', None)
 
+                                            # Pontos de tangência com A e B
+                                            st.session_state.pop('xa', None)
+                                            st.session_state.pop('ya', None)
+                                            st.session_state.pop('xb', None)
+                                            st.session_state.pop('yb', None)
+
                                             for nome, centro_x, raio in [('A', centro_A, raio_A),
                                                                          ('B', centro_B, raio_B)]:
-                                                centro = (centro_x, 0.0)
+                                                x, y = projecao_ponto_na_reta(centro_x, 0.0, m, x0, y0)
 
-                                                pontos = intersecao_circulo_reta(centro, raio, m, x0, y0)
-
-                                                if pontos:
-                                                    xc, yc = centro
-                                                    xproj, yproj = projecao_ponto_na_reta(xc, yc, m, x0, y0)
-
-                                                    x, y = min(
-                                                        pontos,
-                                                        key=lambda p: (p[0] - xproj) ** 2 + (p[1] - yproj) ** 2
-                                                    )
-
-                                                    st.session_state[f'x{nome.lower()}'] = x
-                                                    st.session_state[f'y{nome.lower()}'] = y
+                                                st.session_state[f'x{nome.lower()}'] = x
+                                                st.session_state[f'y{nome.lower()}'] = y
 
                                             # Adiciona pontos no gráfico, se aplicável
                                             if st.session_state.op in ['Comp Inferior σθA',
@@ -13875,14 +14072,14 @@ def geo_page():
                                             linha = df_tvp.loc[st.session_state.y == profundidade_proxima].iloc[0]
 
                                             x_max_inf = pd.Series(
-                                                df_suav['Max Inferior'] if st.session_state.suav_max_inf else df_tvp[
+                                                df_tvp['Max Inferior'] if st.session_state.suav_max_inf else df_tvp[
                                                     'Max Inferior'],
                                                 index=df_tvp.index,
                                                 dtype=float
                                             )
 
                                             x_min_sup = pd.Series(
-                                                df_suav['Min Superior'] if st.session_state.suav_min_sup else df_tvp[
+                                                df_tvp['Min Superior'] if st.session_state.suav_min_sup else df_tvp[
                                                     'Min Superior'],
                                                 index=df_tvp.index,
                                                 dtype=float
@@ -13921,16 +14118,197 @@ def geo_page():
                                                             font-weight: bold;
                                                             border: 2px solid black;
                                                             border-radius: 10px;
-                                                            padding: 0px 0px;
+                                                            padding: 6px 10px;
                                                             text-align: center;
+                                                            font-size: 15px;
+                                                            line-height: 1.2;
                                                         ">
                                                             Janela Op.<br>
-                                                            <span style="color: red;">{max_inferior:.2f}</span> &lt; ρ &lt; <span style="color: red;">{min_superior:.2f}</span>
+                                                            <span style="color: red; font-size: 15px;">{max_inferior:.2f}</span>
+                                                            <span style="font-size: 15px;">&lt; ρ &lt;</span>
+                                                            <span style="color: red; font-size: 15px;">{min_superior:.2f}</span>
                                                         </div>
                                                     </div>
                                                     """,
                                                     unsafe_allow_html=True
                                                 )
+                                        def _normalizar_angulo_360(ang, default=np.nan):
+                                            try:
+                                                if pd.isna(ang):
+                                                    return default
+                                                return float(ang) % 360
+                                            except Exception:
+                                                return default
+                                        def _seta_polar(ax_polar, angulo, r_ini, r_fim, cor, lw=2.0, ms=12,linestyle="-"):
+                                            theta = np.deg2rad(_normalizar_angulo_360(angulo, 0))
+
+                                            ax_polar.annotate(
+                                                "",
+                                                xy=(theta, r_fim),
+                                                xytext=(theta, r_ini),
+                                                arrowprops=dict(
+                                                    arrowstyle="-|>",
+                                                    color=cor,
+                                                    linewidth=lw,
+                                                    linestyle=linestyle,
+                                                    mutation_scale=ms,
+                                                    shrinkA=0,
+                                                    shrinkB=0
+                                                ),
+                                                zorder=10
+                                            )
+                                        def _plotar_eixo_tensao_inset(ax_polar,angulo,cor,label,r_ini,r_fim,lw,ms,r_texto,deslocamento_lateral=8):
+                                            angulo = _normalizar_angulo_360(angulo, 0)
+                                            angulo_oposto = _normalizar_angulo_360(angulo + 180, 0)
+
+                                            # plota as duas setas do eixo de tensão
+                                            for ang in [angulo, angulo_oposto]:
+                                                _seta_polar(
+                                                    ax_polar,
+                                                    angulo=ang,
+                                                    r_ini=r_ini,
+                                                    r_fim=r_fim,
+                                                    cor=cor,
+                                                    lw=lw,
+                                                    ms=ms
+                                                )
+
+                                            # escreve o nome apenas uma vez, deslocado lateralmente
+                                            theta_texto = np.deg2rad(
+                                                _normalizar_angulo_360(angulo + deslocamento_lateral, 0)
+                                            )
+
+                                            ax_polar.text(
+                                                theta_texto,
+                                                r_texto,
+                                                label,
+                                                color=cor,
+                                                fontsize=6,
+                                                ha="center",
+                                                va="center",
+                                                zorder=20
+                                            )
+                                        def plotar_rosa_dos_ventos_inset_jo(
+                                                ax,
+                                                direcao_shmax,
+                                                direcao_shmin,
+                                                azimute_poco=np.nan,
+                                                posicao=(0.02, 0.735, 0.27, 0.27)
+                                        ):
+
+                                            direcao_shmax = _normalizar_angulo_360(direcao_shmax, 0)
+                                            direcao_shmin = _normalizar_angulo_360(direcao_shmin, direcao_shmax + 90)
+                                            azimute_poco = _normalizar_angulo_360(azimute_poco, np.nan)
+
+                                            ax_rosa = ax.inset_axes(
+                                                posicao,
+                                                projection="polar",
+                                                zorder=30
+                                            )
+
+                                            ax_rosa.set_facecolor((1, 1, 1, 0.88))
+
+                                            # Convenção de rosa dos ventos
+                                            ax_rosa.set_theta_zero_location("N")
+                                            ax_rosa.set_theta_direction(-1)
+
+                                            ax_rosa.set_ylim(0, 1.12)
+                                            ax_rosa.set_yticks([])
+
+                                            ax_rosa.set_xticks(np.deg2rad([0, 45, 90, 135, 180, 225, 270, 315]))
+
+                                            ax_rosa.set_xticklabels(
+                                                ["N", "NE", "E", "SE", "S", "SO", "O", "NO"],
+                                                fontsize=6,
+                                                fontweight="bold"
+                                            )
+
+                                            ax_rosa.tick_params(axis='x', pad=-6)
+                                            ax_rosa.grid(True, linestyle="--", alpha=0.35, linewidth=0.6)
+
+                                            # Poço central
+                                            theta = np.linspace(0, 2 * np.pi, 200)
+                                            raio_poco = np.full_like(theta, 0.18)
+
+                                            ax_rosa.fill(
+                                                theta,
+                                                raio_poco,
+                                                facecolor="#9ecae1",
+                                                edgecolor="black",
+                                                linewidth=0.8,
+                                                alpha=0.95,
+                                                zorder=5
+                                            )
+
+                                            # SH maior, vermelho
+                                            _plotar_eixo_tensao_inset(
+                                                ax_polar=ax_rosa,
+                                                angulo=direcao_shmax,
+                                                cor="red",
+                                                label="SH",
+                                                r_ini=1.00,
+                                                r_fim=0.22,
+                                                lw=2.4,
+                                                ms=14,
+                                                r_texto=0.8,
+                                                deslocamento_lateral=15
+                                            )
+
+                                            # Sh menor, verde
+                                            _plotar_eixo_tensao_inset(
+                                                ax_polar=ax_rosa,
+                                                angulo=direcao_shmin,
+                                                cor="green",
+                                                label="Sh",
+                                                r_ini=0.82,
+                                                r_fim=0.22,
+                                                lw=1.8,
+                                                ms=11,
+                                                r_texto=0.8,
+                                                deslocamento_lateral=15
+                                            )
+
+                                            # Azimute final do poço
+                                            if pd.notna(azimute_poco):
+                                                theta_azi = np.deg2rad(azimute_poco)
+
+                                                ax_rosa.annotate(
+                                                    "",
+                                                    xy=(theta_azi, 0.98),
+                                                    xytext=(theta_azi, 0.20),
+                                                    arrowprops=dict(
+                                                        arrowstyle="->",
+                                                        color="black",
+                                                        linewidth=1.5,
+                                                        linestyle="--",
+                                                        mutation_scale=10,
+                                                        shrinkA=0,
+                                                        shrinkB=0
+                                                    ),
+                                                    zorder=15
+                                                )
+
+                                                deslocamento_lateral = 20
+                                                theta_texto = np.deg2rad(
+                                                    _normalizar_angulo_360(azimute_poco + deslocamento_lateral, 0))
+
+                                                ax_rosa.text(
+                                                    theta_texto,
+                                                    0.62,
+                                                    "Azi",
+                                                    color="black",
+                                                    fontsize=6,
+                                                    ha="center",
+                                                    va="center",
+                                                    zorder=20
+                                                )
+
+                                            for spine in ax_rosa.spines.values():
+                                                spine.set_edgecolor("black")
+                                                spine.set_linewidth(0.8)
+
+                                            return ax_rosa
+
                                         st.session_state.fig_jo = plt.figure(figsize=(8, 10))
 
                                         if st.session_state.idg == 'Sim':
@@ -14020,11 +14398,43 @@ def geo_page():
 
                                         if "ponto_a"not in st.session_state:
                                             st.session_state.ponto_a = 'Não'
+                                        def valor_na_curva(df_plot, coluna, profundidade):
+                                            base = df_plot[['Profundidade (m)', coluna]].dropna().sort_values(
+                                                'Profundidade (m)')
+
+                                            if base.empty:
+                                                return np.nan
+
+                                            return np.interp(
+                                                profundidade,
+                                                base['Profundidade (m)'],
+                                                base[coluna]
+                                            )
+                                        mapa_colunas_falha = {
+                                            'Tração Inferior': 'Tração Inferior',
+                                            'Tração Superior σθA': 'Tração Superior (σθA)',
+                                            'Tração Superior σθB': 'Tração Superior (σθB)',
+                                            'Comp Inferior σθA': 'Comp Inferior σθA',
+                                            'Comp Superior σθA': 'Comp Superior σθA',
+                                            'Comp Inferior σθB': 'Comp Inferior σθB',
+                                            'Comp Superior σθB': 'Comp Superior σθB',
+                                        }
 
                                         if st.session_state.ponto_a == 'Sim':
                                             if st.session_state.ppg is not None and st.session_state.m is not None:
+                                                coluna_ponto = mapa_colunas_falha.get(st.session_state.op)
+
+                                                if coluna_ponto is not None and coluna_ponto in df_suav.columns:
+                                                    peso_ponto = valor_na_curva(
+                                                        df_suav,
+                                                        coluna_ponto,
+                                                        profundidade_proxima
+                                                    )
+                                                else:
+                                                    peso_ponto = peso_fluido
+
                                                 ax.scatter(
-                                                    peso_fluido,
+                                                    peso_ponto,
                                                     profundidade_proxima,
                                                     color='red',
                                                     edgecolor='black',
@@ -14045,8 +14455,8 @@ def geo_page():
                                         colunas_texto = [
                                             'Profundidade (m)',
                                             'Gradiente de Sobrecarga (lb/gal)',
-                                            'SH (lb/gal)',
-                                            'Sh (lb/gal)',
+                                            'SH (psi)',
+                                            'Sh (psi)',
                                             'Direção SH',
                                             'Direção Sh'
                                         ]
@@ -14072,54 +14482,112 @@ def geo_page():
                                                     sv = linha_t['Gradiente de Sobrecarga (lb/gal)']
                                                     dir_shmax = ajustar_angulo_360(linha_t['Direção SH'])
                                                     dir_shmin = ajustar_angulo_360(linha_t['Direção Sh'])
+                                                    prof = linha_t['Profundidade (m)']
 
-                                                    # Captura azimute final do poço, se existir
                                                     azimute_poco = np.nan
-                                                    if 'Azi' in df_tvp.columns and pd.notna(linha_t.get('Azi', np.nan)):
-                                                        azimute_poco = ajustar_angulo_360(linha_t['Azi'])
-                                                    elif 'Azimute' in df_tvp.columns and pd.notna(
-                                                            linha_t.get('Azimute', np.nan)):
-                                                        azimute_poco = ajustar_angulo_360(linha_t['Azimute'])
-                                                    elif 'Azimuth' in df_tvp.columns and pd.notna(
-                                                            linha_t.get('Azimuth', np.nan)):
-                                                        azimute_poco = ajustar_angulo_360(linha_t['Azimuth'])
+
+                                                    fontes_azimute = [
+                                                        st.session_state.get("df2", None),
+                                                        st.session_state.get("df_out_traj", None),
+                                                        st.session_state.get("df_interp", None),
+                                                        df_tvp
+                                                    ]
+
+                                                    for df_azi in fontes_azimute:
+                                                        if isinstance(df_azi, pd.DataFrame) and not df_azi.empty:
+                                                            for col_azi in ["Azi", "Azimute", "Azimuth", "Azimute (°)"]:
+                                                                if col_azi in df_azi.columns:
+                                                                    serie_azi = pd.to_numeric(df_azi[col_azi],
+                                                                                              errors="coerce").dropna()
+
+                                                                    if not serie_azi.empty:
+                                                                        azimute_poco = ajustar_angulo_360(
+                                                                            float(serie_azi.iloc[-1]))
+                                                                        break
+
+                                                        if pd.notna(azimute_poco):
+                                                            break
 
                                                     if pd.notna(sv) and sv != 0:
                                                         if 'SH% Sobrecarga' in df_tvp.columns and pd.notna(
                                                                 linha_t.get('SH% Sobrecarga', np.nan)):
                                                             rel_shmax = linha_t['SH% Sobrecarga']
                                                         else:
-                                                            rel_shmax = linha_t['SH (lb/gal)'] / sv
+                                                            rel_shmax = (linha_t['SH (psi)'] / (0.1704 * prof)) / sv
 
                                                         if 'Sh% Sobrecarga' in df_tvp.columns and pd.notna(
                                                                 linha_t.get('Sh% Sobrecarga', np.nan)):
                                                             rel_shmin = linha_t['Sh% Sobrecarga']
                                                         else:
-                                                            rel_shmin = linha_t['Sh (lb/gal)'] / sv
+                                                            rel_shmin = (linha_t['Sh (psi)'] / (0.1704 * prof)) / sv
 
-                                                        texto_tensoes = (
-                                                            f"SH = {rel_shmax:.2f}·σv | Dir. SH = {dir_shmax:.1f}°\n"
-                                                            f"Sh = {rel_shmin:.2f}·σv | Dir. Sh = {dir_shmin:.1f}°"
+                                                        from matplotlib.offsetbox import AnchoredOffsetbox, VPacker, \
+                                                            TextArea
+                                                        linha_SH = TextArea(
+                                                            f"SH = {rel_shmax:.2f}·σv | Dir. SH = {dir_shmax:.1f}°",
+                                                            textprops=dict(
+                                                                color="red",
+                                                                fontsize=9,
+                                                                fontweight="bold"
+                                                            )
                                                         )
+
+                                                        linha_Sh = TextArea(
+                                                            f"Sh = {rel_shmin:.2f}·σv | Dir. Sh = {dir_shmin:.1f}°",
+                                                            textprops=dict(
+                                                                color="green",
+                                                                fontsize=9,
+                                                                fontweight="bold"
+                                                            )
+                                                        )
+
+                                                        linhas_caixa = [linha_SH, linha_Sh]
 
                                                         if pd.notna(azimute_poco):
-                                                            texto_tensoes += f"\nAzimute final do poço = {azimute_poco:.1f}°"
+                                                            linha_azi = TextArea(
+                                                                f"Azimute final do poço = {azimute_poco:.1f}°",
+                                                                textprops=dict(
+                                                                    color="black",
+                                                                    fontsize=9,
+                                                                    fontweight="bold"
+                                                                )
+                                                            )
 
-                                                        ax.text(
-                                                            0.98, 0.99,
-                                                            texto_tensoes,
-                                                            transform=ax.transAxes,
-                                                            fontsize=9,
-                                                            verticalalignment='top',
-                                                            horizontalalignment='right',
-                                                            bbox=dict(
-                                                                boxstyle='round',
-                                                                facecolor='white',
-                                                                alpha=0.85,
-                                                                edgecolor='black'
-                                                            ),
-                                                            zorder=20
+                                                            linhas_caixa.append(linha_azi)
+
+                                                        if st.session_state.get("rosa_jo", "Sim") == "Sim":
+                                                            plotar_rosa_dos_ventos_inset_jo(
+                                                                ax=ax,
+                                                                direcao_shmax=dir_shmax,
+                                                                direcao_shmin=dir_shmin,
+                                                                azimute_poco=azimute_poco,
+                                                                posicao=(0.025, 0.828, 0.2, 0.2)
+                                                            )
+
+                                                        caixa_texto = VPacker(
+                                                            children=linhas_caixa,
+                                                            align="right",
+                                                            pad=0,
+                                                            sep=2
                                                         )
+
+                                                        caixa_ancorada = AnchoredOffsetbox(
+                                                            loc="upper right",
+                                                            child=caixa_texto,
+                                                            pad=0.25,
+                                                            frameon=True,
+                                                            bbox_to_anchor=(0.98, 0.99),
+                                                            bbox_transform=ax.transAxes,
+                                                            borderpad=0.45
+                                                        )
+
+                                                        caixa_ancorada.patch.set_boxstyle("round,pad=0.35")
+                                                        caixa_ancorada.patch.set_facecolor("white")
+                                                        caixa_ancorada.patch.set_alpha(0.85)
+                                                        caixa_ancorada.patch.set_edgecolor("black")
+                                                        caixa_ancorada.set_zorder(20)
+
+                                                        ax.add_artist(caixa_ancorada)
                                                 except Exception:
                                                     pass
 
@@ -14155,18 +14623,19 @@ def geo_page():
                                             x_fs_sup = np.asarray(x_min_sup, dtype=float).copy()
 
                                         # Janela útil (verde)
-                                        mascara_janela = x_fs_sup > x_fs_inf
-                                        if np.any(mascara_janela):
-                                            ax.fill_betweenx(
-                                                y_vals,
-                                                x_fs_inf,
-                                                x_fs_sup,
-                                                where=mascara_janela,
-                                                interpolate=True,
-                                                color='lightgreen',
-                                                alpha=0.25,
-                                                label='Janela Operacional'
-                                            )
+                                        if st.session_state.jo:
+                                            mascara_janela = x_fs_sup > x_fs_inf
+                                            if np.any(mascara_janela):
+                                                ax.fill_betweenx(
+                                                    y_vals,
+                                                    x_fs_inf,
+                                                    x_fs_sup,
+                                                    where=mascara_janela,
+                                                    interpolate=True,
+                                                    color='lightgreen',
+                                                    alpha=0.25,
+                                                    label='Janela Operacional'
+                                                )
 
                                         # Faixa consumida pelo FS inferior (vermelho)
                                         if st.session_state.ijo:
@@ -14603,8 +15072,13 @@ def geo_page():
                                                 )
 
                                             with st.expander("Configurações da Legenda", expanded=False):
-                                                # st.checkbox('Exibir Legendas', key='leg', value=True)
                                                 st.selectbox("Exibir configuração das tensões", ['Sim', 'Não'],key="ctjo")
+                                                st.selectbox(
+                                                    "Exibir rosa dos ventos",
+                                                    ['Sim', 'Não'],
+                                                    key="rosa_jo",
+                                                    index=0
+                                                )
                                                 st.selectbox("Exibir legendas", ['Sim', 'Não'], key="leg", index=1)
 
                                                 if st.session_state.leg == "Sim":
@@ -14746,8 +15220,8 @@ def geo_page():
                                 tvd = linha['Profundidade (m)']
                                 pressure = linha['Gradiente de Pressão de Poros (lb/gal)']
                                 sig_a = sa * 0.1704 * tvd - pressure * 0.1704 * tvd
-                                sig_h = linha['Sh (lb/gal)'] * 0.1704 * tvd
-                                sig_H = linha['SH (lb/gal)'] * 0.1704 * tvd
+                                sig_h = linha['Sh (psi)']
+                                sig_H = linha['SH (psi)']
                                 ang_theta = linha['θA (°)']
                                 ang_azi = linha['Azi']
                                 ang_inc = linha['Inc']
@@ -15237,7 +15711,7 @@ def geo_page():
                                     )
 
                                     grad_fratura_mohr = pd.to_numeric(
-                                        df_suav[["Tração Superior (σθA)", "Tração Superior (σθB)"]].min(axis=1),
+                                        df_tvp[["Tração Superior (σθA)", "Tração Superior (σθB)"]].min(axis=1),
                                         errors="coerce"
                                     ).reset_index(drop=True)
 
@@ -15264,10 +15738,10 @@ def geo_page():
 
                                     df_sapata = pd.DataFrame({
                                         "Profundidade (m)": pd.to_numeric(
-                                            df_suav["Profundidade (m)"], errors="coerce"
+                                            df_tvp["Profundidade (m)"], errors="coerce"
                                         ).reset_index(drop=True),
                                         "Gradiente de Pressão de Poros (lb/gal)": pd.to_numeric(
-                                            df_suav["Gradiente de Pressão de Poros (lb/gal)"], errors="coerce"
+                                            df_tvp["Gradiente de Pressão de Poros (lb/gal)"], errors="coerce"
                                         ).reset_index(drop=True),
                                         "Gradiente de Fratura (lb/gal)": grad_fratura_sapata
                                     }).copy()
@@ -15421,8 +15895,8 @@ def geo_page():
                                             manual_c2b_ativa = (
                                                     prof_sapata_manual_c2b > float(
                                                 prof_sapata_superficie) + tol_sapata_manual_c2b
-                                                    and prof_sapata_manual_c2b < float(
-                                                prof_final_poco) - tol_sapata_manual_c2b
+                                                    and prof_sapata_manual_c2b <= float(
+                                                prof_final_poco) + tol_sapata_manual_c2b
                                             )
 
                                         sapatas_calculadas = []
@@ -15565,13 +16039,22 @@ def geo_page():
                                                     and not manual_c2b_assentada
                                                     and prof_sapata_manual_c2b is not None
                                                     and float(prof_sapata_atual) < float(
-                                                prof_sapata_manual_c2b) < float(prof_final_poco)
+                                                prof_sapata_manual_c2b) <= float(
+                                                prof_final_poco) + tol_sapata_manual_c2b
                                             ):
-                                                idx_sapata_manual_c2b = (
-                                                        df_sapata["Profundidade (m)"] - float(prof_sapata_manual_c2b)
-                                                ).abs().idxmin()
-
-                                                prof_sapata_manual_calc_c2b = float(prof_sapata_manual_c2b)
+                                                if chegou_na_profundidade_final(
+                                                        prof_sapata_manual_c2b,
+                                                        base_final=prof_final_poco,
+                                                        tol=tol_sapata_manual_c2b
+                                                ):
+                                                    prof_sapata_manual_calc_c2b = float(prof_final_poco)
+                                                    idx_sapata_manual_c2b = df_sapata["Profundidade (m)"].idxmax()
+                                                else:
+                                                    prof_sapata_manual_calc_c2b = float(prof_sapata_manual_c2b)
+                                                    idx_sapata_manual_c2b = (
+                                                            df_sapata["Profundidade (m)"] - float(
+                                                        prof_sapata_manual_calc_c2b)
+                                                    ).abs().idxmin()
 
                                             candidatos = []
 
@@ -15630,10 +16113,13 @@ def geo_page():
                                                 "Sapata definida pelo usuário"
                                             )
 
-                                            if chegou_na_profundidade_final(
-                                                    prof_sapata_nova,
-                                                    base_final=prof_final_poco,
-                                                    tol=0.5
+                                            if (
+                                                    chegou_na_profundidade_final(
+                                                        prof_sapata_nova,
+                                                        base_final=prof_final_poco,
+                                                        tol=0.5
+                                                    )
+                                                    and not eh_sapata_manual_c2b
                                             ):
                                                 mask_preencher = rho_kt.notna()
 
