@@ -746,6 +746,19 @@ def tensoes():
 
         # Botão para confirmar e fechar a aba
         if st.button("Inserir Direção das Tensões In Situ", use_container_width=True, type="primary"):
+            tise = st.session_state.tise.copy()
+
+            tise["Profundidade (m)"] = pd.to_numeric(tise["Profundidade (m)"], errors="coerce")
+            tise["Direção SH"] = pd.to_numeric(tise["Direção SH"], errors="coerce")
+
+            tise = (
+                tise
+                .dropna(subset=["Profundidade (m)", "Direção SH"])
+                .sort_values("Profundidade (m)")
+                .reset_index(drop=True)
+            )
+
+            st.session_state.tise = tise
             st.session_state.direct = True
             st.rerun()
 
@@ -783,6 +796,54 @@ def interpolar_direcao_sh(df_ref: pd.DataFrame, profundidades: pd.Series) -> pd.
     return pd.Series(direcao, index=profundidades.index)
 
 
+def interpolar_relacao_tensoes(df_ref: pd.DataFrame, profundidades: pd.Series) -> pd.DataFrame:
+    df_ref = df_ref.copy()
+
+    df_ref["Profundidade (m)"] = pd.to_numeric(df_ref["Profundidade (m)"], errors="coerce")
+    df_ref["SH% Sobrecarga"] = pd.to_numeric(df_ref["SH% Sobrecarga"], errors="coerce")
+    df_ref["Sh% Sobrecarga"] = pd.to_numeric(df_ref["Sh% Sobrecarga"], errors="coerce")
+
+    df_ref = (
+        df_ref
+        .dropna(subset=["Profundidade (m)", "SH% Sobrecarga", "Sh% Sobrecarga"])
+        .sort_values("Profundidade (m)")
+        .drop_duplicates(subset=["Profundidade (m)"], keep="last")
+    )
+
+    prof = pd.to_numeric(profundidades, errors="coerce").to_numpy(dtype=float)
+
+    if df_ref.empty:
+        return pd.DataFrame({
+            "SH% Sobrecarga": np.full(len(prof), 0.70),
+            "Sh% Sobrecarga": np.full(len(prof), 0.70),
+        }, index=profundidades.index)
+
+    if len(df_ref) == 1:
+        return pd.DataFrame({
+            "SH% Sobrecarga": np.full(len(prof), float(df_ref["SH% Sobrecarga"].iloc[0])),
+            "Sh% Sobrecarga": np.full(len(prof), float(df_ref["Sh% Sobrecarga"].iloc[0])),
+        }, index=profundidades.index)
+
+    x = df_ref["Profundidade (m)"].to_numpy(dtype=float)
+
+    rel_sh = np.interp(
+        prof,
+        x,
+        df_ref["SH% Sobrecarga"].to_numpy(dtype=float)
+    )
+
+    rel_shmin = np.interp(
+        prof,
+        x,
+        df_ref["Sh% Sobrecarga"].to_numpy(dtype=float)
+    )
+
+    return pd.DataFrame({
+        "SH% Sobrecarga": rel_sh,
+        "Sh% Sobrecarga": rel_shmin,
+    }, index=profundidades.index)
+
+
 
 @st.dialog("Relação das tensões horizontais", width="large")
 def rel_hor():
@@ -802,10 +863,24 @@ def rel_hor():
         )
 
         if st.button(
-            "Inserir Relação das Tensões Horizontais",
-            use_container_width=True,
-            type="primary"
+                "Inserir Relação das Tensões Horizontais",
+                use_container_width=True,
+                type="primary"
         ):
+            rel_hor_df = st.session_state.rel_hor_df.copy()
+
+            rel_hor_df["Profundidade (m)"] = pd.to_numeric(rel_hor_df["Profundidade (m)"], errors="coerce")
+            rel_hor_df["SH% Sobrecarga"] = pd.to_numeric(rel_hor_df["SH% Sobrecarga"], errors="coerce")
+            rel_hor_df["Sh% Sobrecarga"] = pd.to_numeric(rel_hor_df["Sh% Sobrecarga"], errors="coerce")
+
+            rel_hor_df = (
+                rel_hor_df
+                .dropna(subset=["Profundidade (m)", "SH% Sobrecarga", "Sh% Sobrecarga"])
+                .sort_values("Profundidade (m)")
+                .reset_index(drop=True)
+            )
+
+            st.session_state.rel_hor_df = rel_hor_df
             st.session_state.rel_hor = True
             st.rerun()
 
@@ -2382,53 +2457,73 @@ def _limitar_perfilagem_ao_tvd_final(
 
 def _gerar_df_interp_a_partir_df1_df2(df1: pd.DataFrame, df2: pd.DataFrame) -> pd.DataFrame:
     """
-    Replica a lógica do seu direcional(): interpola Inc/Azi da df2 para as profundidades de df1.
-    Usa a mesma regra de expandir do zero via st.session_state.ex == 'Ativada'
+    Gera df_interp usando a trajetória calculada por mínima curvatura.
+    Interpola Inc em função do TVD da perfilagem.
+    Mantém Azi em degrau, usando o último azimute conhecido.
     """
-    # mesma lógica que você já usa dentro do direcional() :contentReference[oaicite:2]{index=2}
     expand_from_zero = (st.session_state.get("ex", "Desativada") == "Ativada")
 
-    col_md1 = [col for col in df1.columns if "md" in col.lower()]
-    col_md2 = [col for col in df2.columns if "md" in col.lower()]
+    col_prof1 = [col for col in df1.columns if "profund" in col.lower()]
 
-    if not col_md1 or not col_md2:
-        raise ValueError("Colunas de profundidade MD não encontradas em df1 ou df2.")
-    if "Inc" not in df2.columns or "Azi" not in df2.columns:
-        raise ValueError("df2 precisa conter colunas 'Inc' e 'Azi'.")
+    if not col_prof1:
+        raise ValueError("Coluna de profundidade não encontrada em df1.")
 
-    md1_col = col_md1[0]
-    md2_col = col_md2[0]
+    prof1_col = col_prof1[0]
 
-    md2 = df2[md2_col].astype(float).values
-    inc2 = df2["Inc"].astype(float).values
-    azi2 = df2["Azi"].astype(float).values
+    df_out = _calcular_trajetoria_min_curvatura(df2)
 
-    sort_idx = np.argsort(md2)
-    md2_sorted = md2[sort_idx]
-    inc2_sorted = inc2[sort_idx]
-    azi2_sorted = azi2[sort_idx]
+    tvd_out = pd.to_numeric(df_out["TVD"], errors="coerce").to_numpy(dtype=float)
+    md_out = pd.to_numeric(df_out["MD"], errors="coerce").to_numpy(dtype=float)
+    inc_out = pd.to_numeric(df_out["Inclinação (°)"], errors="coerce").to_numpy(dtype=float)
+    azi_out = pd.to_numeric(df_out["Azimute (°)"], errors="coerce").to_numpy(dtype=float)
 
-    md1_original = df1[md1_col].astype(float).values
-    md1_original = np.sort(md1_original)
+    sort_idx = np.argsort(tvd_out)
+    tvd_sorted = tvd_out[sort_idx]
+    md_sorted = md_out[sort_idx]
+    inc_sorted = inc_out[sort_idx]
+    azi_sorted = azi_out[sort_idx]
+
+    valid = (
+        np.isfinite(tvd_sorted)
+        & np.isfinite(md_sorted)
+        & np.isfinite(inc_sorted)
+        & np.isfinite(azi_sorted)
+    )
+
+    tvd_sorted = tvd_sorted[valid]
+    md_sorted = md_sorted[valid]
+    inc_sorted = inc_sorted[valid]
+    azi_sorted = azi_sorted[valid]
+
+    if len(tvd_sorted) == 0:
+        raise ValueError("df_out da trajetória ficou vazio após limpeza dos dados.")
+
+    tvd1_original = pd.to_numeric(df1[prof1_col], errors="coerce").dropna().to_numpy(dtype=float)
+    tvd1_original = np.sort(tvd1_original)
 
     if expand_from_zero:
-        first_depth = md1_original[0]
-        md1_extra = np.arange(0, first_depth, 1.0)
-        md1 = np.concatenate((md1_extra, md1_original))
+        first_depth = tvd1_original[0]
+        tvd1_extra = np.arange(0, first_depth, 1.0)
+        tvd1 = np.concatenate((tvd1_extra, tvd1_original))
     else:
-        md1 = md1_original.copy()
+        tvd1 = tvd1_original.copy()
 
-    inc_interp = np.interp(md1, md2_sorted, inc2_sorted)
-    idx = np.searchsorted(md2_sorted, md1, side="right") - 1
-    idx = np.clip(idx, 0, len(azi2_sorted) - 1)
-    azi_interp = azi2_sorted[idx]
+    md_interp = np.interp(tvd1, tvd_sorted, md_sorted)
+    inc_interp = np.interp(tvd1, tvd_sorted, inc_sorted)
+
+    idx = np.searchsorted(tvd_sorted, tvd1, side="right") - 1
+    idx = np.clip(idx, 0, len(azi_sorted) - 1)
+    azi_interp = azi_sorted[idx]
 
     df_interp = pd.DataFrame({
-        "Profundidade": md1,
+        "Profundidade": tvd1,
+        "MD": md_interp,
         "Inc (°)": inc_interp,
         "Azi (°)": azi_interp
     })
+
     return df_interp
+
 
 
 def _ler_litologia_do_xlsm(wb) -> pd.DataFrame:
@@ -5099,7 +5194,34 @@ def _asp_desenhar_sapata(ax, x_left, x_right, parede, y, dx, dy):
 
 def _asp_plotar_esquematico(df):
     df = _asp_preparar_dados(df)
+    def _asp_tvd_por_md(md):
+        df_ref = st.session_state.get("df_tvp", None)
 
+        if not isinstance(df_ref, pd.DataFrame) or df_ref.empty:
+            return np.nan
+
+        if "MD" not in df_ref.columns or "Profundidade (m)" not in df_ref.columns:
+            return np.nan
+
+        base_ref = df_ref[["MD", "Profundidade (m)"]].copy()
+        base_ref["MD"] = pd.to_numeric(base_ref["MD"], errors="coerce")
+        base_ref["Profundidade (m)"] = pd.to_numeric(base_ref["Profundidade (m)"], errors="coerce")
+
+        base_ref = (
+            base_ref
+            .dropna(subset=["MD", "Profundidade (m)"])
+            .sort_values("MD")
+            .drop_duplicates(subset=["MD"], keep="last")
+        )
+
+        if base_ref.empty:
+            return np.nan
+
+        return float(np.interp(
+            float(md),
+            base_ref["MD"],
+            base_ref["Profundidade (m)"]
+        ))
     if df.empty:
         return None, None
 
@@ -5364,25 +5486,8 @@ def _asp_plotar_esquematico(df):
             )
         )
 
-        # ax.text(
-        #     diam_furo / 2 + diam_max * 0.04,
-        #     (topo_aberto + base_aberto) / 2,
-        #     "Poço aberto",
-        #     ha="left",
-        #     va="center",
-        #     fontsize=10,
-        #     fontweight="bold",
-        #     bbox=dict(
-        #         facecolor="white",
-        #         edgecolor="red",
-        #         boxstyle="round,pad=0.2"
-        #     ),
-        #     zorder=40
-        # )
-
     # 8) Caixas laterais
     for i, (_, row) in enumerate(df.iterrows()):
-        # Remove a primeira caixa, referente ao revestimento condutor / Fase 0
         if i == 0:
             continue
 
@@ -5392,18 +5497,33 @@ def _asp_plotar_esquematico(df):
         diam_furo = float(row["diam_furo"])
 
         if tipo == "poço aberto":
-            txt = (
-                f'{row["fase"]}\n'
-                f"Poço aberto\n"
-                f'Diâmetro da fase: {_asp_fmt_pol(diam_furo)}"\n'
-                f"Fundo: {base:.1f} m"
-            )
+            if st.session_state.get("t_prof") == "MD":
+                fundo_md = base
+                fundo_tvd = _asp_tvd_por_md(fundo_md)
+
+                txt = (
+                    f'{row["fase"]}\n'
+                    f"Poço aberto\n"
+                    f'Diâmetro da fase: {_asp_fmt_pol(diam_furo)}"\n'
+                    f"Fundo TVD: {fundo_tvd:.1f} m\n"
+                    f"Fundo MD: {fundo_md:.1f} m"
+
+                )
+            else:
+                txt = (
+                    f'{row["fase"]}\n'
+                    f"Poço aberto\n"
+                    f'Diâmetro da fase: {_asp_fmt_pol(diam_furo)}"\n'
+                    f"Fundo: {base:.1f} m (TVD)"
+                )
+
+
         else:
             txt = (
                 f'{row["fase"]}\n'
                 f'Rev.: {_asp_fmt_pol(row["diam_rev"])}"\n'
                 f'Diâmetro da fase: {_asp_fmt_pol(diam_furo)}"\n'
-                f"Sapata: {base:.1f} m"
+                f"Sapata TVD: {base:.1f} m"
             )
 
         ax.text(
@@ -5420,6 +5540,67 @@ def _asp_plotar_esquematico(df):
             ),
             zorder=40
         )
+    if st.session_state.get("t_prof") == "MD":
+        inicio_horizontal = st.session_state.get("inicio_trecho_horizontal_jo")
+
+        if inicio_horizontal is None or pd.isna(inicio_horizontal):
+            df_ref = st.session_state.get("df_tvp", None)
+            if isinstance(df_ref, pd.DataFrame) and not df_ref.empty:
+                if "MD" in df_ref.columns and "Profundidade (m)" in df_ref.columns:
+                    base_ref = df_ref[["MD", "Profundidade (m)"]].copy()
+                    base_ref["MD"] = pd.to_numeric(base_ref["MD"], errors="coerce")
+                    base_ref["Profundidade (m)"] = pd.to_numeric(base_ref["Profundidade (m)"], errors="coerce")
+                    base_ref = (
+                        base_ref
+                        .dropna(subset=["MD", "Profundidade (m)"])
+                        .sort_values("MD")
+                        .drop_duplicates(subset=["MD"], keep="last")
+                    )
+
+                    if len(base_ref) >= 2:
+                        md_vals = base_ref["MD"].to_numpy(dtype=float)
+                        tvd_vals = base_ref["Profundidade (m)"].to_numpy(dtype=float)
+                        dmd = np.diff(md_vals)
+                        dtvd = np.diff(tvd_vals)
+                        idx_horizontal = np.where((dmd > 0) & (np.abs(dtvd) <= 1e-6))[0]
+
+                        if len(idx_horizontal) > 0:
+                            inicio_horizontal = float(md_vals[idx_horizontal[0]])
+
+        if inicio_horizontal is not None and pd.notna(inicio_horizontal):
+            inicio_horizontal = float(inicio_horizontal)
+            if 0 <= inicio_horizontal <= prof_final:
+                x_inicio_linha = 0.0
+
+                if not df_revestido.empty:
+                    ultimo_rev_linha = df_revestido.sort_values("base_intervalo").iloc[-1]
+                    x_inicio_linha = float(ultimo_rev_linha["diam_rev"]) / 2 + dx_sapata * 0.15
+                elif not df_aberto.empty:
+                    x_inicio_linha = float(df_aberto.iloc[-1]["diam_furo"]) / 2
+
+                ax.annotate(
+                    "Início do trecho horizontal",
+                    xy=(x_inicio_linha, inicio_horizontal),
+                    xytext=(x_lim * 0.45, inicio_horizontal),
+                    ha="left",
+                    va="center",
+                    fontsize=10,
+                    fontweight="bold",
+                    color="red",
+                    bbox=dict(
+                        facecolor="white",
+                        edgecolor="black",
+                        boxstyle="round,pad=0.2"
+                    ),
+                    arrowprops=dict(
+                        arrowstyle="-",
+                        linestyle=(0, (2, 2)),
+                        color="black",
+                        lw=2.
+                    ),
+                    zorder=45
+                )
+
     # 9) linhas pretas nas laterais do hatch do poço aberto
     for _, row in df_aberto.iterrows():
         topo_aberto = float(row["topo_intervalo"])
@@ -5462,6 +5643,37 @@ def _asp_plotar_esquematico(df):
     plt.tight_layout()
 
     return fig, df
+
+
+def repetir_ultima_linha_ate_md_final(df_tvp: pd.DataFrame, md_final: float, passo: float = 1.0) -> pd.DataFrame:
+    df_tvp = df_tvp.copy()
+
+    if "MD" not in df_tvp.columns or df_tvp.empty:
+        return df_tvp
+
+    md_atual_final = float(df_tvp["MD"].max())
+    md_final = float(md_final)
+
+    if md_final <= md_atual_final:
+        return df_tvp
+
+    novos_mds = np.arange(md_atual_final + passo, md_final + passo, passo)
+    novos_mds = novos_mds[novos_mds <= md_final]
+
+    if len(novos_mds) == 0:
+        return df_tvp
+
+    ultima_linha = df_tvp.iloc[-1].copy()
+    linhas_extra = pd.DataFrame([ultima_linha] * len(novos_mds))
+
+    linhas_extra["MD"] = novos_mds
+
+    if "Linha Extrapolada" in linhas_extra.columns:
+        linhas_extra["Linha Extrapolada"] = True
+
+    df_tvp = pd.concat([df_tvp, linhas_extra], ignore_index=True)
+
+    return df_tvp
 
 
 PAGINAS_PDF_OPCOES = {
@@ -12333,15 +12545,11 @@ def geo_page():
                                     if "direct" not in st.session_state:
                                         st.session_state.direct = False
                                     if st.session_state.direct:
-                                        df_pp = pd.merge_asof(
-                                            df_pp,
+                                        dir_H = interpolar_direcao_sh(
                                             st.session_state.tise,
-                                            on="Profundidade (m)",
-                                            direction="backward"
+                                            df_pp["Profundidade (m)"]
                                         )
-                                        dir_H = df_pp['Direção SH']
-                                        dir_h = df_pp['Direção SH'] + 90
-
+                                        dir_h = (dir_H + 90) % 360
                                     else:
                                         dir_H = 0
                                         dir_h = 90
@@ -12363,8 +12571,8 @@ def geo_page():
                                                 type="primary"
                                         ):
                                             st.session_state.rel_hor = False
-                                            st.session_state.SH = 0.61
-                                            st.session_state.Sh = 0.6
+                                            st.session_state.SH = 0.70
+                                            st.session_state.Sh = 0.70
 
                                             if "rel_hor_df" in st.session_state:
                                                 del st.session_state.rel_hor_df
@@ -12380,8 +12588,8 @@ def geo_page():
                             # =========================
                             PLOT_DEFAULTS_ORIGINAIS = {
                                 "jo": True,
-                                "suav_max_inf": True,
-                                "suav_min_sup": True,
+                                "suav_max_inf": False,
+                                "suav_min_sup": False,
                                 "ijo": True,
                                 "sjo": True,
                                 "li": False,
@@ -12705,8 +12913,26 @@ def geo_page():
                                                 st.session_state.y = df_tvp['Profundidade (m)']
                                                 prof_final = st.session_state.y_max_pp
                                             else:
-                                                st.session_state.y = df_tvp['MD']
-                                                prof_final = df_tvp['MD'].max() + 100
+                                                md_final_poco = df_tvp["MD"].max()
+
+                                                if "df2" in st.session_state and isinstance(st.session_state.df2,
+                                                                                            pd.DataFrame):
+                                                    md_final_poco = max(md_final_poco, st.session_state.df2["MD"].max())
+
+                                                st.session_state.y = df_tvp["MD"]
+                                                prof_final = md_final_poco
+
+                                            mask_extrap = (
+                                                    st.session_state.onshore
+                                                    and st.session_state.ex == 'Ativada'
+                                                    and df_tvp['Linha Extrapolada']
+                                            )
+
+                                            mask_calculo_valido = (
+                                                    ~df_tvp['Linha Extrapolada']
+                                                    & df_tvp['Perfil sônico (µs/pé)'].notna()
+                                                    & (df_tvp['Perfil sônico (µs/pé)'] > 0)
+                                            )
 
                                             profundidade_proxima = st.session_state.y.loc[
                                                 (st.session_state.y - st.session_state.m).abs().idxmin()
@@ -12724,12 +12950,20 @@ def geo_page():
                                             )
 
                                             if "df_interp" in st.session_state:
-                                                df_tvp["Inc"] = np.interp(st.session_state.y,
-                                                                          st.session_state.df_interp["Profundidade"],
-                                                                          st.session_state.df_interp["Inc (°)"])
-                                                df_tvp["Azi"] = np.interp(st.session_state.y,
-                                                                          st.session_state.df_interp["Profundidade"],
-                                                                          st.session_state.df_interp["Azi (°)"])
+                                                df_tvp["Inc"] = np.interp(
+                                                    df_tvp["Profundidade (m)"],
+                                                    st.session_state.df_interp["Profundidade"],
+                                                    st.session_state.df_interp["Inc (°)"]
+                                                )
+
+                                                df_tvp["Azi"] = np.interp(
+                                                    df_tvp["Profundidade (m)"],
+                                                    st.session_state.df_interp["Profundidade"],
+                                                    st.session_state.df_interp["Azi (°)"]
+                                                )
+
+
+
 
                                             else:
                                                 if "Inc" not in df_tvp.columns:
@@ -12893,21 +13127,19 @@ def geo_page():
 
 
                                         if "rel_hor_df" in st.session_state and not st.session_state.rel_hor_df.empty:
-                                            df_tvp = pd.merge_asof(
-                                                df_tvp.sort_values("Profundidade (m)"),
-                                                st.session_state.rel_hor_df.sort_values("Profundidade (m)"),
-                                                on="Profundidade (m)",
-                                                direction="backward"
+                                            rel_interp = interpolar_relacao_tensoes(
+                                                st.session_state.rel_hor_df,
+                                                df_tvp["Profundidade (m)"]
                                             )
 
-                                            rel_sh = df_tvp["SH% Sobrecarga"].fillna(0.61)
-                                            rel_shmin = df_tvp["Sh% Sobrecarga"].fillna(0.6)
+                                            rel_sh = rel_interp["SH% Sobrecarga"]
+                                            rel_shmin = rel_interp["Sh% Sobrecarga"]
 
                                             r1 = rel_sh * df_tvp['Gradiente de Sobrecarga (lb/gal)'] * 0.1704 * df_tvp["Profundidade (m)"]
                                             r2 = rel_shmin * df_tvp['Gradiente de Sobrecarga (lb/gal)'] * 0.1704 * df_tvp["Profundidade (m)"]
                                         else:
-                                            r1 = 0.61 * df_tvp['Gradiente de Sobrecarga (lb/gal)'] * 0.1704 * df_tvp["Profundidade (m)"]
-                                            r2 = 0.6 * df_tvp['Gradiente de Sobrecarga (lb/gal)'] * 0.1704 * df_tvp["Profundidade (m)"]
+                                            r1 = 0.7 * df_tvp['Gradiente de Sobrecarga (lb/gal)'] * 0.1704 * df_tvp["Profundidade (m)"]
+                                            r2 = 0.7 * df_tvp['Gradiente de Sobrecarga (lb/gal)'] * 0.1704 * df_tvp["Profundidade (m)"]
 
                                         # Inserindo a coluna no DataFrame
                                         df_tvp.insert(
@@ -13317,8 +13549,32 @@ def geo_page():
                                                 df_tvp.loc[mask_calculo_valido, cols_min_sup].min(axis=1, skipna=True)
                                             )
 
-                                            st.session_state.df_tvp = df_tvp
+                                            if st.session_state.t_prof == "MD":
+                                                ultimo_valido = bool(mask_calculo_valido.iloc[-1]) if len(
+                                                    mask_calculo_valido) else False
 
+                                                st.session_state.inicio_trecho_horizontal_jo = None
+                                                if "MD" in df_tvp.columns and not df_tvp.empty:
+                                                    md_validos = pd.to_numeric(df_tvp["MD"], errors="coerce").dropna()
+                                                    if not md_validos.empty and pd.notna(md_final_poco):
+                                                        md_atual_final = float(md_validos.max())
+                                                        if float(md_final_poco) > md_atual_final:
+                                                            st.session_state.inicio_trecho_horizontal_jo = md_atual_final
+
+                                                df_tvp = repetir_ultima_linha_ate_md_final(
+                                                    df_tvp,
+                                                    md_final=md_final_poco,
+                                                    passo=1.0
+                                                )
+
+                                                st.session_state.y = df_tvp["MD"]
+
+                                                mask_calculo_valido = mask_calculo_valido.reindex(
+                                                    df_tvp.index,
+                                                    fill_value=ultimo_valido
+                                                )
+
+                                            st.session_state.df_tvp = df_tvp
                             def criterio_disponivel(df):
                                 colunas = [
                                     'Tração Inferior',
@@ -13423,6 +13679,7 @@ def geo_page():
                                                     'Comp Superior σθB'
                                                 ]].min(axis=1, skipna=True)
                                             )
+
                                             st.session_state.df_suav = df_suav
 
                                             colu1, colu2, colu3 = st.columns(3)
@@ -14106,32 +14363,57 @@ def geo_page():
                                                     "A janela operacional não será exibida nesse ponto."
                                                 )
                                             else:
-                                                st.markdown(
-                                                    f"""
-                                                    <div style="
-                                                        display: flex;
-                                                        justify-content: center;
-                                                        margin-top: 0px;
-                                                    ">
+                                                if max_inferior > min_superior:
+                                                    st.markdown(
+                                                        """
                                                         <div style="
-                                                            color: black;
-                                                            font-weight: bold;
-                                                            border: 2px solid black;
-                                                            border-radius: 10px;
-                                                            padding: 6px 10px;
-                                                            text-align: center;
-                                                            font-size: 15px;
-                                                            line-height: 1.2;
+                                                            display: flex;
+                                                            justify-content: center;
+                                                            margin-top: 0px;
                                                         ">
-                                                            Janela Op.<br>
-                                                            <span style="color: red; font-size: 15px;">{max_inferior:.2f}</span>
-                                                            <span style="font-size: 15px;">&lt; ρ &lt;</span>
-                                                            <span style="color: red; font-size: 15px;">{min_superior:.2f}</span>
+                                                            <div style="
+                                                                color: red;
+                                                                font-weight: bold;
+                                                                border: 2px solid black;
+                                                                border-radius: 10px;
+                                                                padding: 6px 10px;
+                                                                text-align: center;
+                                                                font-size: 15px;
+                                                                line-height: 1.2;
+                                                            ">
+                                                                Sem Janela Operaciona
+                                                            </div>
                                                         </div>
-                                                    </div>
-                                                    """,
-                                                    unsafe_allow_html=True
-                                                )
+                                                        """,
+                                                        unsafe_allow_html=True
+                                                    )
+                                                else:
+                                                    st.markdown(
+                                                        f"""
+                                                            <div style="
+                                                                display: flex;
+                                                                justify-content: center;
+                                                                margin-top: 0px;
+                                                            ">
+                                                                <div style="
+                                                                    color: black;
+                                                                    font-weight: bold;
+                                                                    border: 2px solid black;
+                                                                    border-radius: 10px;
+                                                                    padding: 6px 10px;
+                                                                    text-align: center;
+                                                                    font-size: 15px;
+                                                                    line-height: 1.2;
+                                                                ">
+                                                                    Janela Op.<br>
+                                                                    <span style="color: red; font-size: 15px;">{max_inferior:.2f}</span>
+                                                                    <span style="font-size: 15px;">&lt; ρ &lt;</span>
+                                                                    <span style="color: red; font-size: 15px;">{min_superior:.2f}</span>
+                                                                </div>
+                                                            </div>
+                                                            """,
+                                                        unsafe_allow_html=True
+                                                    )
                                         def _normalizar_angulo_360(ang, default=np.nan):
                                             try:
                                                 if pd.isna(ang):
@@ -14447,10 +14729,10 @@ def geo_page():
                                         if st.session_state.jo:
                                             ax.plot(x_max_inf, st.session_state.y, color='blue',
                                                     linestyle='-', linewidth=2,
-                                                    label="Limite Inferior da Janela Operacional")
+                                                    label="Limite Inferior da Janela Operacional", zorder=10)
                                             ax.plot(x_min_sup, st.session_state.y, color='red',
                                                     linestyle='-', linewidth=2,
-                                                    label="Limite Superior da Janela Operacional")
+                                                    label="Limite Superior da Janela Operacional", zorder=10)
 
                                         colunas_texto = [
                                             'Profundidade (m)',
@@ -14766,7 +15048,7 @@ def geo_page():
                                             ax.plot(df_tvp['Gradiente de Pressão de Poros (lb/gal)'],
                                                     st.session_state.y,
                                                     color='orange', linestyle='-', linewidth=2,
-                                                    label="Pressão de Poros")
+                                                    label="Gradiente de Pressão de Poros")
                                         if st.session_state.ti:
                                             ax.plot(df_tvp['Tração Inferior'], st.session_state.y,
                                                     color='teal', linestyle='-',
@@ -15002,6 +15284,33 @@ def geo_page():
                                                     zorder=5
                                                 )
 
+                                        if st.session_state.option == "Previsão de Geopressões":
+                                            if st.session_state.t_prof == "MD":
+                                                inicio_horizontal = st.session_state.get("inicio_trecho_horizontal_jo")
+                                                if inicio_horizontal is not None and pd.notna(inicio_horizontal):
+                                                    x_min_jo = st.session_state.get("x_min", 7)
+                                                    x_max_jo = st.session_state.get("x_max", 23)
+                                                    ax.hlines(
+                                                        y=inicio_horizontal,
+                                                        xmin=x_min_jo,
+                                                        xmax=x_max_jo,
+                                                        colors="black",
+                                                        linestyles="--",
+                                                        linewidth=2.,
+                                                        label="Início do trecho horizontal",
+                                                        zorder=6
+                                                    )
+                                                    ax.text(
+                                                        x_max_jo - (x_max_jo - x_min_jo) * 0.01,
+                                                        inicio_horizontal - 3,
+                                                        "Início do trecho horizontal",
+                                                        color="black",
+                                                        fontsize=10,
+                                                        verticalalignment="bottom",
+                                                        horizontalalignment="right",
+                                                        zorder=8
+                                                    )
+
                                         def reset_config():
                                             st.session_state.x_min = 7
                                             st.session_state.x_max = 23
@@ -15016,7 +15325,7 @@ def geo_page():
                                             df_pp,
                                             profundidades,
                                             litologias,
-                                            prof_final
+                                            prof_final+100
                                         )
 
                                         with st.expander("Configurações do Gráfico", expanded=False):
@@ -15115,7 +15424,10 @@ def geo_page():
                                         ax.set_title('Janela Operacional (lb/gal)', fontsize=14,
                                                      fontweight='bold')
                                         ax.set_xlabel('Gradiente (ppg)', fontsize=12)
-                                        ax.set_ylabel('Profundidade TVD (m)', fontsize=12)
+                                        if st.session_state.t_prof == 'TVD:':
+                                            ax.set_ylabel('Profundidade TVD (m)', fontsize=12)
+                                        else:
+                                            ax.set_ylabel('Profundidade MD (m)', fontsize=12)
                                         ax.invert_yaxis()
                                         ax.tick_params(axis='y', which='both', left=True, labelleft=True)
                                         ax.set_ylim(st.session_state.y_max, st.session_state.y_min)
@@ -15240,19 +15552,19 @@ def geo_page():
                         with tb[3]:
                             if criterio_disponivel(df_tvp):
                                 if uploaded_file:
-                                    with st.container(border=True):
-                                        try:
+                                    try:
+                                        with st.container(border=True):
                                             st.dataframe(
                                                 st.session_state.dados_lito,
                                                 use_container_width=True,
                                                 hide_index=True
                                             )
-                                        except Exception:
-                                            pass
+                                    except Exception:
+                                        pass
                                     with st.container(border=True):
                                         st.dataframe(df_tvp, use_container_width=True, hide_index=True)
-                                    with st.container(border=True):
-                                        st.dataframe(df_suav, use_container_width=True, hide_index=True)
+                                    # with st.container(border=True):
+                                    #     st.dataframe(df_suav, use_container_width=True, hide_index=True)
 
                     else:
                         st.error('Preencha corretamente a aba "Gradiente de Pressão de Poros"', icon="🚨")
@@ -16974,7 +17286,7 @@ def geo_page():
                                     st.session_state.x_max_sa = 23
                                     st.session_state.x_step_sa = 1
                                     st.session_state.y_min_sa = 0
-                                    st.session_state.y_max_sa = int(st.session_state.y.max()) + 100
+                                    st.session_state.y_max_sa = int(df_pp['Profundidade (m)'].max()) + 100
                                     st.session_state.y_step_sa = 50
                                 with st.expander("Configurações do Gráfico", expanded=False):
                                     st.checkbox('Exibir Legendas', key='leg_sa', value=False)
@@ -16989,7 +17301,7 @@ def geo_page():
                                                     key="y_min_sa")
                                     st.number_input(
                                         "Eixo Y - máximo",
-                                        value=int(st.session_state.y.max()) + 100,
+                                        value=int(df_pp['Profundidade (m)'].max()) + 100,
                                         step=100,
                                         key="y_max_sa"
                                     )
@@ -17028,7 +17340,7 @@ def geo_page():
                                         ax = st.session_state.fig_asp.add_subplot(gs[3], sharey=ax_idade)
 
                                         idade_formacao(ax_idade, st.session_state.df_idade,
-                                                       df_pp['Profundidade (m)'].max() + 100)
+                                                       df_sapata['Profundidade (m)'].max() + 100)
 
                                         # remove ticks e labels da coluna de idade
                                         ax_idade.tick_params(
@@ -17067,7 +17379,7 @@ def geo_page():
                                         df_pp,
                                         profundidades,
                                         litologias,
-                                        st.session_state.y_max_pp
+                                        st.session_state.y_max_sa
                                     )
 
                                     try:
@@ -17496,6 +17808,16 @@ def geo_page():
                                 st.pyplot(st.session_state.fig_asp, use_container_width=True)
 
                         with c3:
+                            def arredondar_peso_fluido_para_cima(valor, passo):
+                                valor = float(valor)
+                                passo = float(passo)
+
+                                peso = np.ceil(valor / passo) * passo
+
+                                if np.isclose(peso, valor, atol=1e-9):
+                                    peso += passo
+
+                                return round(peso, 2)
                             df_suav = st.session_state.df_suav.copy()
                             df_sapata_kt = st.session_state.df_sapata_kt.copy()
 
@@ -17599,14 +17921,17 @@ def geo_page():
                                         (df_fluido["Profundidade (m)"] <= base)
                                 )
 
+                                if "mpf" not in st.session_state:
+                                    st.session_state.mpf = 0.1
+
                                 if mask_intervalo.any():
                                     margem_intervalo = df_fluido.loc[mask_intervalo, "Margem"].max()
                                     linha_media_intervalo = df_fluido.loc[mask_intervalo, "Linha média (lb/gal)"].min()
 
-                                    peso_plot = np.ceil(margem_intervalo * 2) / 2
-                                    if np.isclose(peso_plot, margem_intervalo, atol=1e-9):
-                                        peso_plot += 0.5
-                                    peso_plot = round(peso_plot, 2)
+                                    peso_plot = arredondar_peso_fluido_para_cima(
+                                        margem_intervalo,
+                                        st.session_state.mpf
+                                    )
 
                                     df_fluido.loc[
                                         mask_intervalo,
@@ -17629,10 +17954,10 @@ def geo_page():
                                     margem_final = df_fluido.loc[mask_final, "Margem"].max()
                                     linha_media_final = df_fluido.loc[mask_final, "Linha média (lb/gal)"].min()
 
-                                    peso_plot = np.ceil(margem_final * 2) / 2
-                                    if np.isclose(peso_plot, margem_final, atol=1e-9):
-                                        peso_plot += 0.5
-                                    peso_plot = round(peso_plot, 2)
+                                    peso_plot = arredondar_peso_fluido_para_cima(
+                                        margem_final,
+                                        st.session_state.mpf
+                                    )
 
                                     df_fluido.loc[
                                         mask_final,
@@ -17722,19 +18047,33 @@ def geo_page():
                                     st.session_state.x_max_fp = 23
                                     st.session_state.x_step_fp = 1
                                     st.session_state.y_min_fp = 0
-                                    st.session_state.y_max_fp = int(st.session_state.y.max()) + 100
+                                    st.session_state.y_max_fp = int(df_sapata['Profundidade (m)'].max()) + 100
                                     st.session_state.y_step_fp = 50
 
                                 with st.expander("Configurações do Gráfico", expanded=False):
                                     st.checkbox('Exibir Legendas', key='leg_fp', value=False)
+                                    st.number_input(
+                                        "Passo de arredondamento do peso do fluido",
+                                        value=0.1,
+                                        step=0.1,
+                                        min_value=0.1,
+                                        format="%.2f",
+                                        key="mpf",
+                                        help=(
+                                            "Define o ***múltiplo*** usado para ***arredondar*** o peso do fluido sempre ***para cima*** .\n\n"
+                                            "Exemplos:\n\n"
+                                            "• 0,10 lb/gal: 9,12 → 9,20\n\n"
+                                            "• 0,50 lb/gal: 9,12 → 9,50"
+                                        )
+                                    )
+
                                     st.number_input("Eixo X - mínimo", value=7, step=1, key="x_min_fp")
                                     st.number_input("Eixo X - máximo", value=23, step=1, key="x_max_fp")
                                     st.number_input("Passo do eixo X", value=1, step=1, key="x_step_fp")
-
                                     st.number_input("Eixo Y - mínimo", value=0, step=100, key="y_min_fp")
                                     st.number_input(
                                         "Eixo Y - máximo",
-                                        value=int(st.session_state.y.max()) + 100,
+                                        value=int(df_sapata['Profundidade (m)'].max()) + 100,
                                         step=100,
                                         key="y_max_fp"
                                     )
