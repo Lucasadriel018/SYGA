@@ -24093,7 +24093,7 @@ def _montar_df_cmp_global(df_mud, df_suav):
 
 
 PAGINAS_PDF_OPCOES = {
-    "dados_poco_elevacao": "Dados do P000000000000000000oço",
+    "dados_poco_elevacao": "Dados do Poço",
     "pressao_poros_lbf": "LBF",
     "sobrecarga": "Gradiente de Sobrecarga",
     "pressao_poros_trending": "Trending",
@@ -25049,7 +25049,7 @@ def _rel_pagina_capa(c, width, height, logo_path, footer_y):
     c.drawCentredString(width / 2, height - 365, _rel_texto_seguro(well_name))
 
     c.setFont("Helvetica", 15)
-    c.drawCentredString(width / 2, height - 395, f"Responsável Técnico: {_rel_texto_seguro(user_name)}")
+    c.drawCentredString(width / 2, height - 395, f"Respppppppppppppppppppppppppponsável Técnico: {_rel_texto_seguro(user_name)}")
 
     c.setFont("Helvetica", 12)
     c.line(30, 80, width - 30, 80)
