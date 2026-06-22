@@ -1,7 +1,6 @@
 import io
 import os
 import re
-import base64
 import hashlib
 import utm
 import yaml
@@ -17279,82 +17278,58 @@ def _rtp_pdf_state_key(nome):
     return _rtp_widget_key(f"pdf_{nome}")
 
 
-def _exibir_pdf_responsivo(pdf_bytes, altura=820):
+@st.cache_data(show_spinner=False, max_entries=4)
+def _renderizar_paginas_pdf(pdf_bytes, zoom=1.45):
     """
-    Exibe o PDF com o leitor nativo do navegador.
+    Converte as paginas do PDF em PNG no servidor.
+    Isso evita bloqueios do Chrome a PDFs dentro de iframes do Streamlit.
+    """
+    import pypdfium2 as pdfium
 
-    Evita o redimensionamento interno do streamlit_pdf_viewer, que pode
-    renderizar paginas e imagens com escalas diferentes no Streamlit Cloud.
+    documento = pdfium.PdfDocument(pdf_bytes)
+    paginas_png = []
+
+    try:
+        for indice in range(len(documento)):
+            pagina = documento[indice]
+            bitmap = pagina.render(scale=float(zoom))
+            imagem = bitmap.to_pil().convert("RGB")
+            buffer_pagina = BytesIO()
+            imagem.save(buffer_pagina, format="PNG", optimize=True)
+            paginas_png.append(buffer_pagina.getvalue())
+            bitmap.close()
+            pagina.close()
+    finally:
+        documento.close()
+
+    return paginas_png
+
+
+def _exibir_pdf_responsivo(pdf_bytes):
+    """
+    Mostra cada pagina como imagem responsiva dentro do Streamlit.
     """
     if not pdf_bytes:
         return
 
-    pdf_base64 = base64.b64encode(pdf_bytes).decode("ascii")
-    altura = max(int(altura), 300)
+    try:
+        paginas_png = _renderizar_paginas_pdf(pdf_bytes)
+    except Exception as erro:
+        st.error(f"Não foi possível gerar a pré-visualização: {erro}")
+        return
 
-    html_pdf = """
-    <style>
-        html, body {
-            margin: 0;
-            padding: 0;
-            width: 100%;
-            height: 100%;
-            overflow: hidden;
-            background: #f3f4f6;
-        }
-        #pdf-frame {
-            display: block;
-            width: 100%;
-            height: __ALTURA__px;
-            border: 0;
-            background: white;
-        }
-    </style>
-    <iframe
-        id="pdf-frame"
-        title="Visualizacao do PDF"
-        loading="eager"
-    ></iframe>
-    <script>
-        (() => {
-            const base64Pdf = "__PDF_BASE64__";
-            const binary = atob(base64Pdf);
-            const chunkSize = 1024 * 1024;
-            const chunks = [];
+    if not paginas_png:
+        st.info("O PDF não possui páginas para visualizar.")
+        return
 
-            for (let offset = 0; offset < binary.length; offset += chunkSize) {
-                const slice = binary.slice(offset, offset + chunkSize);
-                const bytes = new Uint8Array(slice.length);
+    st.caption(f"Pré-visualização — {len(paginas_png)} página(s)")
 
-                for (let i = 0; i < slice.length; i++) {
-                    bytes[i] = slice.charCodeAt(i);
-                }
-
-                chunks.push(bytes);
-            }
-
-            const blob = new Blob(chunks, { type: "application/pdf" });
-            const blobUrl = URL.createObjectURL(blob);
-            const frame = document.getElementById("pdf-frame");
-            frame.src = blobUrl + "#view=FitH&toolbar=1&navpanes=0";
-
-            window.addEventListener("beforeunload", () => {
-                URL.revokeObjectURL(blobUrl);
-            });
-        })();
-    </script>
-    """
-    html_pdf = (
-        html_pdf
-        .replace("__ALTURA__", str(altura))
-        .replace("__PDF_BASE64__", pdf_base64)
-    )
-
-    components.html(
-        html_pdf,
-        height=altura,
-        scrolling=False,
-    )
+    for numero, pagina_png in enumerate(paginas_png, start=1):
+        st.image(
+            pagina_png,
+            caption=f"Página {numero}",
+            use_container_width=True,
+        )
 
 
 def _pdf_valor_ausente(valor):
@@ -21628,7 +21603,7 @@ def pagina_relatorio_tecnico_poco():
                         key=_rtp_widget_key(f"download_pdf_{pdf_versao}"),
                     )
 
-                _exibir_pdf_responsivo(pdf_bytes, altura=800)
+                _exibir_pdf_responsivo(pdf_bytes)
             else:
                 st.info("Clique em **Gerar / atualizar PDF** para visualizar o relatório.")
 
@@ -26031,13 +26006,15 @@ def pagina_relatorio():
 
     report_name = f"{nome_base}.pdf"
 
-    col_config, col_preview, c3 = st.columns((0.65, 1., 0.25))
+    # Sem coluna vazia à direita: a prévia passa a usar todo o espaço restante
+    # e cresce junto com a área principal quando o sidebar é minimizado.
+    col_config, col_preview = st.columns((0.42, 1.58), gap="small")
 
     with col_config:
         with st.container(border=True):
             st.markdown("### Páginas do relatório")
 
-            col_sel1, col_sel2 = st.columns(2)
+            col_sel1, col_sel2 = st.columns((0.7,1.0))
 
             with col_sel1:
                 if st.button(
@@ -26110,12 +26087,9 @@ def pagina_relatorio():
                 )
 
     with col_preview:
-        with st.container(border=True, height=900):
+        with st.container(border=True):
             if st.session_state.pdf_view_open and st.session_state.pdf_bytes is not None:
-                _exibir_pdf_responsivo(
-                    st.session_state.pdf_bytes,
-                    altura=840,
-                )
+                _exibir_pdf_responsivo(st.session_state.pdf_bytes)
             else:
                 st.info("Clique em **Ver Relatório** para gerar a pré-visualização.")
 
