@@ -63,36 +63,6 @@ PAGE_CONFIG = {
 
 st.set_page_config(**PAGE_CONFIG)
 
-hide_st_style = """
-<style>
-#MainMenu {
-    visibility: hidden;
-}
-
-footer {
-    visibility: hidden;
-}
-
-header[data-testid="stHeader"] {
-    visibility: hidden;
-    background: transparent;
-}
-
-header[data-testid="stHeader"] [data-testid="collapsedControl"],
-header[data-testid="stHeader"] [data-testid="stSidebarCollapsedControl"],
-[data-testid="collapsedControl"],
-[data-testid="stSidebarCollapsedControl"] {
-    display: flex !important;
-    visibility: visible !important;
-    opacity: 1 !important;
-    pointer-events: auto !important;
-    z-index: 100000 !important;
-}
-</style>
-"""
-
-st.markdown(hide_st_style, unsafe_allow_html=True)
-
 st.markdown(
     """
     <style>
@@ -123,13 +93,10 @@ st.markdown(
         max-width: 0 !important;
     }
 
-    [data-testid="collapsedControl"],
-    [data-testid="stSidebarCollapsedControl"] {
+    [data-testid="collapsedControl"] {
         display: flex !important;
         visibility: visible !important;
-        opacity: 1 !important;
-        pointer-events: auto !important;
-        z-index: 100000 !important;
+        z-index: 100000;
     }
 
     [data-testid="stSidebar"] * {
