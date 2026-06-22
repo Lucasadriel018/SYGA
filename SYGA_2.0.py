@@ -24093,7 +24093,7 @@ def _montar_df_cmp_global(df_mud, df_suav):
 
 
 PAGINAS_PDF_OPCOES = {
-    "dados_poco_elevacao": "Dados do Poço",
+    "dados_poco_elevacao": "Dados do P000000000000000000oço",
     "pressao_poros_lbf": "LBF",
     "sobrecarga": "Gradiente de Sobrecarga",
     "pressao_poros_trending": "Trending",
