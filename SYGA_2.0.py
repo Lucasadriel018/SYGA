@@ -77,8 +77,6 @@ footer {
 
 st.markdown(hide_st_style, unsafe_allow_html=True)
 
-st.set_page_config(**PAGE_CONFIG)
-
 st.markdown(
     """
     <style>
