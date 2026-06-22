@@ -1,6 +1,7 @@
 import io
 import os
 import re
+import base64
 import hashlib
 import utm
 import yaml
@@ -30,7 +31,6 @@ import streamlit_antd_components as sac
 from datetime import datetime, timedelta
 from plotly.subplots import make_subplots
 from reportlab.lib.utils import ImageReader
-from streamlit_pdf_viewer import pdf_viewer
 from scipy.interpolate import griddata, Rbf
 from scipy.ndimage import gaussian_filter1d
 import streamlit.components.v1 as components
@@ -17279,6 +17279,84 @@ def _rtp_pdf_state_key(nome):
     return _rtp_widget_key(f"pdf_{nome}")
 
 
+def _exibir_pdf_responsivo(pdf_bytes, altura=820):
+    """
+    Exibe o PDF com o leitor nativo do navegador.
+
+    Evita o redimensionamento interno do streamlit_pdf_viewer, que pode
+    renderizar paginas e imagens com escalas diferentes no Streamlit Cloud.
+    """
+    if not pdf_bytes:
+        return
+
+    pdf_base64 = base64.b64encode(pdf_bytes).decode("ascii")
+    altura = max(int(altura), 300)
+
+    html_pdf = """
+    <style>
+        html, body {
+            margin: 0;
+            padding: 0;
+            width: 100%;
+            height: 100%;
+            overflow: hidden;
+            background: #f3f4f6;
+        }
+        #pdf-frame {
+            display: block;
+            width: 100%;
+            height: __ALTURA__px;
+            border: 0;
+            background: white;
+        }
+    </style>
+    <iframe
+        id="pdf-frame"
+        title="Visualizacao do PDF"
+        loading="eager"
+    ></iframe>
+    <script>
+        (() => {
+            const base64Pdf = "__PDF_BASE64__";
+            const binary = atob(base64Pdf);
+            const chunkSize = 1024 * 1024;
+            const chunks = [];
+
+            for (let offset = 0; offset < binary.length; offset += chunkSize) {
+                const slice = binary.slice(offset, offset + chunkSize);
+                const bytes = new Uint8Array(slice.length);
+
+                for (let i = 0; i < slice.length; i++) {
+                    bytes[i] = slice.charCodeAt(i);
+                }
+
+                chunks.push(bytes);
+            }
+
+            const blob = new Blob(chunks, { type: "application/pdf" });
+            const blobUrl = URL.createObjectURL(blob);
+            const frame = document.getElementById("pdf-frame");
+            frame.src = blobUrl + "#view=FitH&toolbar=1&navpanes=0";
+
+            window.addEventListener("beforeunload", () => {
+                URL.revokeObjectURL(blobUrl);
+            });
+        })();
+    </script>
+    """
+    html_pdf = (
+        html_pdf
+        .replace("__ALTURA__", str(altura))
+        .replace("__PDF_BASE64__", pdf_base64)
+    )
+
+    components.html(
+        html_pdf,
+        height=altura,
+        scrolling=False,
+    )
+
+
 def _pdf_valor_ausente(valor):
     if valor is None:
         return True
@@ -21550,13 +21628,7 @@ def pagina_relatorio_tecnico_poco():
                         key=_rtp_widget_key(f"download_pdf_{pdf_versao}"),
                     )
 
-                pdf_viewer(
-                    input=pdf_bytes,
-                    width=650,
-                    height=800,
-                    pages_vertical_spacing=12,
-                    key=_rtp_widget_key(f"pdf_viewer"),
-                )
+                _exibir_pdf_responsivo(pdf_bytes, altura=800)
             else:
                 st.info("Clique em **Gerar / atualizar PDF** para visualizar o relatório.")
 
@@ -26040,11 +26112,9 @@ def pagina_relatorio():
     with col_preview:
         with st.container(border=True, height=900):
             if st.session_state.pdf_view_open and st.session_state.pdf_bytes is not None:
-                pdf_viewer(
-                    input=st.session_state.pdf_bytes,
-                    width=650,
-                    height=840,
-                    pages_vertical_spacing=12
+                _exibir_pdf_responsivo(
+                    st.session_state.pdf_bytes,
+                    altura=840,
                 )
             else:
                 st.info("Clique em **Ver Relatório** para gerar a pré-visualização.")
