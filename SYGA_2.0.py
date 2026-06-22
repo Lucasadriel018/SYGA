@@ -26027,7 +26027,7 @@ def pagina_relatorio():
 
     # Sem coluna vazia à direita: a prévia passa a usar todo o espaço restante
     # e cresce junto com a área principal quando o sidebar é minimizado.
-    col_config, col_preview = st.columns((0.7, 1.0), gap="small")
+    c1, col_config, col_preview, c4 = st.columns((0.1, 0.7, 1.0, 0.1), gap="small")
 
     with col_config:
         with st.container(border=True):
