@@ -19671,20 +19671,21 @@ def _rtp_estilos_geopressoes_pdf():
             "markersize": RTP_GEO_MARKERSIZE,
             "markeredgecolor": "#111111",
             "markeredgewidth": 0.8,
+            "legend_markeredgewidth": 0.4,
         },
         "Gradiente de Colapso": {
             "color": "#800080",
             "marker": "s",
             "markersize": RTP_GEO_MARKERSIZE,
             "markeredgecolor": "#111111",
-            "markeredgewidth": 0.8,
+            "markeredgewidth": 0.4,
         },
         "LOT": {
             "color": "#FF0000",
             "marker": "D",
             "markersize": RTP_GEO_MARKERSIZE,
             "markeredgecolor": "#111111",
-            "markeredgewidth": 0.8,
+            "markeredgewidth": 0.4,
         },
         "FIT": {
             "color": "#0000FF",
@@ -19978,6 +19979,12 @@ def _rtp_desenhar_legenda_geopressoes_pdf(c, dados_poco, x, y_top, largura):
         c.setFillColor(cor)
         if "marker" in estilo:
             c.setStrokeColor(HexColor(estilo.get("markeredgecolor", estilo["color"])))
+            c.setLineWidth(
+                estilo.get(
+                    "legend_markeredgewidth",
+                    estilo.get("markeredgewidth", 0.8),
+                )
+            )
             x_marcador = x_item + 17
             marcador = estilo["marker"]
             if marcador == "o":
@@ -20047,24 +20054,29 @@ def _rtp_criar_figura_geopressoes(
     valores_perdas = []
     for nome, curva in curvas:
         estilo = _rtp_estilo_geopressao(nome)
+        estilo_grafico = {
+            chave: valor
+            for chave, valor in estilo.items()
+            if not str(chave).startswith("legend_")
+        }
         if nome == "Perda de circulação":
             valores_perdas.extend(
                 pd.to_numeric(curva["Valor"], errors="coerce").dropna().tolist()
             )
-        if "marker" in estilo:
+        if "marker" in estilo_grafico:
             ax.plot(
                 curva["Valor"],
                 curva["Profundidade (m)"],
                 linestyle="none",
                 zorder=7,
-                **estilo,
+                **estilo_grafico,
             )
         else:
             ax.plot(
                 curva["Valor"],
                 curva["Profundidade (m)"],
                 zorder=4,
-                **estilo,
+                **estilo_grafico,
             )
 
     if valores_perdas:
@@ -20672,6 +20684,45 @@ def _rtp_desenhar_cronograma_pdf(c, dados_auto, dados_poco, x, y_bottom, largura
         plt.close(fig)
 
 
+def _rtp_desenhar_marca_dagua_pdf(c, page_width, page_height):
+    """
+    Desenha a marca d'agua por ultimo, sobre os graficos, para que os fundos
+    brancos das imagens nao escondam a logo.
+    """
+    try:
+        if not os.path.exists("logo_syga.png"):
+            return
+
+        logo_wm = Image.open("logo_syga.png").convert("RGBA")
+
+        # Transparencia baixa para manter curvas e textos legiveis.
+        alpha = 25
+        canal_alpha = logo_wm.getchannel("A")
+        canal_alpha = canal_alpha.point(lambda p: min(p, alpha))
+        logo_wm.putalpha(canal_alpha)
+
+        buffer_logo = BytesIO()
+        logo_wm.save(buffer_logo, format="PNG")
+        buffer_logo.seek(0)
+
+        marca_w = page_width * 0.55
+        marca_h = page_height * 0.55
+        marca_x = (page_width - marca_w) / 2
+        marca_y = (page_height - marca_h) / 2
+
+        c.drawImage(
+            ImageReader(buffer_logo),
+            marca_x,
+            marca_y,
+            width=marca_w,
+            height=marca_h,
+            preserveAspectRatio=True,
+            mask="auto",
+        )
+    except Exception:
+        pass
+
+
 def _rtp_gerar_pdf_bytes(dados_auto, dados_poco):
     """
     Gera um PDF preliminar do Relatório Técnico de Poço em memória.
@@ -20686,41 +20737,6 @@ def _rtp_gerar_pdf_bytes(dados_auto, dados_poco):
 
     margem = 18
     y_top = page_height - margem
-
-    # ============================================================
-    # Marca d'água centralizada
-    # ============================================================
-    try:
-        if os.path.exists("logo_syga.png"):
-            logo_wm = Image.open("logo_syga.png").convert("RGBA")
-
-            # Transparência da marca d'água: 0 = invisível, 255 = opaco
-            alpha = 25
-            canal_alpha = logo_wm.getchannel("A")
-            canal_alpha = canal_alpha.point(lambda p: min(p, alpha))
-            logo_wm.putalpha(canal_alpha)
-
-            buffer_logo = BytesIO()
-            logo_wm.save(buffer_logo, format="PNG")
-            buffer_logo.seek(0)
-
-            marca_w = page_width * 0.55
-            marca_h = page_height * 0.55
-
-            marca_x = (page_width - marca_w) / 2
-            marca_y = (page_height - marca_h) / 2
-
-            c.drawImage(
-                ImageReader(buffer_logo),
-                marca_x,
-                marca_y,
-                width=marca_w,
-                height=marca_h,
-                preserveAspectRatio=True,
-                mask="auto"
-            )
-    except Exception:
-        pass
 
     # ============================================================
     # Cabeçalho
@@ -20999,6 +21015,9 @@ def _rtp_gerar_pdf_bytes(dados_auto, dados_poco):
     _rtp_desenhar_cronograma_pdf(
         c, dados_auto, dados_poco, x_crono, y_blocos_bottom, w_crono, h_blocos
     )
+
+    # A marca d'agua precisa ser a ultima camada visual da pagina.
+    _rtp_desenhar_marca_dagua_pdf(c, page_width, page_height)
 
     # Rodapé
     c.setFont("Helvetica", 6)
@@ -26008,7 +26027,7 @@ def pagina_relatorio():
 
     # Sem coluna vazia à direita: a prévia passa a usar todo o espaço restante
     # e cresce junto com a área principal quando o sidebar é minimizado.
-    col_config, col_preview = st.columns((0.42, 1.58), gap="small")
+    col_config, col_preview = st.columns((0.7, 1.0), gap="small")
 
     with col_config:
         with st.container(border=True):
