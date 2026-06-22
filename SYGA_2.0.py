@@ -21080,8 +21080,6 @@ def pagina_relatorio_tecnico_poco():
         # FORM 1 - Dados gerais
         # ------------------------------------------------------------
         with st.expander("1. Dados gerais", expanded=True):
-            st.markdown("Dados já carregados automaticamente pelo SYGA:")
-
             st.caption(f"**Nome do poço:** {dados_auto['poco']}")
             st.caption(f"**Campo:** {dados_auto['campo']}")
             st.caption(f"**TVD Final:** {_rtp_fmt(dados_auto['tvd_final'], 2, ' m')}")
