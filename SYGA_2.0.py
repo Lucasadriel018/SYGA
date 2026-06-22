@@ -72,6 +72,22 @@ hide_st_style = """
 footer {
     visibility: hidden;
 }
+
+header[data-testid="stHeader"] {
+    visibility: hidden;
+    background: transparent;
+}
+
+header[data-testid="stHeader"] [data-testid="collapsedControl"],
+header[data-testid="stHeader"] [data-testid="stSidebarCollapsedControl"],
+[data-testid="collapsedControl"],
+[data-testid="stSidebarCollapsedControl"] {
+    display: flex !important;
+    visibility: visible !important;
+    opacity: 1 !important;
+    pointer-events: auto !important;
+    z-index: 100000 !important;
+}
 </style>
 """
 
@@ -107,10 +123,13 @@ st.markdown(
         max-width: 0 !important;
     }
 
-    [data-testid="collapsedControl"] {
+    [data-testid="collapsedControl"],
+    [data-testid="stSidebarCollapsedControl"] {
         display: flex !important;
         visibility: visible !important;
-        z-index: 100000;
+        opacity: 1 !important;
+        pointer-events: auto !important;
+        z-index: 100000 !important;
     }
 
     [data-testid="stSidebar"] * {
