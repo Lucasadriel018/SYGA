@@ -1,6 +1,7 @@
 import io
 import os
 import re
+import hashlib
 import utm
 import yaml
 import math
@@ -20,6 +21,7 @@ import matplotlib.image as mpimg
 import plotly.graph_objects as go
 from openpyxl import load_workbook
 from reportlab.pdfgen import canvas
+from reportlab.lib.colors import HexColor
 import matplotlib.patheffects as pe
 import matplotlib.patches as mpatches
 import matplotlib.gridspec as gridspec
@@ -27,7 +29,6 @@ from streamlit_folium import st_folium
 import streamlit_antd_components as sac
 from datetime import datetime, timedelta
 from plotly.subplots import make_subplots
-from reportlab.lib.pagesizes import letter
 from reportlab.lib.utils import ImageReader
 from streamlit_pdf_viewer import pdf_viewer
 from scipy.interpolate import griddata, Rbf
@@ -36,11 +37,11 @@ import streamlit.components.v1 as components
 import matplotlib.patheffects as path_effects
 from streamlit_js_eval import get_geolocation
 from matplotlib.patches import Rectangle, Polygon
+from reportlab.lib.pagesizes import letter, A4, landscape
 from matplotlib.offsetbox import OffsetImage, AnnotationBbox
 from statsmodels.nonparametric.smoothers_lowess import lowess
-from matplotlib.offsetbox import OffsetImage, AnnotationBbox, TextArea, VPacker
-from matplotlib.ticker import FixedLocator, FuncFormatter, LogLocator, NullFormatter
-
+from matplotlib.offsetbox import OffsetImage, AnnotationBbox, TextArea, VPacker, AnchoredOffsetbox
+from matplotlib.ticker import FixedLocator, FuncFormatter, LogLocator, MaxNLocator, NullFormatter
 # Configurações da página web
 logo = 'logo.png'
 img_logo = Image.open(logo)
@@ -48,11 +49,14 @@ img_logo = Image.open(logo)
 cab = 'logo_syng.png'
 img_cab = Image.open(cab)
 
+logo_sidebar = 'logo_syga.png'
+img_logo_sidebar = Image.open(logo_sidebar)
+
 image = Image.open(logo)
 
 PAGE_CONFIG = {
     "page_title": "SYGA",
-    "page_icon": image,
+    "page_icon": img_logo_sidebar,
     "layout": "wide",
     "initial_sidebar_state": "expanded",
 }
@@ -148,116 +152,11 @@ st.markdown(
         font-weight: 600;
         overflow-wrap: anywhere;
     }
-    
+
     </style>
     """,
     unsafe_allow_html=True
 )
-
-
-def instalar_persistencia_expanders():
-    components.html(
-        """
-        <script>
-        (() => {
-            const STORAGE_KEY = "syga_expanders_state_v1";
-            const root = window.parent.document;
-
-            const normalize = (text) => (text || "").replace(/\\s+/g, " ").trim();
-
-            const getPageKey = () => {
-                const selected =
-                    root.querySelector(".ant-tree-node-selected .ant-tree-title") ||
-                    root.querySelector('[aria-selected="true"]') ||
-                    root.querySelector('[data-testid="stSidebar"] [aria-current="page"]');
-                const header = root.querySelector("main h1, main h2, main h3");
-
-                return normalize(selected?.textContent) ||
-                    normalize(header?.textContent) ||
-                    window.parent.location.pathname ||
-                    "SYGA";
-            };
-
-            const readState = () => {
-                try {
-                    return JSON.parse(window.parent.localStorage.getItem(STORAGE_KEY) || "{}");
-                } catch (_) {
-                    return {};
-                }
-            };
-
-            const writeState = (state) => {
-                try {
-                    window.parent.localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
-                } catch (_) {}
-            };
-
-            const expanderLabel = (details) => {
-                const summary = details.querySelector("summary");
-                return normalize(summary?.innerText || summary?.textContent);
-            };
-
-            const expanderKey = (details, index) => {
-                const label = expanderLabel(details) || `Expander ${index + 1}`;
-                return `${getPageKey()}::${index}::${label}`;
-            };
-
-            const syncExpanders = () => {
-                const expanders = [
-                    ...new Set([
-                        ...root.querySelectorAll('details[data-testid="stExpander"]'),
-                        ...root.querySelectorAll('[data-testid="stExpander"] details'),
-                    ])
-                ];
-                const state = readState();
-
-                expanders.forEach((details, index) => {
-                    const key = expanderKey(details, index);
-
-                    if (Object.prototype.hasOwnProperty.call(state, key)) {
-                        const shouldOpen = Boolean(state[key]);
-                        if (details.open !== shouldOpen) {
-                            details.open = shouldOpen;
-                        }
-                    }
-
-                    if (details.dataset.sygaExpanderPersistent === "true") {
-                        return;
-                    }
-
-                    details.dataset.sygaExpanderPersistent = "true";
-                    details.addEventListener("toggle", () => {
-                        const latestState = readState();
-                        latestState[expanderKey(details, index)] = details.open;
-                        writeState(latestState);
-                    });
-                });
-            };
-
-            window.parent.__sygaExpanderSync = syncExpanders;
-
-            syncExpanders();
-            setTimeout(syncExpanders, 100);
-            setTimeout(syncExpanders, 500);
-
-            if (!window.parent.__sygaExpanderPersistenceInstalled) {
-                window.parent.__sygaExpanderPersistenceInstalled = true;
-                new MutationObserver(() => {
-                    window.parent.clearTimeout(window.parent.__sygaExpanderPersistenceTimer);
-                    window.parent.__sygaExpanderPersistenceTimer = window.parent.setTimeout(() => {
-                        window.parent.__sygaExpanderSync?.();
-                    }, 80);
-                }).observe(root.body, { childList: true, subtree: true });
-            }
-        })();
-        </script>
-        """,
-        height=0,
-        width=0,
-    )
-
-
-instalar_persistencia_expanders()
 
 st.image(img_cab, width=2000)
 
@@ -454,8 +353,6 @@ paises = {
     "Zâmbia": "zm",
     "Zimbábue": "zw"
 }
-
-
 @st.cache_data(show_spinner=False)
 def carregar_workbook(file_bytes):
     buffer = io.BytesIO(file_bytes)
@@ -498,15 +395,13 @@ def _ler_trajetoria_do_xlsm(wb, modo: str) -> pd.DataFrame:
     h_inc = ws[f"{col_inc}6"].value
     h_azi = ws[f"{col_azi}6"].value
     h_tvd = ws[f"{col_tvd}6"].value
-
     def _norm(x):
         return str(x).strip().lower() if x is not None else ""
-
     if not (
-        "md" in _norm(h_md)
-        and ("incl" in _norm(h_inc) or "inc" in _norm(h_inc))
-        and ("az" in _norm(h_azi) or "azim" in _norm(h_azi))
-        and "tvd" in _norm(h_tvd)
+            "md" in _norm(h_md)
+            and ("incl" in _norm(h_inc) or "inc" in _norm(h_inc))
+            and ("az" in _norm(h_azi) or "azim" in _norm(h_azi))
+            and "tvd" in _norm(h_tvd)
     ):
         raise ValueError(
             f"Header não bate no esperado. Lido em {col_md}6:{col_tvd}6 -> "
@@ -551,9 +446,9 @@ def _ler_trajetoria_do_xlsm(wb, modo: str) -> pd.DataFrame:
 
 
 def _limitar_perfilagem_ao_tvd_final(
-    df_full: pd.DataFrame,
-    tvd_final: float,
-    col_tvd: str = "Profundidade"
+        df_full: pd.DataFrame,
+        tvd_final: float,
+        col_tvd: str = "Profundidade"
 ) -> pd.DataFrame:
     df = df_full.copy()
     df.columns = [str(c).strip() for c in df.columns]
@@ -666,10 +561,10 @@ def _gerar_df_interp_a_partir_df1_df2(df1: pd.DataFrame, df2: pd.DataFrame) -> p
     azi_sorted = azi_out[sort_idx]
 
     valid = (
-        np.isfinite(tvd_sorted)
-        & np.isfinite(md_sorted)
-        & np.isfinite(inc_sorted)
-        & np.isfinite(azi_sorted)
+            np.isfinite(tvd_sorted)
+            & np.isfinite(md_sorted)
+            & np.isfinite(inc_sorted)
+            & np.isfinite(azi_sorted)
     )
 
     tvd_sorted = tvd_sorted[valid]
@@ -728,7 +623,6 @@ def _ler_inicio_do_xlsm(wb) -> dict:
     northing = ws["D6"].value
     zona = ws["D8"].value
     hem = ws["D9"].value
-
     def _to_float(v):
         try:
             if v is None or v == "":
@@ -736,7 +630,6 @@ def _ler_inicio_do_xlsm(wb) -> dict:
             return float(v)
         except Exception:
             return None
-
     def _to_int(v):
         try:
             if v is None or v == "":
@@ -744,12 +637,10 @@ def _ler_inicio_do_xlsm(wb) -> dict:
             return int(float(v))
         except Exception:
             return None
-
     def _to_str(v):
         if v is None or v == "":
             return None
         return str(v).strip()
-
     return {
         "poco": None if nome_poco in (None, "") else str(nome_poco).strip(),
         "comments": "" if objetivo in (None, "") else str(objetivo).strip(),
@@ -773,10 +664,8 @@ def _ler_peso_fluido_do_xlsm(wb) -> pd.DataFrame:
     h_md = ws["B5"].value
     h_wp = ws["C5"].value
     h_we = ws["D5"].value
-
     def _norm(x):
         return str(x).strip().lower() if x is not None else ""
-
     if "prof" not in _norm(h_md):
         raise ValueError(f"Header inesperado em B5: {h_md}")
     if "planej" not in _norm(h_wp):
@@ -788,11 +677,11 @@ def _ler_peso_fluido_do_xlsm(wb) -> pd.DataFrame:
     vazio_seguidos = 0
 
     for md, wp, we in ws.iter_rows(
-        min_row=6,
-        max_row=min(ws.max_row, 10000),
-        min_col=2,   # B
-        max_col=4,   # D
-        values_only=True
+            min_row=6,
+            max_row=min(ws.max_row, 10000),
+            min_col=2,  # B
+            max_col=4,  # D
+            values_only=True
     ):
         if md in (None, ""):
             vazio_seguidos += 1
@@ -841,7 +730,6 @@ def _ler_sapatas_do_xlsm(wb) -> pd.DataFrame:
         raise ValueError("A aba 'Início' (ou 'Inicio') não existe no arquivo.")
 
     ws = wb["Início"] if "Início" in wb.sheetnames else wb["Inicio"]
-
     def _to_float(v):
         try:
             if v is None or str(v).strip() == "":
@@ -849,7 +737,6 @@ def _ler_sapatas_do_xlsm(wb) -> pd.DataFrame:
             return float(v)
         except Exception:
             return None
-
     rows = []
 
     for ordem, r in enumerate(range(13, 18), start=1):
@@ -897,7 +784,6 @@ def _ler_fases_do_xlsm(wb) -> pd.DataFrame:
         raise ValueError("A aba 'Início' (ou 'Inicio') não existe no arquivo.")
 
     ws = wb["Início"] if "Início" in wb.sheetnames else wb["Inicio"]
-
     def _to_float(v):
         try:
             if v is None or str(v).strip() == "":
@@ -905,7 +791,6 @@ def _ler_fases_do_xlsm(wb) -> pd.DataFrame:
             return float(v)
         except Exception:
             return None
-
     rows = []
 
     for ordem, r in enumerate(range(21, 26), start=1):
@@ -942,10 +827,8 @@ def _ler_litologia_do_xlsm(wb) -> pd.DataFrame:
     h_lit = ws["E3"].value
     h_top = ws["F3"].value
     h_bas = ws["G3"].value
-
     def _norm(x):
         return str(x).strip().lower() if x is not None else ""
-
     if not any(k in _norm(h_fm) for k in ["forma", "formação", "formacao", "fm"]):
         raise ValueError(f"Header de Formação inválido em C3: {h_fm}")
     if "litolog" not in _norm(h_lit):
@@ -1671,7 +1554,7 @@ def suavizar(x, y, frac=None):
     return y_suav
 
 
-def add_watermark(ax, logo_path="logo2.png", xy=(0.80, 0.25), zoom=0.20, alpha=0.10, zorder=0):
+def add_watermark(ax, logo_path="logo_syga.png", xy=(0.80, 0.25), zoom=0.20, alpha=0.10, zorder=0):
     """
     Marca d'água robusta:
     - NÃO distorce em eixo log (usa ax.transAxes)
@@ -1690,11 +1573,11 @@ def add_watermark(ax, logo_path="logo2.png", xy=(0.80, 0.25), zoom=0.20, alpha=0
 
     arr = arr.astype(np.uint8)
 
-    oi = OffsetImage(arr, zoom=zoom)  # aqui já vai com alpha aplicado
+    oi = OffsetImage(arr, zoom=zoom)
     ab = AnnotationBbox(
         oi,
         xy=xy,
-        xycoords=ax.transAxes,   # independe de log/linear
+        xycoords=ax.transAxes,
         frameon=False,
         box_alignment=(0.5, 0.5),
         zorder=zorder
@@ -1719,10 +1602,10 @@ def lito(ax1, df_pp, profundidades, litologias, bases, y_min=None, y_max=None):
         coluna_gr = "Raio Gama Suavizado" if s_gr_ativo else "Perfil Raio Gama"
 
         pode_gerar_perm_nao_perm = (
-            tipo_coluna_lito == "Permeável / Não permeável"
-            and "LBF_calc" in df_pp.columns
-            and coluna_gr in df_pp.columns
-            and "Profundidade (m)" in df_pp.columns
+                tipo_coluna_lito == "Permeável / Não permeável"
+                and "LBF_calc" in df_pp.columns
+                and coluna_gr in df_pp.columns
+                and "Profundidade (m)" in df_pp.columns
         )
 
         if pode_gerar_perm_nao_perm:
@@ -2040,9 +1923,9 @@ def normal(df, df_pp=None):
     prof_fim = prof_anormal
 
     if (
-        df_ref is not None
-        and isinstance(df_ref, pd.DataFrame)
-        and coluna_prof in df_ref.columns
+            df_ref is not None
+            and isinstance(df_ref, pd.DataFrame)
+            and coluna_prof in df_ref.columns
     ):
         df_aux = df_ref.copy()
 
@@ -2128,7 +2011,7 @@ def normal(df, df_pp=None):
         t = np.clip(t, 0.0, 1.0)
 
         valores = val_ini + (val_fim - val_ini) * (
-            (1 - np.exp(-alpha * t)) / (1 - np.exp(-alpha))
+                (1 - np.exp(-alpha * t)) / (1 - np.exp(-alpha))
         )
 
     df_gfs = pd.DataFrame({
@@ -2147,8 +2030,8 @@ def normal(df, df_pp=None):
     ] = None
 
     if (
-        st.session_state.get("tipo_poco") == "Onshore"
-        and st.session_state.get("ex") == "Ativada"
+            st.session_state.get("tipo_poco") == "Onshore"
+            and st.session_state.get("ex") == "Ativada"
     ):
         mask_rtkb = df_gfs["Profundidade (m)"] <= prof_ini
 
@@ -2214,14 +2097,56 @@ def montar_df_pp_base(df_sobrecarga_calc):
     return df_pp
 
 
+def _aplicar_limites_dados_df_pp(df_pp):
+    df_pp = df_pp.copy()
+
+    col_sonico_normal = "Perfil sônico (µs/pé) Reta Normal"
+    col_lbf = "LBF_calc"
+    mask_dados = _mask_perfis_pp_validos(df_pp)
+
+    if col_sonico_normal in df_pp.columns:
+        df_pp.loc[~mask_dados, col_sonico_normal] = np.nan
+
+    if col_lbf in df_pp.columns:
+        df_pp.loc[~mask_dados, col_lbf] = np.nan
+
+    return df_pp
+
+
+def _mask_perfis_pp_validos(df_pp):
+    mask_dados = pd.Series(True, index=df_pp.index)
+
+    col_sonico = "Perfil sônico (µs/pé)"
+    col_gr = "Perfil Raio Gama"
+
+    if col_sonico in df_pp.columns:
+        mask_dados = mask_dados & pd.to_numeric(
+            df_pp[col_sonico],
+            errors="coerce"
+        ).notna()
+    else:
+        mask_dados = pd.Series(False, index=df_pp.index)
+
+    if col_gr in df_pp.columns:
+        mask_dados = mask_dados & pd.to_numeric(
+            df_pp[col_gr],
+            errors="coerce"
+        ).notna()
+    else:
+        mask_dados = pd.Series(False, index=df_pp.index)
+
+    return mask_dados
+
+
 TRENDING_COLORS = [
-    "#FF8C00",
-    "#8A2BE2",
-    "#32CD32",
-    "#FFD700",
-    "#FF1493",
-    "#ADFF2F",
+    "#006400",  # dark green
+    "#228B22",  # forest green
+    "#2E8B57",  # sea green
+    "#32CD32",  # lime green
+    "#6B8E23",  # olive drab
+    "#00A86B",  # jade green
 ]
+
 
 
 def _valor_float_ou_none(valor):
@@ -2276,18 +2201,17 @@ def _coletar_lbfs_poros():
     return lbfs
 
 
-
 def _remover_chaves_lbf(indice):
     for chave in (
-        f"lbf_valor_{indice}",
-        f"_w_lbf_valor_{indice}",
-        f"lbf_inclinacao_{indice}",
-        f"_w_lbf_inclinacao_{indice}",
-        f"lbf_prof_ini_{indice}",
-        f"_w_lbf_prof_ini_{indice}",
-        f"lbf_prof_fim_{indice}",
-        f"_w_lbf_prof_fim_{indice}",
-        f"exp_lbf_{indice}",
+            f"lbf_valor_{indice}",
+            f"_w_lbf_valor_{indice}",
+            f"lbf_inclinacao_{indice}",
+            f"_w_lbf_inclinacao_{indice}",
+            f"lbf_prof_ini_{indice}",
+            f"_w_lbf_prof_ini_{indice}",
+            f"lbf_prof_fim_{indice}",
+            f"_w_lbf_prof_fim_{indice}",
+            f"exp_lbf_{indice}",
     ):
         st.session_state.pop(chave, None)
 
@@ -2304,7 +2228,6 @@ def _renderizar_campos_lbf(preparar_widget, incluir_titulo=True, persistente=Fal
             })
 
         return kwargs
-
     if "n_lbf" not in st.session_state:
         st.session_state.n_lbf = 1
 
@@ -2313,8 +2236,8 @@ def _renderizar_campos_lbf(preparar_widget, incluir_titulo=True, persistente=Fal
 
     for i in range(int(st.session_state.n_lbf)):
         with st.expander(
-            f"LBF {i + 1}",
-            expanded=estado_expander_persistente(f"exp_lbf_{i}", True)
+                f"LBF {i + 1}",
+                expanded=estado_expander_persistente(f"exp_lbf_{i}", False)
         ):
             if st.session_state.n_lbf > 1:
                 colun1, colun2 = st.columns(2)
@@ -2352,7 +2275,7 @@ def _renderizar_campos_lbf(preparar_widget, incluir_titulo=True, persistente=Fal
                 st.session_state[chave_lbf_valor] = 110.0
 
             if chave_widget_lbf_valor in st.session_state and (
-                valor_widget_lbf_atual is None or valor_widget_lbf_atual <= 1.0
+                    valor_widget_lbf_atual is None or valor_widget_lbf_atual <= 1.0
             ):
                 st.session_state[chave_widget_lbf_valor] = st.session_state[chave_lbf_valor]
 
@@ -2385,10 +2308,10 @@ def _sincronizar_widgets_lbf_do_estado():
 
     for i in range(n_lbf):
         for chave in (
-            f"lbf_valor_{i}",
-            f"lbf_inclinacao_{i}",
-            f"lbf_prof_ini_{i}",
-            f"lbf_prof_fim_{i}",
+                f"lbf_valor_{i}",
+                f"lbf_inclinacao_{i}",
+                f"lbf_prof_ini_{i}",
+                f"lbf_prof_fim_{i}",
         ):
             if chave in st.session_state:
                 st.session_state[f"_w_{chave}"] = st.session_state[chave]
@@ -2406,6 +2329,7 @@ def _atualizar_df_pp_lito_por_lbf():
     try:
         df_lito = montar_df_pp_base(df_base)
         df_lito = _calcular_lbf_pp(df_lito, _coletar_lbfs_poros())
+        df_lito = _aplicar_limites_dados_df_pp(df_lito)
         st.session_state.df_pp_lito = df_lito.copy()
 
     except Exception:
@@ -2424,14 +2348,14 @@ def _montar_df_lbf_litologia():
     df_lbf = montar_df_pp_base(df_base)
 
     if (
-        "Raio Gama Suavizado" in df_lbf.columns
-        and df_lbf["Raio Gama Suavizado"].notna().any()
+            "Raio Gama Suavizado" in df_lbf.columns
+            and df_lbf["Raio Gama Suavizado"].notna().any()
     ):
         return df_lbf
 
     if (
-        "Profundidade (m)" in df_lbf.columns
-        and "Perfil Raio Gama" in df_lbf.columns
+            "Profundidade (m)" in df_lbf.columns
+            and "Perfil Raio Gama" in df_lbf.columns
     ):
         try:
             prof = pd.to_numeric(df_lbf["Profundidade (m)"], errors="coerce")
@@ -2462,36 +2386,19 @@ def _calcular_lbf_pp(df_pp, lbfs):
         errors="coerce"
     )
 
-    limitar_lbf_onshore = (
-        st.session_state.get("tipo_poco") == "Onshore"
-        and int(st.session_state.get("n_lbf", 1)) == 1
-        and int(st.session_state.get("n_trending", 1)) == 1
-    )
+    mask_gr_valido = pd.Series(True, index=df_pp.index)
 
-    prof_primeiro_gr = None
+    coluna_gr_ref = "Perfil Raio Gama"
 
-    if limitar_lbf_onshore:
-        if (
-            st.session_state.get("s_gr") == "Sim"
-            and "Raio Gama Suavizado" in df_pp.columns
-        ):
-            coluna_gr_ref = "Raio Gama Suavizado"
-        else:
-            coluna_gr_ref = "Perfil Raio Gama"
+    if coluna_gr_ref in df_pp.columns:
+        curva_gr_ref = pd.to_numeric(
+            df_pp[coluna_gr_ref],
+            errors="coerce"
+        )
 
-        if coluna_gr_ref in df_pp.columns:
-            curva_gr_ref = pd.to_numeric(
-                df_pp[coluna_gr_ref],
-                errors="coerce"
-            )
-
-            prof_validas_gr = prof[
-                prof.notna()
-                & curva_gr_ref.notna()
-            ]
-
-            if not prof_validas_gr.empty:
-                prof_primeiro_gr = prof_validas_gr.min()
+        mask_gr_valido = curva_gr_ref.notna()
+    else:
+        mask_gr_valido = pd.Series(False, index=df_pp.index)
 
     df_pp["LBF_calc"] = np.nan
 
@@ -2505,10 +2412,7 @@ def _calcular_lbf_pp(df_pp, lbfs):
 
             lbf_line = lbf["inclbf"] * (prof - prof_ref) + lbf["lbf"]
 
-            mask_base = prof.notna()
-
-            if prof_primeiro_gr is not None and pd.notna(prof_primeiro_gr):
-                mask_base = mask_base & (prof >= prof_primeiro_gr)
+            mask_base = prof.notna() & mask_gr_valido
 
             if st.session_state.get("tipo_poco") == "Offshore":
                 mask_base = mask_base & (df_pp.index >= 1)
@@ -2517,9 +2421,9 @@ def _calcular_lbf_pp(df_pp, lbfs):
             prof_fim = lbf.get("prof_fim")
 
             if (
-                prof_ini is not None
-                and prof_fim is not None
-                and prof_fim > prof_ini
+                    prof_ini is not None
+                    and prof_fim is not None
+                    and prof_fim > prof_ini
             ):
                 mask_intervalo = (prof >= prof_ini) & (prof <= prof_fim)
                 mask_final = mask_base & mask_intervalo
@@ -2543,12 +2447,12 @@ def _calcular_lbf_pp(df_pp, lbfs):
             )
 
             lbf_padrao = (
-                primeira_lbf["inclbf"] * (prof - prof_ref)
-                + primeira_lbf["lbf"]
+                    primeira_lbf["inclbf"] * (prof - prof_ref)
+                    + primeira_lbf["lbf"]
             )
 
             if st.session_state.get("tipo_poco") == "Offshore":
-                mask_fill = df_pp.index >= 1
+                mask_fill = mask_gr_valido & (df_pp.index >= 1)
 
                 df_pp.loc[mask_fill, "LBF_calc"] = df_pp.loc[
                     mask_fill,
@@ -2558,10 +2462,7 @@ def _calcular_lbf_pp(df_pp, lbfs):
                 )
 
             else:
-                mask_fill = prof.notna()
-
-                if prof_primeiro_gr is not None and pd.notna(prof_primeiro_gr):
-                    mask_fill = mask_fill & (prof >= prof_primeiro_gr)
+                mask_fill = prof.notna() & mask_gr_valido
 
                 df_pp.loc[mask_fill, "LBF_calc"] = df_pp.loc[
                     mask_fill,
@@ -2573,7 +2474,7 @@ def _calcular_lbf_pp(df_pp, lbfs):
         except Exception as e:
             st.warning(f"Erro no preenchimento padrão da LBF: {e}")
 
-    return df_pp
+    return _aplicar_limites_dados_df_pp(df_pp)
 
 
 def _calcular_reta_normal_trending(prof, tr):
@@ -2583,13 +2484,13 @@ def _calcular_reta_normal_trending(prof, tr):
     s2 = tr.get("s2")
 
     if (
-        pp1 is None
-        or pp2 is None
-        or s1 is None
-        or s2 is None
-        or pp1 == pp2
-        or s1 <= 0
-        or s2 <= 0
+            pp1 is None
+            or pp2 is None
+            or s1 is None
+            or s2 is None
+            or pp1 == pp2
+            or s1 <= 0
+            or s2 <= 0
     ):
         return None
 
@@ -2655,27 +2556,17 @@ def _calcular_trending_pp(df_pp, trendings):
         errors="coerce"
     )
 
-    limitar_trending_onshore = (
-        st.session_state.get("tipo_poco") == "Onshore"
-        and int(st.session_state.get("n_lbf", 1)) == 1
-        and int(st.session_state.get("n_trending", 1)) == 1
-    )
+    mask_sonico_valido = pd.Series(True, index=df_pp.index)
 
-    prof_primeiro_sonico = None
-
-    if limitar_trending_onshore and "Perfil sônico (µs/pé)" in df_pp.columns:
+    if "Perfil sônico (µs/pé)" in df_pp.columns:
         sonico_ref = pd.to_numeric(
             df_pp["Perfil sônico (µs/pé)"],
             errors="coerce"
         )
 
-        prof_validas_sonico = prof[
-            prof.notna()
-            & sonico_ref.notna()
-        ]
-
-        if not prof_validas_sonico.empty:
-            prof_primeiro_sonico = prof_validas_sonico.min()
+        mask_sonico_valido = sonico_ref.notna()
+    else:
+        mask_sonico_valido = pd.Series(False, index=df_pp.index)
 
     df_pp["Perfil sônico (µs/pé) Reta Normal"] = np.nan
 
@@ -2691,13 +2582,7 @@ def _calcular_trending_pp(df_pp, trendings):
                 errors="coerce"
             )
 
-            mask_base = prof.notna()
-
-            if (
-                prof_primeiro_sonico is not None
-                and pd.notna(prof_primeiro_sonico)
-            ):
-                mask_base = mask_base & (prof >= prof_primeiro_sonico)
+            mask_base = prof.notna() & mask_sonico_valido
 
             if st.session_state.get("tipo_poco") == "Offshore":
                 mask_base = mask_base & (df_pp.index >= 1)
@@ -2706,9 +2591,9 @@ def _calcular_trending_pp(df_pp, trendings):
             prof_fim = tr.get("prof_fim")
 
             if (
-                prof_ini is not None
-                and prof_fim is not None
-                and prof_fim > prof_ini
+                    prof_ini is not None
+                    and prof_fim is not None
+                    and prof_fim > prof_ini
             ):
                 mask_intervalo = (prof >= prof_ini) & (prof <= prof_fim)
                 mask_final = mask_base & mask_intervalo
@@ -2725,8 +2610,8 @@ def _calcular_trending_pp(df_pp, trendings):
             st.warning(f"Erro ao calcular Trending {idx + 1}: {e}")
 
     if (
-        df_pp["Perfil sônico (µs/pé) Reta Normal"].isna().any()
-        and trendings
+            df_pp["Perfil sônico (µs/pé) Reta Normal"].isna().any()
+            and trendings
     ):
         try:
             tr0 = trendings[0]
@@ -2739,7 +2624,7 @@ def _calcular_trending_pp(df_pp, trendings):
                 )
 
                 if st.session_state.get("tipo_poco") == "Offshore":
-                    mask_fill = df_pp.index >= 1
+                    mask_fill = mask_sonico_valido & (df_pp.index >= 1)
 
                     df_pp.loc[
                         mask_fill,
@@ -2752,13 +2637,7 @@ def _calcular_trending_pp(df_pp, trendings):
                     )
 
                 else:
-                    mask_fill = prof.notna()
-
-                    if (
-                        prof_primeiro_sonico is not None
-                        and pd.notna(prof_primeiro_sonico)
-                    ):
-                        mask_fill = mask_fill & (prof >= prof_primeiro_sonico)
+                    mask_fill = prof.notna() & mask_sonico_valido
 
                     df_pp.loc[
                         mask_fill,
@@ -2773,7 +2652,7 @@ def _calcular_trending_pp(df_pp, trendings):
         except Exception as e:
             st.warning(f"Erro no preenchimento padrão da reta normal: {e}")
 
-    return df_pp
+    return _aplicar_limites_dados_df_pp(df_pp)
 
 
 def _aplicar_suavizacao_pressao_poros(df_pp):
@@ -2863,13 +2742,12 @@ def _aplicar_suavizacao_pressao_poros(df_pp):
     df_pp[col_gp_suav] = grad_suav
 
     df_pp[col_pp_suav] = (
-        0.1704
-        * df_pp[col_gp_suav]
-        * prof
+            0.1704
+            * df_pp[col_gp_suav]
+            * prof
     )
 
     return df_pp
-
 
 
 def _coletar_boyances_poros():
@@ -2935,12 +2813,12 @@ def _calcular_boyance_pp(df_pp, boyances=None):
     col_boy_ba_tf = "Boyance (lb/gal) (BA = TF)"
 
     for col in (
-        col_fpr,
-        col_formacao,
-        col_press_ta_bf,
-        col_boy_ta_bf,
-        col_press_ba_tf,
-        col_boy_ba_tf,
+            col_fpr,
+            col_formacao,
+            col_press_ta_bf,
+            col_boy_ta_bf,
+            col_press_ba_tf,
+            col_boy_ba_tf,
     ):
         if col not in df_pp.columns:
             df_pp[col] = np.nan
@@ -2979,9 +2857,9 @@ def _calcular_boyance_pp(df_pp, boyances=None):
                 continue
 
             mask_intervalo = (
-                prof.notna()
-                & (prof >= prof_inicial)
-                & (prof <= prof_final)
+                    prof.notna()
+                    & (prof >= prof_inicial)
+                    & (prof <= prof_final)
             )
 
             df_pp.loc[mask_intervalo, col_fpr] = fpr
@@ -2999,14 +2877,14 @@ def _calcular_boyance_pp(df_pp, boyances=None):
     fpr_efetivo = pd.to_numeric(df_pp[col_fpr], errors="coerce")
 
     incremento = (
-        0.1704
-        * fpr_efetivo
-        * (prof - prof.shift(1))
+            0.1704
+            * fpr_efetivo
+            * (prof - prof.shift(1))
     )
 
     if (
-        st.session_state.get("s_gr") == "Sim"
-        and col_gr_suav in df_pp.columns
+            st.session_state.get("s_gr") == "Sim"
+            and col_gr_suav in df_pp.columns
     ):
         curva_gr = pd.to_numeric(df_pp[col_gr_suav], errors="coerce")
     else:
@@ -3021,15 +2899,15 @@ def _calcular_boyance_pp(df_pp, boyances=None):
     )
 
     topo_permeavel = (
-        (df_pp[col_formacao] == "Formação Permeável")
-        & (df_pp[col_formacao].shift(1) != "Formação Permeável")
+            (df_pp[col_formacao] == "Formação Permeável")
+            & (df_pp[col_formacao].shift(1) != "Formação Permeável")
     )
 
     df_pp[col_press_ta_bf] = np.nan
     df_pp.loc[topo_permeavel, col_press_ta_bf] = (
-        grad_referencia.shift(1)
-        * 0.1704
-        * prof
+            grad_referencia.shift(1)
+            * 0.1704
+            * prof
     )
 
     id_camada = topo_permeavel.cumsum()
@@ -3040,8 +2918,8 @@ def _calcular_boyance_pp(df_pp, boyances=None):
         .groupby(id_camada[mask_perm], group_keys=False)
         .apply(
             lambda g: (
-                g[col_press_ta_bf].iloc[0]
-                + incremento.loc[g.index].fillna(0).cumsum()
+                    g[col_press_ta_bf].iloc[0]
+                    + incremento.loc[g.index].fillna(0).cumsum()
             )
         )
     )
@@ -3067,8 +2945,8 @@ def _calcular_boyance_pp(df_pp, boyances=None):
     df_pp[col_press_ba_tf] = np.nan
 
     base_permeavel = (
-        (df_pp[col_formacao] == "Formação Permeável")
-        & (df_pp[col_formacao].shift(-1) != "Formação Permeável")
+            (df_pp[col_formacao] == "Formação Permeável")
+            & (df_pp[col_formacao].shift(-1) != "Formação Permeável")
     )
 
     for idx in df_pp.index[base_permeavel]:
@@ -3079,8 +2957,8 @@ def _calcular_boyance_pp(df_pp, boyances=None):
             df_pp.loc[idx, col_press_ba_tf] = pressao_referencia.loc[idx]
 
     id_camada = (
-        (df_pp[col_formacao] == "Formação Permeável")
-        & (df_pp[col_formacao].shift(1) != "Formação Permeável")
+            (df_pp[col_formacao] == "Formação Permeável")
+            & (df_pp[col_formacao].shift(1) != "Formação Permeável")
     ).cumsum()
 
     serie_ba_tf = (
@@ -3088,8 +2966,8 @@ def _calcular_boyance_pp(df_pp, boyances=None):
         .groupby(id_camada[mask_perm], group_keys=False)
         .apply(
             lambda g: (
-                g[col_press_ba_tf].iloc[-1]
-                - incremento.loc[g.index].fillna(0).iloc[::-1].cumsum().iloc[::-1]
+                    g[col_press_ba_tf].iloc[-1]
+                    - incremento.loc[g.index].fillna(0).iloc[::-1].cumsum().iloc[::-1]
             )
         )
     )
@@ -3159,8 +3037,8 @@ def _calcular_pressao_poros_por_partes(df_pp):
     lbf_calc = pd.to_numeric(df_pp[col_lbf], errors="coerce")
 
     if (
-        st.session_state.get("suav_s") == "Sim"
-        and col_sonico in df_pp.columns
+            st.session_state.get("suav_s") == "Sim"
+            and col_sonico in df_pp.columns
     ):
         try:
             sonico_suavizado = suavizar(prof, sonico_bruto)
@@ -3174,8 +3052,8 @@ def _calcular_pressao_poros_por_partes(df_pp):
             st.warning(f"Erro ao suavizar sônico para Eaton: {e}")
 
     if (
-        st.session_state.get("suav_s") == "Sim"
-        and col_sonico_suav in df_pp.columns
+            st.session_state.get("suav_s") == "Sim"
+            and col_sonico_suav in df_pp.columns
     ):
         sonico_usado = pd.to_numeric(df_pp[col_sonico_suav], errors="coerce")
         nome_sonico_usado = col_sonico_suav
@@ -3185,8 +3063,8 @@ def _calcular_pressao_poros_por_partes(df_pp):
         nome_sonico_usado = col_sonico
 
     if (
-        st.session_state.get("s_gr") == "Sim"
-        and col_gr_suav in df_pp.columns
+            st.session_state.get("s_gr") == "Sim"
+            and col_gr_suav in df_pp.columns
     ):
         curva_gr = pd.to_numeric(df_pp[col_gr_suav], errors="coerce")
         nome_curva_gr = col_gr_suav
@@ -3200,9 +3078,9 @@ def _calcular_pressao_poros_por_partes(df_pp):
     df_pp["Curva GR usada Eaton"] = curva_gr
 
     mask_folhelho = (
-        curva_gr.notna()
-        & lbf_calc.notna()
-        & (curva_gr >= lbf_calc)
+            curva_gr.notna()
+            & lbf_calc.notna()
+            & (curva_gr >= lbf_calc)
     )
 
     if st.session_state.get("tipo_poco") == "Offshore":
@@ -3290,21 +3168,21 @@ def _calcular_pressao_poros_por_partes(df_pp):
             continue
 
         if (
-            pd.isna(son_i)
-            or pd.isna(son_norm_i)
-            or pd.isna(gs_i)
-            or son_i <= 0
-            or son_norm_i <= 0
+                pd.isna(son_i)
+                or pd.isna(son_norm_i)
+                or pd.isna(gs_i)
+                or son_i <= 0
+                or son_norm_i <= 0
         ):
             gp.append(ultimo_grad_folhelho)
             continue
 
         grad_eaton = (
-            gs_i
-            - (
-                (gs_i - gn)
-                * ((son_i / son_norm_i) ** (-expoente))
-            )
+                gs_i
+                - (
+                        (gs_i - gn)
+                        * ((son_i / son_norm_i) ** (-expoente))
+                )
         )
 
         if pd.isna(grad_eaton):
@@ -3322,10 +3200,10 @@ def _calcular_pressao_poros_por_partes(df_pp):
     df_pp[col_gp] = pd.to_numeric(gp, errors="coerce")
 
     if (
-        st.session_state.get("tipo_poco") == "Onshore"
-        and "df_gfs" in st.session_state
-        and isinstance(st.session_state.df_gfs, pd.DataFrame)
-        and not st.session_state.df_gfs.empty
+            st.session_state.get("tipo_poco") == "Onshore"
+            and "df_gfs" in st.session_state
+            and isinstance(st.session_state.df_gfs, pd.DataFrame)
+            and not st.session_state.df_gfs.empty
     ):
         prof_fim_normal = float(
             pd.to_numeric(
@@ -3342,8 +3220,8 @@ def _calcular_pressao_poros_por_partes(df_pp):
         )
 
         mask_ate_anormal = (
-            (prof > prof_fim_normal)
-            & (prof < anormal)
+                (prof > prof_fim_normal)
+                & (prof < anormal)
         )
 
         df_pp.loc[mask_ate_anormal, col_gp] = (
@@ -3379,13 +3257,17 @@ def _calcular_pressao_poros_por_partes(df_pp):
 
     df_pp = _aplicar_suavizacao_pressao_poros(df_pp)
     df_pp = _calcular_boyance_pp(df_pp)
+    df_pp = _aplicar_limites_dados_df_pp(df_pp)
 
     return df_pp
 
 
-
-
-def plotar_boyance_pp(ax, df_pp, modo_grafico="Gradiente (lb/gal)"):
+def plotar_boyance_pp(
+        ax,
+        df_pp,
+        modo_grafico="Gradiente (lb/gal)",
+        profundidade_minima=None
+):
     if st.session_state.get("boyance", "Não") != "Sim":
         return
 
@@ -3422,6 +3304,10 @@ def plotar_boyance_pp(ax, df_pp, modo_grafico="Gradiente (lb/gal)"):
         df_boyance_plot[col_prof] = pd.to_numeric(df_boyance_plot[col_prof], errors="coerce")
         df_boyance_plot[coluna] = pd.to_numeric(df_boyance_plot[coluna], errors="coerce")
         df_boyance_plot = df_boyance_plot.dropna(subset=[col_prof, coluna])
+        if profundidade_minima is not None:
+            df_boyance_plot = df_boyance_plot[
+                df_boyance_plot[col_prof] >= float(profundidade_minima)
+            ]
 
         if df_boyance_plot.empty:
             continue
@@ -3436,11 +3322,11 @@ def plotar_boyance_pp(ax, df_pp, modo_grafico="Gradiente (lb/gal)"):
         )
 
 
-def plotar_rft(ax, modo_grafico="Gradiente (lb/gal)", label="Teste RFT"):
+def plotar_rft(ax, modo_grafico="Gradiente (lb/gal)", label="Teste RFT", profundidade_minima=None):
     if (
-        "rft_pontos_pp" not in st.session_state
-        or not isinstance(st.session_state.rft_pontos_pp, pd.DataFrame)
-        or st.session_state.rft_pontos_pp.empty
+            "rft_pontos_pp" not in st.session_state
+            or not isinstance(st.session_state.rft_pontos_pp, pd.DataFrame)
+            or st.session_state.rft_pontos_pp.empty
     ):
         return
 
@@ -3466,6 +3352,9 @@ def plotar_rft(ax, modo_grafico="Gradiente (lb/gal)", label="Teste RFT"):
         subset=[col_prof, col_rft]
     )
 
+    if profundidade_minima is not None:
+        df_rft_plot = df_rft_plot[df_rft_plot[col_prof] >= float(profundidade_minima)]
+
     if df_rft_plot.empty:
         return
 
@@ -3473,9 +3362,9 @@ def plotar_rft(ax, modo_grafico="Gradiente (lb/gal)", label="Teste RFT"):
         x_rft = df_rft_plot[col_rft]
     else:
         x_rft = (
-            df_rft_plot[col_rft]
-            * 0.1704
-            * df_rft_plot[col_prof]
+                df_rft_plot[col_rft]
+                * 0.1704
+                * df_rft_plot[col_prof]
         )
 
     ax.scatter(
@@ -3486,14 +3375,14 @@ def plotar_rft(ax, modo_grafico="Gradiente (lb/gal)", label="Teste RFT"):
         marker="o",
         s=50,
         label=label,
-        zorder=50
+        zorder=200
     )
 
     if st.session_state.get("mostrar_texto_rft_pp", "Sim") == "Sim":
         for x, prof, rft in zip(
-            x_rft,
-            df_rft_plot[col_prof],
-            df_rft_plot[col_rft]
+                x_rft,
+                df_rft_plot[col_prof],
+                df_rft_plot[col_rft]
         ):
             ax.annotate(
                 f"{rft:.2f} ppg",
@@ -3504,15 +3393,162 @@ def plotar_rft(ax, modo_grafico="Gradiente (lb/gal)", label="Teste RFT"):
                 color="black",
                 va="center",
                 ha="left",
-                zorder=51
+                zorder=201
             )
 
 
-def plotar_gradiente_colapso(ax, modo_grafico="Gradiente (lb/gal)", label="Gradiente de Colapso"):
+def plotar_lot_fit_jo(
+        ax,
+        modo_grafico="Gradiente (lb/gal)",
+        mostrar_lot=True,
+        profundidade_minima=None
+):
+    df_lot = _normalizar_pontos_lot_fratura(
+        st.session_state.get("lot_pontos_fratura", pd.DataFrame())
+        if st.session_state.get("lot_fratura", "Sim") == "Sim"
+        else st.session_state.get("lot_pontos_yaml_fratura", pd.DataFrame())
+    )
+
+    if df_lot.empty:
+        return
+
+    if profundidade_minima is not None:
+        profundidades_lot = pd.to_numeric(df_lot["Profundidade (m)"], errors="coerce")
+        df_lot = df_lot[
+            profundidades_lot.notna()
+            & (profundidades_lot >= float(profundidade_minima))
+        ].copy()
+
+    for tipo, cor, marcador, label in [
+        ("LOT", "red", "D", "LOT's"),
+        ("FIT", "blue", "^", "FIT's"),
+    ]:
+        if tipo == "LOT" and not mostrar_lot:
+            continue
+
+        df_tipo = df_lot[df_lot["Tipo"] == tipo]
+        if df_tipo.empty:
+            continue
+
+        if modo_grafico == "Pressão (psi)":
+            x_ponto = (
+                    df_tipo["Peso Eq. (lb/gal)"]
+                    * 0.1704
+                    * df_tipo["Profundidade (m)"]
+            )
+        else:
+            x_ponto = df_tipo["Peso Eq. (lb/gal)"]
+
+        ax.scatter(
+            x_ponto,
+            df_tipo["Profundidade (m)"],
+            color=cor,
+            edgecolors="black",
+            linewidths=0.8,
+            label=label,
+            zorder=200,
+            marker=marcador,
+            s=50
+        )
+
+        chave_texto = "mostrar_texto_lot_tabs4" if tipo == "LOT" else "mostrar_texto_fit_tabs4"
+        if st.session_state.get(chave_texto, "Sim") == "Sim":
+            for x_item, y_item, peso_item in zip(
+                    x_ponto,
+                    df_tipo["Profundidade (m)"],
+                    df_tipo["Peso Eq. (lb/gal)"]
+            ):
+                ax.annotate(
+                    f"{peso_item:.2f} ppg",
+                    xy=(x_item, y_item),
+                    xytext=(6, 0),
+                    textcoords="offset points",
+                    fontsize=8,
+                    color="black",
+                    va="center",
+                    ha="left",
+                    zorder=201
+                )
+
+
+def plotar_peso_fluido_jo(
+        ax,
+        modo_grafico="Gradiente (lb/gal)",
+        mostrar_planejado=True,
+        mostrar_executado=True,
+        profundidade_minima=None
+):
     if (
-        "colapso_pontos_pp" not in st.session_state
-        or not isinstance(st.session_state.colapso_pontos_pp, pd.DataFrame)
-        or st.session_state.colapso_pontos_pp.empty
+            "df_mud" not in st.session_state
+            or not isinstance(st.session_state.df_mud, pd.DataFrame)
+            or st.session_state.df_mud.empty
+    ):
+        return
+
+    df_mud = st.session_state.df_mud.copy()
+    col_mud_prof = "Profundidade (m)"
+    col_mud_plan = "Peso do Fluido Planejado (lb/gal)"
+    col_mud_exec = "Peso do Fluido Executado (lb/gal)"
+
+    if col_mud_prof not in df_mud.columns:
+        return
+
+    df_mud[col_mud_prof] = pd.to_numeric(df_mud[col_mud_prof], errors="coerce")
+    if profundidade_minima is not None:
+        df_mud = df_mud[
+            df_mud[col_mud_prof].notna()
+            & (df_mud[col_mud_prof] >= float(profundidade_minima))
+        ].copy()
+
+    mostrar_planejado = bool(mostrar_planejado)
+    mostrar_executado = (
+            bool(mostrar_executado)
+            and st.session_state.get("option") == "Retroanálise"
+    )
+    def _x_fluido(coluna):
+        serie = pd.to_numeric(df_mud[coluna], errors="coerce")
+        if modo_grafico == "Pressão (psi)":
+            serie = serie * 0.1704 * df_mud[col_mud_prof]
+        return serie
+    if mostrar_planejado and col_mud_plan in df_mud.columns:
+        x_plan = _x_fluido(col_mud_plan)
+        mask_plan = x_plan.notna() & df_mud[col_mud_prof].notna()
+        if mask_plan.any():
+            ax.plot(
+                x_plan[mask_plan],
+                df_mud.loc[mask_plan, col_mud_prof],
+                linestyle="-",
+                color="green",
+                linewidth=2,
+                label="Peso do Fluido (Planejado)",
+                zorder=45
+            )
+
+    if mostrar_executado and col_mud_exec in df_mud.columns:
+        x_exec = _x_fluido(col_mud_exec)
+        mask_exec = x_exec.notna() & df_mud[col_mud_prof].notna()
+        if mask_exec.any():
+            ax.plot(
+                x_exec[mask_exec],
+                df_mud.loc[mask_exec, col_mud_prof],
+                linestyle="-",
+                color="mediumvioletred",
+                linewidth=2,
+                label="Peso do Fluido (Executado)",
+                zorder=46
+            )
+
+
+def plotar_gradiente_colapso(
+        ax,
+        modo_grafico="Gradiente (lb/gal)",
+        label="Gradiente de Colapso",
+        profundidade_minima=None
+):
+    if (
+            "colapso_pontos_pp" not in st.session_state
+            or not isinstance(st.session_state.colapso_pontos_pp, pd.DataFrame)
+            or st.session_state.colapso_pontos_pp.empty
     ):
         return
 
@@ -3538,6 +3574,11 @@ def plotar_gradiente_colapso(ax, modo_grafico="Gradiente (lb/gal)", label="Gradi
         subset=[col_prof, col_colapso]
     )
 
+    if profundidade_minima is not None:
+        df_colapso_plot = df_colapso_plot[
+            df_colapso_plot[col_prof] >= float(profundidade_minima)
+        ]
+
     if df_colapso_plot.empty:
         return
 
@@ -3547,9 +3588,9 @@ def plotar_gradiente_colapso(ax, modo_grafico="Gradiente (lb/gal)", label="Gradi
         x_colapso = df_colapso_plot[col_colapso]
     else:
         x_colapso = (
-            df_colapso_plot[col_colapso]
-            * 0.1704
-            * df_colapso_plot[col_prof]
+                df_colapso_plot[col_colapso]
+                * 0.1704
+                * df_colapso_plot[col_prof]
         )
 
     ax.scatter(
@@ -3560,14 +3601,14 @@ def plotar_gradiente_colapso(ax, modo_grafico="Gradiente (lb/gal)", label="Gradi
         marker="s",
         s=50,
         label=label,
-        zorder=45
+        zorder=200
     )
 
     if st.session_state.get("mostrar_texto_colapso_pp", "Sim") == "Sim":
         for x, prof, grad in zip(
-            x_colapso,
-            df_colapso_plot[col_prof],
-            df_colapso_plot[col_colapso]
+                x_colapso,
+                df_colapso_plot[col_prof],
+                df_colapso_plot[col_colapso]
         ):
             ax.annotate(
                 f"{grad:.2f} ppg",
@@ -3578,7 +3619,7 @@ def plotar_gradiente_colapso(ax, modo_grafico="Gradiente (lb/gal)", label="Gradi
                 color="black",
                 va="center",
                 ha="left",
-                zorder=46
+                zorder=201
             )
 
 
@@ -3600,6 +3641,10 @@ def _plotar_pressao_poros_com_contexto(df_pp):
         return
 
     opcao_grafico_pp = st.session_state.get("ogp", "Gradiente (lb/gal)")
+    profundidade_inicial_curvas_pp = max(
+        0.0,
+        float(st.session_state.get("prof_inicio_curvas_pp", 0.0))
+    )
 
     usar_pp_suavizada = (
             st.session_state.get("spp", "Não") == "Sim"
@@ -3669,8 +3714,12 @@ def _plotar_pressao_poros_com_contexto(df_pp):
     else:
         df_plot = df_plot.dropna(subset=[col_prof])
 
+    df_plot = df_plot[
+        df_plot[col_prof] >= profundidade_inicial_curvas_pp
+    ].copy()
+
     if df_plot.empty:
-        st.warning("N?o h? dados de profundidade v?lidos para montar o gr?fico.")
+        st.warning("Não há dados de profundidade válidos para montar o gráfico.")
         return
 
     selected = st.session_state.get(
@@ -3685,10 +3734,10 @@ def _plotar_pressao_poros_com_contexto(df_pp):
     litologias = poco.get("litologia", [])
 
     usar_coluna_idade = (
-        st.session_state.get("idg") == "Sim"
-        and "df_idade" in st.session_state
-        and isinstance(st.session_state.df_idade, pd.DataFrame)
-        and not st.session_state.df_idade.empty
+            st.session_state.get("idg") == "Sim"
+            and "df_idade" in st.session_state
+            and isinstance(st.session_state.df_idade, pd.DataFrame)
+            and not st.session_state.df_idade.empty
     )
 
     fig = plt.figure(figsize=(8, 10))
@@ -3750,13 +3799,13 @@ def _plotar_pressao_poros_com_contexto(df_pp):
     df_lito_pp = df_pp
 
     if (
-        st.session_state.get(
-            "tipo_coluna_litologica_graficos",
-            "Permeável / Não permeável"
-        ) == "Permeável / Não permeável"
-        and "df_pp_lito" in st.session_state
-        and isinstance(st.session_state.df_pp_lito, pd.DataFrame)
-        and not st.session_state.df_pp_lito.empty
+            st.session_state.get(
+                "tipo_coluna_litologica_graficos",
+                "Permeável / Não permeável"
+            ) == "Permeável / Não permeável"
+            and "df_pp_lito" in st.session_state
+            and isinstance(st.session_state.df_pp_lito, pd.DataFrame)
+            and not st.session_state.df_pp_lito.empty
     ):
         df_lito_pp = st.session_state.df_pp_lito.copy()
 
@@ -3784,9 +3833,9 @@ def _plotar_pressao_poros_com_contexto(df_pp):
         )
 
     if (
-        plotar_curva_principal
-        and st.session_state.get("grafpp") == "Sim"
-        and coluna_sobrecarga in df_pp.columns
+            plotar_curva_principal
+            and st.session_state.get("grafpp") == "Sim"
+            and coluna_sobrecarga in df_pp.columns
     ):
         df_sob = df_pp[[col_prof, coluna_sobrecarga]].copy()
 
@@ -3801,6 +3850,9 @@ def _plotar_pressao_poros_com_contexto(df_pp):
         )
 
         df_sob = df_sob.dropna(subset=[col_prof, coluna_sobrecarga])
+        df_sob = df_sob[
+            df_sob[col_prof] >= profundidade_inicial_curvas_pp
+        ].copy()
 
         if not df_sob.empty:
             ax.plot(
@@ -3813,10 +3865,10 @@ def _plotar_pressao_poros_com_contexto(df_pp):
             )
 
     if (
-        plotar_curva_principal
-        and "df_mud" in st.session_state
-        and isinstance(st.session_state.df_mud, pd.DataFrame)
-        and not st.session_state.df_mud.empty
+            plotar_curva_principal
+            and "df_mud" in st.session_state
+            and isinstance(st.session_state.df_mud, pd.DataFrame)
+            and not st.session_state.df_mud.empty
     ):
         df_mud = st.session_state.df_mud.copy()
 
@@ -3829,11 +3881,15 @@ def _plotar_pressao_poros_com_contexto(df_pp):
                 df_mud[col_mud_prof],
                 errors="coerce"
             )
+            df_mud = df_mud[
+                df_mud[col_mud_prof].notna()
+                & (df_mud[col_mud_prof] >= profundidade_inicial_curvas_pp)
+            ].copy()
 
             mostrar_planejado = st.session_state.get("fpl", "Não") == "Sim"
             mostrar_executado = (
-                st.session_state.get("option") == "Retroanálise"
-                and st.session_state.get("fex", "Não") == "Sim"
+                    st.session_state.get("option") == "Retroanálise"
+                    and st.session_state.get("fex", "Não") == "Sim"
             )
 
             if mostrar_planejado and col_mud_plan in df_mud.columns:
@@ -3878,9 +3934,22 @@ def _plotar_pressao_poros_com_contexto(df_pp):
                         zorder=5
                     )
 
-    plotar_boyance_pp(ax, df_pp, modo_grafico=opcao_grafico_pp)
-    plotar_rft(ax, modo_grafico=opcao_grafico_pp)
-    plotar_gradiente_colapso(ax, modo_grafico=opcao_grafico_pp)
+    plotar_boyance_pp(
+        ax,
+        df_pp,
+        modo_grafico=opcao_grafico_pp,
+        profundidade_minima=profundidade_inicial_curvas_pp
+    )
+    plotar_rft(
+        ax,
+        modo_grafico=opcao_grafico_pp,
+        profundidade_minima=profundidade_inicial_curvas_pp
+    )
+    plotar_gradiente_colapso(
+        ax,
+        modo_grafico=opcao_grafico_pp,
+        profundidade_minima=profundidade_inicial_curvas_pp
+    )
 
     ax.set_title(
         titulo,
@@ -3948,10 +4017,10 @@ def _plotar_pressao_poros_com_contexto(df_pp):
 
     add_watermark(
         ax,
-        logo_path="logo2.png",
+        logo_path="logo_syga.png",
         xy=(0.50, 0.5),
         zoom=0.2,
-        alpha=0.2,
+        alpha=0.3,
         zorder=0
     )
 
@@ -3995,10 +4064,10 @@ def _plotar_gr_poros_com_contexto(df_pp, modo_grafico, lbfs=None, trendings=None
     litologias = poco.get("litologia", [])
 
     usar_coluna_idade = (
-        st.session_state.get("idg") == "Sim"
-        and "df_idade" in st.session_state
-        and isinstance(st.session_state.df_idade, pd.DataFrame)
-        and not st.session_state.df_idade.empty
+            st.session_state.get("idg") == "Sim"
+            and "df_idade" in st.session_state
+            and isinstance(st.session_state.df_idade, pd.DataFrame)
+            and not st.session_state.df_idade.empty
     )
 
     fig = plt.figure(figsize=(8, 10))
@@ -4060,13 +4129,13 @@ def _plotar_gr_poros_com_contexto(df_pp, modo_grafico, lbfs=None, trendings=None
     df_lito_gr = df_pp
 
     if (
-        st.session_state.get(
-            "tipo_coluna_litologica_graficos",
-            "Permeável / Não permeável"
-        ) == "Permeável / Não permeável"
-        and "df_pp_lito" in st.session_state
-        and isinstance(st.session_state.df_pp_lito, pd.DataFrame)
-        and not st.session_state.df_pp_lito.empty
+            st.session_state.get(
+                "tipo_coluna_litologica_graficos",
+                "Permeável / Não permeável"
+            ) == "Permeável / Não permeável"
+            and "df_pp_lito" in st.session_state
+            and isinstance(st.session_state.df_pp_lito, pd.DataFrame)
+            and not st.session_state.df_pp_lito.empty
     ):
         df_lito_gr = st.session_state.df_pp_lito.copy()
 
@@ -4162,8 +4231,8 @@ def _plotar_gr_poros_com_contexto(df_pp, modo_grafico, lbfs=None, trendings=None
 
         if "LBF_calc" in df_plot.columns:
             if (
-                st.session_state.get("s_gr") == "Sim"
-                and "Raio Gama Suavizado" in df_plot.columns
+                    st.session_state.get("s_gr") == "Sim"
+                    and "Raio Gama Suavizado" in df_plot.columns
             ):
                 coluna_rg_lbf = "Raio Gama Suavizado"
             else:
@@ -4182,7 +4251,7 @@ def _plotar_gr_poros_com_contexto(df_pp, modo_grafico, lbfs=None, trendings=None
                 df_pontos_lbf = df_pontos_lbf[
                     (df_pontos_lbf[coluna_rg_lbf] >= df_pontos_lbf["LBF_calc"])
                     & (df_pontos_lbf[coluna_base] > 0)
-                ]
+                    ]
 
                 if not df_pontos_lbf.empty:
                     ax.semilogx(
@@ -4199,6 +4268,7 @@ def _plotar_gr_poros_com_contexto(df_pp, modo_grafico, lbfs=None, trendings=None
             df_pp["Profundidade (m)"],
             errors="coerce"
         )
+        mask_dados_plot = _mask_perfis_pp_validos(df_pp)
 
         for idx, tr in enumerate(trendings):
             try:
@@ -4216,15 +4286,16 @@ def _plotar_gr_poros_com_contexto(df_pp, modo_grafico, lbfs=None, trendings=None
 
                 mask_base = (
                         prof.notna()
+                        & mask_dados_plot
                         & s_normal.notna()
                         & (s_normal > 0)
                 )
 
                 if (
-                    st.session_state.get("tipo_poco") == "Onshore"
-                    and int(st.session_state.get("n_lbf", 1)) == 1
-                    and int(st.session_state.get("n_trending", 1)) == 1
-                    and "Perfil sônico (µs/pé)" in df_pp.columns
+                        st.session_state.get("tipo_poco") == "Onshore"
+                        and int(st.session_state.get("n_lbf", 1)) == 1
+                        and int(st.session_state.get("n_trending", 1)) == 1
+                        and "Perfil sônico (µs/pé)" in df_pp.columns
                 ):
                     sonico_ref = pd.to_numeric(
                         df_pp["Perfil sônico (µs/pé)"],
@@ -4234,11 +4305,11 @@ def _plotar_gr_poros_com_contexto(df_pp, modo_grafico, lbfs=None, trendings=None
                     prof_validas_sonico = prof[
                         prof.notna()
                         & sonico_ref.notna()
-                    ]
+                        ]
 
                     if not prof_validas_sonico.empty:
                         mask_base = mask_base & (
-                            prof >= prof_validas_sonico.min()
+                                prof >= prof_validas_sonico.min()
                         )
 
                 if st.session_state.get("tipo_poco") == "Offshore":
@@ -4258,10 +4329,12 @@ def _plotar_gr_poros_com_contexto(df_pp, modo_grafico, lbfs=None, trendings=None
                 else:
                     mask_final = mask_base
 
-                if mask_final.any():
+                s_normal_plot = s_normal.where(mask_final)
+
+                if s_normal_plot.notna().any():
                     ax.semilogx(
-                        s_normal[mask_final],
-                        prof[mask_final],
+                        s_normal_plot,
+                        prof,
                         linestyle="--",
                         linewidth=3,
                         color=cor_trending,
@@ -4305,8 +4378,8 @@ def _plotar_gr_poros_com_contexto(df_pp, modo_grafico, lbfs=None, trendings=None
         )
 
         if (
-            st.session_state.get("s_gr") == "Sim"
-            and coluna_suavizada in df_plot.columns
+                st.session_state.get("s_gr") == "Sim"
+                and coluna_suavizada in df_plot.columns
         ):
             df_suav_gr = df_plot.dropna(
                 subset=["Profundidade (m)", coluna_suavizada]
@@ -4325,6 +4398,7 @@ def _plotar_gr_poros_com_contexto(df_pp, modo_grafico, lbfs=None, trendings=None
             df_pp["Profundidade (m)"],
             errors="coerce"
         )
+        mask_dados_plot = _mask_perfis_pp_validos(df_pp)
 
         for idx, lbf in enumerate(lbfs):
             try:
@@ -4338,36 +4412,7 @@ def _plotar_gr_poros_com_contexto(df_pp, modo_grafico, lbfs=None, trendings=None
 
                 lbf_line = lbf["inclbf"] * (prof - prof_ref) + lbf["lbf"]
 
-                mask_base = prof.notna()
-
-                if (
-                    st.session_state.get("tipo_poco") == "Onshore"
-                    and int(st.session_state.get("n_lbf", 1)) == 1
-                    and int(st.session_state.get("n_trending", 1)) == 1
-                ):
-                    if (
-                        st.session_state.get("s_gr") == "Sim"
-                        and "Raio Gama Suavizado" in df_pp.columns
-                    ):
-                        coluna_gr_ref = "Raio Gama Suavizado"
-                    else:
-                        coluna_gr_ref = "Perfil Raio Gama"
-
-                    if coluna_gr_ref in df_pp.columns:
-                        curva_gr_ref = pd.to_numeric(
-                            df_pp[coluna_gr_ref],
-                            errors="coerce"
-                        )
-
-                        prof_validas_gr = prof[
-                            prof.notna()
-                            & curva_gr_ref.notna()
-                        ]
-
-                        if not prof_validas_gr.empty:
-                            mask_base = mask_base & (
-                                prof >= prof_validas_gr.min()
-                            )
+                mask_base = prof.notna() & mask_dados_plot
 
                 if st.session_state.get("tipo_poco") == "Offshore":
                     mask_base = mask_base & (df_pp.index >= 1)
@@ -4376,9 +4421,9 @@ def _plotar_gr_poros_com_contexto(df_pp, modo_grafico, lbfs=None, trendings=None
                 prof_fim = lbf.get("prof_fim")
 
                 if (
-                    prof_ini is not None
-                    and prof_fim is not None
-                    and prof_fim > prof_ini
+                        prof_ini is not None
+                        and prof_fim is not None
+                        and prof_fim > prof_ini
                 ):
                     mask_intervalo = (prof >= prof_ini) & (prof <= prof_fim)
                     mask_final = mask_base & mask_intervalo
@@ -4386,10 +4431,12 @@ def _plotar_gr_poros_com_contexto(df_pp, modo_grafico, lbfs=None, trendings=None
                 else:
                     mask_final = mask_base
 
-                if mask_final.any():
+                lbf_line_plot = lbf_line.where(mask_final)
+
+                if lbf_line_plot.notna().any():
                     ax.plot(
-                        lbf_line[mask_final],
-                        prof[mask_final],
+                        lbf_line_plot,
+                        prof,
                         color=cor_lbf,
                         linestyle="--",
                         linewidth=3,
@@ -4405,8 +4452,8 @@ def _plotar_gr_poros_com_contexto(df_pp, modo_grafico, lbfs=None, trendings=None
             valores_x.append(df_plot[coluna_base])
 
         if (
-            st.session_state.get("s_gr") == "Sim"
-            and coluna_suavizada in df_plot.columns
+                st.session_state.get("s_gr") == "Sim"
+                and coluna_suavizada in df_plot.columns
         ):
             valores_x.append(df_plot[coluna_suavizada])
 
@@ -4464,10 +4511,10 @@ def _plotar_gr_poros_com_contexto(df_pp, modo_grafico, lbfs=None, trendings=None
 
     add_watermark(
         ax,
-        logo_path="logo2.png",
+        logo_path="logo_syga.png",
         xy=(0.50, 0.5),
         zoom=0.2,
-        alpha=0.2,
+        alpha=0.3,
         zorder=0
     )
 
@@ -4541,7 +4588,6 @@ def _serie_interpolada_fratura(df_ref, coluna, profundidades):
     )
 
 
-
 def _carregar_lots_yaml_fratura():
     try:
         with open("pocos.yaml", "r", encoding="utf-8") as f:
@@ -4559,11 +4605,9 @@ def _carregar_lots_yaml_fratura():
 
     if easting_base is None or northing_base is None or zona_base is None:
         return pd.DataFrame(columns=["Nome", "Distância (km)", "Profundidade Vertical (m)", "Peso Eq. (lb/gal)"])
-
     def _hemisferio_norte(valor):
         txt = str(valor).strip().lower()
         return txt in ("n", "norte", "north")
-
     def _haversine(lat1, lon1, lat2, lon2):
         r = 6371000
         phi1 = math.radians(lat1)
@@ -4573,7 +4617,6 @@ def _carregar_lots_yaml_fratura():
         a = math.sin(dphi / 2) ** 2 + math.cos(phi1) * math.cos(phi2) * math.sin(dlambda / 2) ** 2
         c = 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
         return r * c
-
     try:
         lat_base, lon_base = utm.to_latlon(
             float(easting_base),
@@ -4669,7 +4712,7 @@ def _calibrar_k_fratura(df_pp, df_lot, usar_auxiliar=False):
     col_gp = (
         "Gradiente de Pressão de Poros Suavizado (lb/gal)"
         if st.session_state.get("spp", "Não") == "Sim"
-        and "Gradiente de Pressão de Poros Suavizado (lb/gal)" in df_ref.columns
+           and "Gradiente de Pressão de Poros Suavizado (lb/gal)" in df_ref.columns
         else "Gradiente de Pressão de Poros (lb/gal)"
     )
 
@@ -4677,9 +4720,9 @@ def _calibrar_k_fratura(df_pp, df_lot, usar_auxiliar=False):
 
     if "Pressão de Sobrecarga (psi)" not in df_ref.columns and "Gradiente de Sobrecarga (lb/gal)" in df_ref.columns:
         df_ref["Pressão de Sobrecarga (psi)"] = (
-            0.1704
-            * pd.to_numeric(df_ref["Gradiente de Sobrecarga (lb/gal)"], errors="coerce")
-            * pd.to_numeric(df_ref["Profundidade (m)"], errors="coerce")
+                0.1704
+                * pd.to_numeric(df_ref["Gradiente de Sobrecarga (lb/gal)"], errors="coerce")
+                * pd.to_numeric(df_ref["Profundidade (m)"], errors="coerce")
         )
 
     pressao_sob = _serie_interpolada_fratura(df_ref, "Pressão de Sobrecarga (psi)", prof_lot)
@@ -4698,8 +4741,8 @@ def _calibrar_k_fratura(df_pp, df_lot, usar_auxiliar=False):
     })
 
     gf["K"] = (
-        (gf["P. Absorção (psi)"] - gf["P. Poros (psi)"])
-        / (gf["P. Sobrecarga (psi)"] - gf["P. Poros (psi)"])
+            (gf["P. Absorção (psi)"] - gf["P. Poros (psi)"])
+            / (gf["P. Sobrecarga (psi)"] - gf["P. Poros (psi)"])
     )
 
     if usar_auxiliar:
@@ -4752,7 +4795,7 @@ def _calcular_df_f_fratura(df_pp, gf=None):
     col_gp = (
         "Gradiente de Pressão de Poros Suavizado (lb/gal)"
         if st.session_state.get("spp", "Não") == "Sim"
-        and "Gradiente de Pressão de Poros Suavizado (lb/gal)" in df_pp.columns
+           and "Gradiente de Pressão de Poros Suavizado (lb/gal)" in df_pp.columns
         else "Gradiente de Pressão de Poros (lb/gal)"
     )
 
@@ -4761,7 +4804,8 @@ def _calcular_df_f_fratura(df_pp, gf=None):
 
     df_f = pd.DataFrame({
         "Profundidade (m)": pd.to_numeric(df_pp[col_prof], errors="coerce"),
-        "MD": pd.to_numeric(df_pp["MD"], errors="coerce") if "MD" in df_pp.columns else pd.to_numeric(df_pp[col_prof], errors="coerce"),
+        "MD": pd.to_numeric(df_pp["MD"], errors="coerce") if "MD" in df_pp.columns else pd.to_numeric(df_pp[col_prof],
+                                                                                                      errors="coerce"),
         "Gradiente de Sobrecarga (lb/gal)": pd.to_numeric(df_pp[col_gs], errors="coerce"),
         "Gradiente de Pressão de Poros (lb/gal)": pd.to_numeric(df_pp[col_gp], errors="coerce"),
     })
@@ -4776,12 +4820,12 @@ def _calcular_df_f_fratura(df_pp, gf=None):
     df_f["K"] = (np.log(prof) - np.log(a)) / b
 
     df_f["Gradiente de Fratura (lb/gal)"] = (
-        df_f["Gradiente de Pressão de Poros (lb/gal)"]
-        + df_f["K"]
-        * (
-            df_f["Gradiente de Sobrecarga (lb/gal)"]
-            - df_f["Gradiente de Pressão de Poros (lb/gal)"]
-        )
+            df_f["Gradiente de Pressão de Poros (lb/gal)"]
+            + df_f["K"]
+            * (
+                    df_f["Gradiente de Sobrecarga (lb/gal)"]
+                    - df_f["Gradiente de Pressão de Poros (lb/gal)"]
+            )
     )
 
     df_f["Gradiente de Fratura (lb/gal)"] = pd.to_numeric(
@@ -4790,9 +4834,9 @@ def _calcular_df_f_fratura(df_pp, gf=None):
     ).clip(lower=0)
 
     df_f["Pressão de Fratura (psi)"] = (
-        0.1704
-        * df_f["Gradiente de Fratura (lb/gal)"]
-        * df_f["Profundidade (m)"]
+            0.1704
+            * df_f["Gradiente de Fratura (lb/gal)"]
+            * df_f["Profundidade (m)"]
     )
 
     st.session_state.a_k = a
@@ -4804,16 +4848,27 @@ def _calcular_df_f_fratura(df_pp, gf=None):
 def _plotar_gradiente_fratura(df_f, df_pp):
     modo = st.session_state.get("ogf", "Gradiente (lb/gal)")
     col_prof = "Profundidade (m)"
+    profundidade_inicial_curvas = max(
+        0.0,
+        float(st.session_state.get("prof_inicio_curvas_f", 0.0))
+    )
 
     plotar_curva_fratura = (
-        isinstance(df_f, pd.DataFrame)
-        and not df_f.empty
-        and col_prof in df_f.columns
-        and "Gradiente de Fratura (lb/gal)" in df_f.columns
+            isinstance(df_f, pd.DataFrame)
+            and not df_f.empty
+            and col_prof in df_f.columns
+            and "Gradiente de Fratura (lb/gal)" in df_f.columns
     )
 
     if not plotar_curva_fratura:
         df_f = df_pp.copy() if isinstance(df_pp, pd.DataFrame) else pd.DataFrame()
+
+    if col_prof in df_f.columns:
+        profundidades_plot = pd.to_numeric(df_f[col_prof], errors="coerce")
+        df_f = df_f[
+            profundidades_plot.notna()
+            & (profundidades_plot >= profundidade_inicial_curvas)
+        ].copy()
 
     y_min_f = float(st.session_state.get("y_min_f", 0.0))
     y_max_f = float(st.session_state.get("y_max_f", 1000.0))
@@ -4828,10 +4883,10 @@ def _plotar_gradiente_fratura(df_f, df_pp):
         x_max_f = x_min_f + x_step_f
 
     usar_coluna_idade = (
-        st.session_state.get("idg") == "Sim"
-        and "df_idade" in st.session_state
-        and isinstance(st.session_state.df_idade, pd.DataFrame)
-        and not st.session_state.df_idade.empty
+            st.session_state.get("idg") == "Sim"
+            and "df_idade" in st.session_state
+            and isinstance(st.session_state.df_idade, pd.DataFrame)
+            and not st.session_state.df_idade.empty
     )
 
     fig = plt.figure(figsize=(8, 10))
@@ -4863,13 +4918,13 @@ def _plotar_gradiente_fratura(df_f, df_pp):
     df_lito_f = df_pp if isinstance(df_pp, pd.DataFrame) and not df_pp.empty else df_f
 
     if (
-        st.session_state.get(
-            "tipo_coluna_litologica_graficos",
-            "Permeável / Não permeável"
-        ) == "Permeável / Não permeável"
-        and "df_pp_lito" in st.session_state
-        and isinstance(st.session_state.df_pp_lito, pd.DataFrame)
-        and not st.session_state.df_pp_lito.empty
+            st.session_state.get(
+                "tipo_coluna_litologica_graficos",
+                "Permeável / Não permeável"
+            ) == "Permeável / Não permeável"
+            and "df_pp_lito" in st.session_state
+            and isinstance(st.session_state.df_pp_lito, pd.DataFrame)
+            and not st.session_state.df_pp_lito.empty
     ):
         df_lito_f = st.session_state.df_pp_lito.copy()
 
@@ -4915,9 +4970,11 @@ def _plotar_gradiente_fratura(df_f, df_pp):
             label="Gradiente de Fratura" if modo == "Gradiente (lb/gal)" else "Pressão de Fratura"
         )
 
-    if plotar_curva_fratura and st.session_state.get("grap", "Sim") == "Sim" and "Gradiente de Pressão de Poros (lb/gal)" in df_f.columns:
+    if plotar_curva_fratura and st.session_state.get("grap",
+                                                     "Sim") == "Sim" and "Gradiente de Pressão de Poros (lb/gal)" in df_f.columns:
         if modo == "Pressão (psi)":
-            x_pp = 0.1704 * pd.to_numeric(df_f["Gradiente de Pressão de Poros (lb/gal)"], errors="coerce") * pd.to_numeric(df_f[col_prof], errors="coerce")
+            x_pp = 0.1704 * pd.to_numeric(df_f["Gradiente de Pressão de Poros (lb/gal)"],
+                                          errors="coerce") * pd.to_numeric(df_f[col_prof], errors="coerce")
             label_pp = "Pressão de Poros"
         else:
             x_pp = pd.to_numeric(df_f["Gradiente de Pressão de Poros (lb/gal)"], errors="coerce")
@@ -4925,9 +4982,11 @@ def _plotar_gradiente_fratura(df_f, df_pp):
 
         ax.plot(x_pp, df_f[col_prof], color="orange", linestyle="-", linewidth=2, label=label_pp)
 
-    if plotar_curva_fratura and st.session_state.get("gras", "Sim") == "Sim" and "Gradiente de Sobrecarga (lb/gal)" in df_f.columns:
+    if plotar_curva_fratura and st.session_state.get("gras",
+                                                     "Sim") == "Sim" and "Gradiente de Sobrecarga (lb/gal)" in df_f.columns:
         if modo == "Pressão (psi)":
-            x_gs = 0.1704 * pd.to_numeric(df_f["Gradiente de Sobrecarga (lb/gal)"], errors="coerce") * pd.to_numeric(df_f[col_prof], errors="coerce")
+            x_gs = 0.1704 * pd.to_numeric(df_f["Gradiente de Sobrecarga (lb/gal)"], errors="coerce") * pd.to_numeric(
+                df_f[col_prof], errors="coerce")
             label_gs = "Pressão de Sobrecarga"
         else:
             x_gs = pd.to_numeric(df_f["Gradiente de Sobrecarga (lb/gal)"], errors="coerce")
@@ -4935,22 +4994,32 @@ def _plotar_gradiente_fratura(df_f, df_pp):
 
         ax.plot(x_gs, df_f[col_prof], color="black", linestyle="-", linewidth=2, label=label_gs)
 
-    if plotar_curva_fratura and st.session_state.get("janela_fratura", "Sim") == "Sim" and "Gradiente de Pressão de Poros (lb/gal)" in df_f.columns:
+    if plotar_curva_fratura and st.session_state.get("janela_fratura",
+                                                     "Sim") == "Sim" and "Gradiente de Pressão de Poros (lb/gal)" in df_f.columns:
         if modo == "Pressão (psi)":
-            x1 = 0.1704 * pd.to_numeric(df_f["Gradiente de Pressão de Poros (lb/gal)"], errors="coerce") * pd.to_numeric(df_f[col_prof], errors="coerce")
+            x1 = 0.1704 * pd.to_numeric(df_f["Gradiente de Pressão de Poros (lb/gal)"],
+                                        errors="coerce") * pd.to_numeric(df_f[col_prof], errors="coerce")
             x2 = pd.to_numeric(df_f.get("Pressão de Fratura (psi)"), errors="coerce")
         else:
             x1 = pd.to_numeric(df_f["Gradiente de Pressão de Poros (lb/gal)"], errors="coerce")
             x2 = pd.to_numeric(df_f["Gradiente de Fratura (lb/gal)"], errors="coerce")
 
         y = pd.to_numeric(df_f[col_prof], errors="coerce")
-        ax.fill_betweenx(y, x1, x2, where=(x2 > x1), color="lightgreen", alpha=0.2, label="Janela Operacional", interpolate=True)
+        ax.fill_betweenx(y, x1, x2, where=(x2 > x1), color="lightgreen", alpha=0.2, label="Janela Operacional",
+                         interpolate=True)
 
     df_lot = _normalizar_pontos_lot_fratura(
         st.session_state.get("lot_pontos_fratura", pd.DataFrame())
         if st.session_state.get("lot_fratura", "Sim") == "Sim"
         else st.session_state.get("lot_pontos_yaml_fratura", pd.DataFrame())
     )
+    if not df_lot.empty:
+        profundidades_lot = pd.to_numeric(df_lot["Profundidade (m)"], errors="coerce")
+        df_lot = df_lot[
+            profundidades_lot.notna()
+            & (profundidades_lot >= profundidade_inicial_curvas)
+        ].copy()
+
     if plotar_curva_fratura and not df_lot.empty:
         for tipo, cor, marcador, label in [("LOT", "red", "D", "LOT's"), ("FIT", "blue", "^", "FIT's")]:
             df_tipo = df_lot[df_lot["Tipo"] == tipo]
@@ -4969,14 +5038,15 @@ def _plotar_gradiente_fratura(df_f, df_pp):
                 edgecolors="black",
                 linewidths=0.8,
                 label=label,
-                zorder=5,
+                zorder=200,
                 marker=marcador,
                 s=50
             )
 
             chave_texto = "mostrar_texto_lot_tabs4" if tipo == "LOT" else "mostrar_texto_fit_tabs4"
             if st.session_state.get(chave_texto, "Sim") == "Sim":
-                for x_item, y_item, peso_item in zip(x_ponto, df_tipo["Profundidade (m)"], df_tipo["Peso Eq. (lb/gal)"]):
+                for x_item, y_item, peso_item in zip(x_ponto, df_tipo["Profundidade (m)"],
+                                                     df_tipo["Peso Eq. (lb/gal)"]):
                     ax.annotate(
                         f"{peso_item:.2f} ppg",
                         xy=(x_item, y_item),
@@ -4990,8 +5060,16 @@ def _plotar_gradiente_fratura(df_f, df_pp):
                     )
 
     if plotar_curva_fratura:
-        plotar_rft(ax, modo_grafico=modo)
-        plotar_gradiente_colapso(ax, modo_grafico=modo)
+        plotar_rft(
+            ax,
+            modo_grafico=modo,
+            profundidade_minima=profundidade_inicial_curvas
+        )
+        plotar_gradiente_colapso(
+            ax,
+            modo_grafico=modo,
+            profundidade_minima=profundidade_inicial_curvas
+        )
 
     ax.set_title(titulo, fontsize=14, fontweight="bold")
     ax.set_xlabel(xlabel, fontsize=12)
@@ -5016,9 +5094,10 @@ def _plotar_gradiente_fratura(df_f, df_pp):
         ax.grid(True, which="minor", axis="x", linestyle="--", alpha=0.5)
 
     if ax.get_legend_handles_labels()[0]:
-        ax.legend(loc="upper right", fontsize=8, frameon=True, shadow=True, fancybox=True, framealpha=1, facecolor="white", edgecolor="gray")
+        ax.legend(loc="upper right", fontsize=8, frameon=True, shadow=True, fancybox=True, framealpha=1,
+                  facecolor="white", edgecolor="gray")
 
-    add_watermark(ax, logo_path="logo2.png", xy=(0.50, 0.5), zoom=0.2, alpha=0.2, zorder=0)
+    add_watermark(ax, logo_path="logo_syga.png", xy=(0.50, 0.5), zoom=0.2, alpha=0.3, zorder=0)
 
     st.session_state.fig_fratura = fig
     st.pyplot(fig)
@@ -5036,7 +5115,26 @@ def _plotar_k_fratura(gf):
     fig, ax = plt.subplots(figsize=(8, 10))
 
     if not gf_plot.empty:
-        ax.plot(gf_plot["K"], gf_plot["Profundidade (m)"], color="blue", linestyle="None", marker="o", markersize=8, markerfacecolor="black", markeredgecolor="red", label="K")
+        ax.plot(gf_plot["K"], gf_plot["Profundidade (m)"], color="blue", linestyle="None", marker="o", markersize=8,
+                markerfacecolor="black", markeredgecolor="red", label="K")
+        for k_valor, prof_valor in zip(gf_plot["K"], gf_plot["Profundidade (m)"]):
+            ax.annotate(
+                f"{k_valor:.3f}",
+                xy=(k_valor, prof_valor),
+                xytext=(0, 16),
+                textcoords="offset points",
+                fontsize=8,
+                color="black",
+                va="top",
+                ha="center",
+                bbox=dict(
+                    boxstyle="round,pad=0.18",
+                    fc="white",
+                    ec="black",
+                    alpha=0.85
+                ),
+                zorder=6
+            )
 
     a, b = _ajustar_tendencia_k_fratura(gf_plot)
     if not gf_plot.empty and a is not None and b is not None and gf_plot["K"].max() > gf_plot["K"].min():
@@ -5048,17 +5146,26 @@ def _plotar_k_fratura(gf):
     y_max_padrao = gf_plot["Profundidade (m)"].max() + 100 if not gf_plot.empty else 1000.0
     y_max_f = float(st.session_state.get("y_max_f", y_max_padrao))
     y_step_f = max(0.01, float(st.session_state.get("y_step_f", 200.0)))
+    x_min_k_f = float(st.session_state.get("x_min_k_f", 0.0))
+    x_max_k_f = float(st.session_state.get("x_max_k_f", 1.0))
+    x_step_k_f = max(0.001, float(st.session_state.get("x_step_k_f", 0.1)))
+
+    if x_max_k_f <= x_min_k_f:
+        x_max_k_f = x_min_k_f + x_step_k_f
 
     ax.set_title("K x Profundidade", fontsize=14, fontweight="bold")
     ax.set_xlabel("K", fontsize=12)
     ax.set_ylabel("Profundidade TVD (m)", fontsize=12)
     ax.invert_yaxis()
+    ax.set_xlim(x_min_k_f, x_max_k_f)
+    ax.set_xticks(np.arange(x_min_k_f, x_max_k_f + x_step_k_f * 0.5, x_step_k_f))
     ax.set_yticks(np.arange(y_min_f, y_max_f + y_step_f * 0.5, y_step_f))
     ax.set_ylim(y_max_f, y_min_f)
     ax.grid(True, linestyle="--", alpha=0.5)
     if ax.get_legend_handles_labels()[0]:
-        ax.legend(loc="upper right", fontsize=8, frameon=True, shadow=True, fancybox=True, framealpha=1, facecolor="white", edgecolor="gray")
-    add_watermark(ax, logo_path="logo2.png", xy=(0.50, 0.5), zoom=0.2, alpha=0.2, zorder=0)
+        ax.legend(loc="upper right", fontsize=8, frameon=True, shadow=True, fancybox=True, framealpha=1,
+                  facecolor="white", edgecolor="gray")
+    add_watermark(ax, logo_path="logo_syga.png", xy=(0.50, 0.5), zoom=0.2, alpha=0.3, zorder=0)
 
     st.session_state.fig_k_prof = fig
     st.pyplot(fig)
@@ -5077,10 +5184,10 @@ def _coluna_existente(df, opcoes):
 
 def _interpolar_coluna_por_profundidade(df_ref, col_prof_ref, col_valor, profundidades_destino):
     if (
-        not isinstance(df_ref, pd.DataFrame)
-        or df_ref.empty
-        or col_prof_ref not in df_ref.columns
-        or col_valor not in df_ref.columns
+            not isinstance(df_ref, pd.DataFrame)
+            or df_ref.empty
+            or col_prof_ref not in df_ref.columns
+            or col_valor not in df_ref.columns
     ):
         return pd.Series(np.nan, index=profundidades_destino.index)
 
@@ -5107,6 +5214,526 @@ def _interpolar_coluna_por_profundidade(df_ref, col_prof_ref, col_valor, profund
         ),
         index=profundidades_destino.index
     )
+
+
+def aplicar_calibracao_fraturas_superiores(df_est):
+    if not isinstance(df_est, pd.DataFrame) or df_est.empty:
+        return df_est
+
+    df_est = df_est.copy()
+    col_prof = "Profundidade (m)"
+    col_tracao_a = "Tração Superior (σθA)"
+    col_tracao_b = "Tração Superior (σθB)"
+    colunas_calibracao = [
+        "Fratura Superior Atual",
+        "Gradiente de Fratura Ref. Tensões Mínimas",
+        "Delta Calibração Fratura Superior",
+        "Tração Superior (σθA) Calibrada",
+        "Tração Superior (σθB) Calibrada",
+    ]
+
+    for coluna in colunas_calibracao:
+        if coluna not in df_est.columns:
+            df_est[coluna] = np.nan
+
+    if any(
+            coluna not in df_est.columns
+            for coluna in (col_prof, col_tracao_a, col_tracao_b)
+    ):
+        return df_est
+
+    profundidade = pd.to_numeric(df_est[col_prof], errors="coerce")
+    tracao_a = pd.to_numeric(df_est[col_tracao_a], errors="coerce")
+    tracao_b = pd.to_numeric(df_est[col_tracao_b], errors="coerce")
+    fratura_superior_atual = pd.concat(
+        [tracao_a, tracao_b],
+        axis=1,
+    ).min(axis=1, skipna=True)
+    df_est["Fratura Superior Atual"] = fratura_superior_atual
+
+    df_f = st.session_state.get("df_f", pd.DataFrame())
+    referencia_valida = (
+        isinstance(df_f, pd.DataFrame)
+        and not df_f.empty
+        and col_prof in df_f.columns
+        and "Gradiente de Fratura (lb/gal)" in df_f.columns
+    )
+
+    if referencia_valida:
+        referencia = _interpolar_coluna_por_profundidade(
+            df_f,
+            col_prof,
+            "Gradiente de Fratura (lb/gal)",
+            profundidade,
+        )
+    else:
+        referencia = pd.Series(np.nan, index=df_est.index, dtype=float)
+
+    df_est["Gradiente de Fratura Ref. Tensões Mínimas"] = referencia
+    delta = referencia - fratura_superior_atual
+
+    if (
+            st.session_state.get(
+                "suavizar_delta_fratura_superior",
+                "Sim",
+            ) == "Sim"
+    ):
+        janela = int(
+            st.session_state.get(
+                "janela_suavizacao_delta_fratura_superior",
+                20,
+            )
+        )
+        janela = min(max(janela, 1), 200)
+        delta = delta.rolling(
+            window=janela,
+            center=True,
+            min_periods=1,
+        ).mean()
+
+    delta = delta.where(
+        referencia.notna() & fratura_superior_atual.notna()
+    )
+    df_est["Delta Calibração Fratura Superior"] = delta
+
+    calibrar = (
+        st.session_state.get(
+            "calibrar_fraturas_superiores_tensoes_minimas",
+            "Não",
+        ) == "Sim"
+        and referencia_valida
+    )
+    if calibrar:
+        delta_aplicado = delta.fillna(0.0)
+        df_est["Tração Superior (σθA) Calibrada"] = tracao_a + delta_aplicado
+        df_est["Tração Superior (σθB) Calibrada"] = tracao_b + delta_aplicado
+    else:
+        df_est["Tração Superior (σθA) Calibrada"] = np.nan
+        df_est["Tração Superior (σθB) Calibrada"] = np.nan
+
+    usar_calibradas_min_sup = (
+        calibrar
+        and st.session_state.get(
+            "usar_fraturas_superiores_calibradas_min_sup",
+            "Sim",
+        ) == "Sim"
+    )
+    if usar_calibradas_min_sup:
+        tracao_a_min_sup = pd.to_numeric(
+            df_est["Tração Superior (σθA) Calibrada"],
+            errors="coerce",
+        ).combine_first(tracao_a)
+        tracao_b_min_sup = pd.to_numeric(
+            df_est["Tração Superior (σθB) Calibrada"],
+            errors="coerce",
+        ).combine_first(tracao_b)
+    else:
+        tracao_a_min_sup = tracao_a
+        tracao_b_min_sup = tracao_b
+
+    series_min_sup = [tracao_a_min_sup, tracao_b_min_sup]
+    for coluna in (
+            "Comp Superior σθA",
+            "Comp Superior σθB",
+            "Comp Superior σaA",
+            "Comp Superior σaB",
+    ):
+        if coluna in df_est.columns:
+            series_min_sup.append(
+                pd.to_numeric(df_est[coluna], errors="coerce")
+            )
+
+    df_est["Min Sup"] = np.round(
+        pd.concat(series_min_sup, axis=1).min(axis=1, skipna=True),
+        2,
+    )
+    return df_est
+
+
+def _hash_dataframe_colunas(df, colunas):
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return None
+
+    colunas_existentes = [col for col in colunas if col in df.columns]
+    if not colunas_existentes:
+        return (len(df), tuple(df.columns))
+
+    df_hash = df[colunas_existentes].copy()
+    for col in colunas_existentes:
+        df_hash[col] = pd.to_numeric(df_hash[col], errors="ignore")
+
+    try:
+        return (
+            len(df_hash),
+            tuple(colunas_existentes),
+            int(pd.util.hash_pandas_object(df_hash, index=True).sum())
+        )
+    except Exception:
+        return (
+            len(df_hash),
+            tuple(colunas_existentes),
+            tuple(str(df_hash[col].iloc[-1]) for col in colunas_existentes if not df_hash[col].empty)
+        )
+
+
+def _assinatura_df_estabilidade(df_pp):
+    return (
+        _hash_dataframe_colunas(
+            df_pp,
+            [
+                "Profundidade (m)",
+                "MD",
+                "Perfil de densidade (g/cm³)",
+                "Perfil sônico (µs/pé)",
+                "Gradiente de Sobrecarga (lb/gal)",
+                "Gradiente de Pressão de Poros (lb/gal)",
+            ]
+        ),
+        _hash_dataframe_colunas(
+            st.session_state.get("df_f", pd.DataFrame()),
+            ["Profundidade (m)", "Gradiente de Fratura (lb/gal)"]
+        ),
+        _hash_dataframe_colunas(
+            st.session_state.get("direcoes_tensoes_df", pd.DataFrame()),
+            ["Profundidade (m)", "Direção SH"]
+        ),
+        _hash_dataframe_colunas(
+            st.session_state.get("relacao_tensoes_df", pd.DataFrame()),
+            ["Profundidade (m)", "SH% Sobrecarga", "Sh% Sobrecarga"]
+        ),
+        st.session_state.get("lft"),
+        float(st.session_state.get("phi_constante", 30.0)),
+        st.session_state.get("ucs"),
+        float(st.session_state.get("ppg", 9.0)),
+        st.session_state.get("suavizar_perfis_estabilidade", "Sim"),
+        st.session_state.get(
+            "calibrar_fraturas_superiores_tensoes_minimas",
+            "Não",
+        ),
+        st.session_state.get(
+            "usar_fraturas_superiores_calibradas_min_sup",
+            "Sim",
+        ),
+        st.session_state.get("suavizar_delta_fratura_superior", "Sim"),
+        int(
+            st.session_state.get(
+                "janela_suavizacao_delta_fratura_superior",
+                20,
+            ) or 20
+        ),
+        bool(st.session_state.get("usar_direcoes_tensoes", False)),
+        bool(st.session_state.get("usar_relacao_tensoes", False)),
+    )
+
+
+def _normalizar_angulo_360(angulo, default=np.nan):
+    try:
+        if pd.isna(angulo):
+            return default
+        return float(angulo) % 360
+    except Exception:
+        return default
+
+
+def _seta_polar(ax_polar, angulo, r_ini, r_fim, cor, lw=2.0, ms=12, linestyle="-"):
+    theta = np.deg2rad(_normalizar_angulo_360(angulo, 0))
+    ax_polar.annotate(
+        "",
+        xy=(theta, r_fim),
+        xytext=(theta, r_ini),
+        arrowprops=dict(
+            arrowstyle="-|>",
+            color=cor,
+            linewidth=lw,
+            linestyle=linestyle,
+            mutation_scale=ms,
+            shrinkA=0,
+            shrinkB=0
+        ),
+        zorder=10
+    )
+
+
+def _plotar_eixo_tensao_inset(ax_polar, angulo, cor, label, r_ini, r_fim, lw, ms, r_texto, deslocamento_lateral=8):
+    angulo = _normalizar_angulo_360(angulo, 0)
+    for ang in (angulo, _normalizar_angulo_360(angulo + 180, 0)):
+        _seta_polar(ax_polar, angulo=ang, r_ini=r_ini, r_fim=r_fim, cor=cor, lw=lw, ms=ms)
+
+    theta_texto = np.deg2rad(_normalizar_angulo_360(angulo + deslocamento_lateral, 0))
+    ax_polar.text(
+        theta_texto,
+        r_texto,
+        label,
+        color=cor,
+        fontsize=6,
+        ha="center",
+        va="center",
+        zorder=20
+    )
+
+
+def plotar_rosa_dos_ventos_inset_jo(ax, direcao_shmax, direcao_shmin, azimute_poco=np.nan,
+                                    posicao=(0.02, 0.735, 0.27, 0.27)):
+    direcao_shmax = _normalizar_angulo_360(direcao_shmax, 0)
+    direcao_shmin = _normalizar_angulo_360(direcao_shmin, direcao_shmax + 90)
+    azimute_poco = _normalizar_angulo_360(azimute_poco, np.nan)
+
+    ax_rosa = ax.inset_axes(posicao, projection="polar", zorder=30)
+    ax_rosa.set_facecolor((1, 1, 1, 0.88))
+    ax_rosa.set_theta_zero_location("N")
+    ax_rosa.set_theta_direction(-1)
+    ax_rosa.set_ylim(0, 1.12)
+    ax_rosa.set_yticks([])
+    ax_rosa.set_xticks(np.deg2rad([0, 45, 90, 135, 180, 225, 270, 315]))
+    ax_rosa.set_xticklabels(["N", "NE", "E", "SE", "S", "SO", "O", "NO"], fontsize=6, fontweight="bold")
+    ax_rosa.tick_params(axis="x", pad=-6)
+    ax_rosa.grid(True, linestyle="--", alpha=0.35, linewidth=0.6)
+
+    theta = np.linspace(0, 2 * np.pi, 200)
+    ax_rosa.fill(
+        theta,
+        np.full_like(theta, 0.18),
+        facecolor="#9ecae1",
+        edgecolor="black",
+        linewidth=0.8,
+        alpha=0.95,
+        zorder=5
+    )
+    _plotar_eixo_tensao_inset(ax_rosa, direcao_shmax, "red", "SH", 1.00, 0.22, 2.4, 14, 0.8, 15)
+    _plotar_eixo_tensao_inset(ax_rosa, direcao_shmin, "green", "Sh", 0.82, 0.22, 1.8, 11, 0.8, 15)
+
+    if pd.notna(azimute_poco):
+        theta_azi = np.deg2rad(azimute_poco)
+        ax_rosa.annotate(
+            "",
+            xy=(theta_azi, 0.98),
+            xytext=(theta_azi, 0.20),
+            arrowprops=dict(
+                arrowstyle="->",
+                color="black",
+                linewidth=1.5,
+                linestyle="--",
+                mutation_scale=10,
+                shrinkA=0,
+                shrinkB=0
+            ),
+            zorder=15
+        )
+        ax_rosa.text(
+            np.deg2rad(_normalizar_angulo_360(azimute_poco + 20, 0)),
+            0.62,
+            "Azi",
+            color="black",
+            fontsize=6,
+            ha="center",
+            va="center",
+            zorder=20
+        )
+
+    for spine in ax_rosa.spines.values():
+        spine.set_edgecolor("black")
+        spine.set_linewidth(0.8)
+
+    return ax_rosa
+
+
+def _normalizar_df_trajetoria_3d(df_traj):
+    if not isinstance(df_traj, pd.DataFrame) or df_traj.empty:
+        return pd.DataFrame()
+
+    df = df_traj.copy()
+    rename_map = {
+        "Profundidade": "MD",
+        "MD(m)": "MD",
+        "Inc (°)": "Inc",
+        "Incl (°)": "Inc",
+        "Inclinação (°)": "Inc",
+        "Azimute (°)": "Azi",
+        "Azi (°)": "Azi",
+    }
+    df = df.rename(columns={k: v for k, v in rename_map.items() if k in df.columns})
+    def _serie_coluna_unica(nome_coluna):
+        if nome_coluna not in df.columns:
+            return pd.Series(np.nan, index=df.index)
+        dados_coluna = df.loc[:, nome_coluna]
+        if isinstance(dados_coluna, pd.DataFrame):
+            dados_coluna = dados_coluna.iloc[:, 0]
+        return pd.to_numeric(dados_coluna, errors="coerce")
+    if all(col in df.columns for col in ("Easting", "Northing")) and (
+            "TVD" in df.columns or "Profundidade (m)" in df.columns):
+        col_tvd = "TVD" if "TVD" in df.columns else "Profundidade (m)"
+        df_out = pd.DataFrame({
+            "Easting": _serie_coluna_unica("Easting"),
+            "Northing": _serie_coluna_unica("Northing"),
+            "TVD": _serie_coluna_unica(col_tvd),
+        })
+        if "MD" in df.columns:
+            df_out["MD"] = _serie_coluna_unica("MD")
+        if "Inc" in df.columns:
+            df_out["Inclinação (°)"] = _serie_coluna_unica("Inc")
+        if "Azi" in df.columns:
+            df_out["Azimute (°)"] = _serie_coluna_unica("Azi")
+        return df_out.dropna(subset=["Easting", "Northing", "TVD"]).reset_index(drop=True)
+
+    if not all(col in df.columns for col in ("MD", "Inc", "Azi")):
+        return pd.DataFrame()
+
+    df = pd.DataFrame({
+        "MD": _serie_coluna_unica("MD"),
+        "Inc": _serie_coluna_unica("Inc"),
+        "Azi": _serie_coluna_unica("Azi"),
+    })
+    df = df.dropna().sort_values("MD").reset_index(drop=True)
+    if len(df) < 2 or (df["MD"].diff().fillna(1) <= 0).any():
+        return pd.DataFrame()
+
+    md = df["MD"].to_numpy(dtype=float)
+    inc = np.radians(df["Inc"].to_numpy(dtype=float))
+    azi = np.radians(df["Azi"].to_numpy(dtype=float))
+    easting = [0.0]
+    northing = [0.0]
+    tvd = [0.0]
+    dls = [0.0]
+
+    for i in range(1, len(md)):
+        dmd = md[i] - md[i - 1]
+        cos_dl = (
+                np.sin(inc[i - 1]) * np.sin(inc[i]) * np.cos(azi[i] - azi[i - 1])
+                + np.cos(inc[i - 1]) * np.cos(inc[i])
+        )
+        cos_dl = np.clip(cos_dl, -1.0, 1.0)
+        dl = np.arccos(cos_dl)
+        rf = 1.0 if dl < 1e-8 else (2.0 / dl) * np.tan(dl / 2.0)
+
+        northing.append(
+            northing[-1] + 0.5 * dmd * (np.sin(inc[i - 1]) * np.cos(azi[i - 1]) + np.sin(inc[i]) * np.cos(azi[i])) * rf)
+        easting.append(
+            easting[-1] + 0.5 * dmd * (np.sin(inc[i - 1]) * np.sin(azi[i - 1]) + np.sin(inc[i]) * np.sin(azi[i])) * rf)
+        tvd.append(tvd[-1] + 0.5 * dmd * (np.cos(inc[i - 1]) + np.cos(inc[i])) * rf)
+        dls.append(float(np.degrees(dl) * 30.0 / dmd) if dmd else np.nan)
+
+    return pd.DataFrame({
+        "MD": md,
+        "Inclinação (°)": np.degrees(inc),
+        "Azimute (°)": np.degrees(azi),
+        "Easting": easting,
+        "Northing": northing,
+        "TVD": tvd,
+        "Dogleg Severity (°/30m)": dls,
+        "Afastamento Horizontal (m)": np.sqrt(np.asarray(easting) ** 2 + np.asarray(northing) ** 2),
+    })
+
+
+def plotar_trajetoria_3d_estabilidade(profundidade_referencia=None):
+    fontes = (
+        st.session_state.get("df_out_traj", pd.DataFrame()),
+        st.session_state.get("df2", pd.DataFrame()),
+        st.session_state.get("df_interp", pd.DataFrame()),
+    )
+    df_out = pd.DataFrame()
+    for fonte in fontes:
+        df_out = _normalizar_df_trajetoria_3d(fonte)
+        if not df_out.empty:
+            break
+
+    if df_out.empty:
+        st.info("Trajetória não encontrada. Verifique se a trajetória foi carregada no arquivo.")
+        return
+
+    st.session_state.df_out_traj = df_out.copy()
+
+    x_vals = pd.to_numeric(df_out["Easting"], errors="coerce").dropna()
+    y_vals = pd.to_numeric(df_out["Northing"], errors="coerce").dropna()
+    z_vals = pd.to_numeric(df_out["TVD"], errors="coerce").dropna()
+    if x_vals.empty or y_vals.empty or z_vals.empty:
+        st.info("Não há valores válidos para plotar a trajetória.")
+        return
+
+    x_min, x_max = float(x_vals.min()), float(x_vals.max())
+    y_min, y_max = float(y_vals.min()), float(y_vals.max())
+    z_min, z_max = 0.0, float(z_vals.max())
+    x_mid = (x_min + x_max) / 2
+    y_mid = (y_min + y_max) / 2
+    maior_span = max(x_max - x_min, y_max - y_min, z_max - z_min, 1.0)
+    margem = max(50.0, 0.05 * maior_span)
+    half_span = maior_span / 2 + margem
+
+    x_range = [x_mid - half_span, x_mid + half_span]
+    y_range = [y_mid - half_span, y_mid + half_span]
+    z_range = [maior_span + margem, 0.0]
+    xg, yg = np.meshgrid(np.linspace(x_range[0], x_range[1], 80), np.linspace(y_range[0], y_range[1], 80))
+
+    fig = go.Figure()
+    fig.add_trace(go.Surface(
+        x=xg,
+        y=yg,
+        z=np.zeros_like(xg),
+        colorscale=[[0, "#aaaaaa"], [1, "#aaaaaa"]],
+        showscale=False,
+        opacity=0.6,
+        name="Solo",
+        showlegend=True
+    ))
+    fig.add_trace(go.Scatter3d(
+        x=df_out["Easting"],
+        y=df_out["Northing"],
+        z=df_out["TVD"],
+        mode="lines",
+        line=dict(color="red", width=5),
+        name="Trajetória"
+    ))
+    fig.add_trace(go.Scatter3d(
+        x=[df_out["Easting"].iloc[0]],
+        y=[df_out["Northing"].iloc[0]],
+        z=[df_out["TVD"].iloc[0]],
+        mode="markers",
+        marker=dict(size=8, color="blue", symbol="circle"),
+        name="Cabeça do poço"
+    ))
+    fig.add_trace(go.Scatter3d(
+        x=[df_out["Easting"].iloc[-1]],
+        y=[df_out["Northing"].iloc[-1]],
+        z=[df_out["TVD"].iloc[-1]],
+        mode="markers",
+        marker=dict(size=8, color="green", symbol="circle"),
+        name="Alvo"
+    ))
+
+    if profundidade_referencia is not None and pd.notna(profundidade_referencia):
+        idx = (pd.to_numeric(df_out["TVD"], errors="coerce") - float(profundidade_referencia)).abs().idxmin()
+        fig.add_trace(go.Scatter3d(
+            x=[df_out.loc[idx, "Easting"]],
+            y=[df_out.loc[idx, "Northing"]],
+            z=[df_out.loc[idx, "TVD"]],
+            mode="markers+text",
+            marker=dict(size=8, color="orange", symbol="diamond"),
+            text=f"Profundidade: {float(profundidade_referencia):.1f} m",
+            textposition="top center",
+            name="Profundidade Analisada"
+        ))
+
+    fig.update_layout(
+        height=650,
+        scene=dict(
+            xaxis=dict(title="Easting", range=x_range),
+            yaxis=dict(title="Northing", range=y_range),
+            zaxis=dict(title="TVD (m)", range=z_range),
+            aspectmode="manual",
+            aspectratio=dict(x=1, y=1, z=1),
+            camera=dict(eye=dict(x=1.5, y=1.5, z=1.0))
+        ),
+        legend=dict(
+            font=dict(size=10, color="black"),
+            bgcolor="rgba(255,255,255,0.7)",
+            bordercolor="gray",
+            borderwidth=1,
+            x=1,
+            y=-0.15,
+            xanchor="right",
+            yanchor="top",
+        )
+    )
+    st.plotly_chart(fig, use_container_width=True)
 
 
 def _montar_df_estabilidade(df_pp):
@@ -5149,9 +5776,9 @@ def _montar_df_estabilidade(df_pp):
 
     df_f = st.session_state.get("df_f", pd.DataFrame())
     if (
-        isinstance(df_f, pd.DataFrame)
-        and not df_f.empty
-        and "Gradiente de Fratura (lb/gal)" in df_f.columns
+            isinstance(df_f, pd.DataFrame)
+            and not df_f.empty
+            and "Gradiente de Fratura (lb/gal)" in df_f.columns
     ):
         df_est["Gradiente de Fratura (lb/gal)"] = _interpolar_coluna_por_profundidade(
             df_f,
@@ -5215,9 +5842,9 @@ def _montar_df_estabilidade(df_pp):
             )
 
         if (
-            not df_est["MD"].isna().all()
-            and "Incl (°)" in df_est.columns
-            and "Azi (°)" in df_est.columns
+                not df_est["MD"].isna().all()
+                and "Incl (°)" in df_est.columns
+                and "Azi (°)" in df_est.columns
         ):
             break
 
@@ -5244,18 +5871,48 @@ def _montar_df_estabilidade(df_pp):
     return df_est.dropna(subset=["Profundidade (m)"]).reset_index(drop=True)
 
 
+def _aplicar_suavizacao_perfis_estabilidade(df_est):
+    if not isinstance(df_est, pd.DataFrame) or df_est.empty:
+        return df_est
+
+    if st.session_state.get("suavizar_perfis_estabilidade", "Sim") != "Sim":
+        return df_est
+
+    df_est = df_est.copy()
+    prof = pd.to_numeric(df_est.get("Profundidade (m)", pd.Series(dtype=float)), errors="coerce")
+
+    for col_perfil in (
+            "Perfil sônico (µs/pé)",
+            "Perfil de densidade (g/cm³)",
+    ):
+        if col_perfil not in df_est.columns:
+            continue
+
+        perfil = pd.to_numeric(df_est[col_perfil], errors="coerce")
+        mask = prof.notna() & perfil.notna()
+        if mask.sum() < 3:
+            continue
+
+        try:
+            df_est.loc[mask, col_perfil] = suavizar(prof.loc[mask], perfil.loc[mask])
+        except Exception as e:
+            st.warning(f"Erro ao suavizar {col_perfil} para estabilidade: {e}")
+
+    return df_est
+
+
 def _df_direcoes_tensoes_padrao():
     return pd.DataFrame({
-        "Profundidade (m)": [],
-        "Direção SH": [],
+        "Profundidade (m)": [0.0],
+        "Direção SH": [90.0],
     })
 
 
 def _df_relacao_tensoes_padrao():
     return pd.DataFrame({
-        "Profundidade (m)": [],
-        "SH% Sobrecarga": [],
-        "Sh% Sobrecarga": [],
+        "Profundidade (m)": [0.0],
+        "SH% Sobrecarga": [0.80],
+        "Sh% Sobrecarga": [0.78],
     })
 
 
@@ -5311,7 +5968,7 @@ def _interpolar_direcao_sh(df_direcoes, profundidades):
     prof = pd.to_numeric(profundidades, errors="coerce").to_numpy(dtype=float)
 
     if df_direcoes.empty:
-        return pd.Series(np.zeros(len(prof)), index=profundidades.index)
+        return pd.Series(np.full(len(prof), 90.0), index=profundidades.index)
 
     if len(df_direcoes) == 1:
         valor = float(df_direcoes["Direção SH"].iloc[0]) % 360
@@ -5334,8 +5991,8 @@ def _interpolar_relacao_tensoes(df_relacao, profundidades):
 
     if df_relacao.empty:
         return pd.DataFrame({
-            "SH% Sobrecarga": np.full(len(prof), 0.70),
-            "Sh% Sobrecarga": np.full(len(prof), 0.68),
+            "SH% Sobrecarga": np.full(len(prof), 0.80),
+            "Sh% Sobrecarga": np.full(len(prof), 0.78),
         }, index=profundidades.index)
 
     if len(df_relacao) == 1:
@@ -5402,8 +6059,8 @@ def _aplicar_parametros_mecanicos_df_est(df_est):
 
         razao_dts_sonico = df_est["DTS"] / sonico
         poisson = (
-            (0.5 * razao_dts_sonico ** 2 - 1)
-            / (razao_dts_sonico ** 2 - 1)
+                (0.5 * razao_dts_sonico ** 2 - 1)
+                / (razao_dts_sonico ** 2 - 1)
         )
         df_est["Poisson"] = np.round(poisson, 2)
 
@@ -5424,8 +6081,8 @@ def _aplicar_parametros_mecanicos_df_est(df_est):
             )
             df_est["UCS (psi)"] = np.round(
                 (
-                    0.2787 * df_est["E estático (MMpsi)"] ** 2
-                    + 2.458 * df_est["E estático (MMpsi)"]
+                        0.2787 * df_est["E estático (MMpsi)"] ** 2
+                        + 2.458 * df_est["E estático (MMpsi)"]
                 ) * 1000,
                 2
             )
@@ -5448,8 +6105,8 @@ def _aplicar_parametros_mecanicos_df_est(df_est):
         phi_rad = np.radians(pd.to_numeric(df_est["Φ (°)"], errors="coerce"))
         df_est["So (psi)"] = np.round(
             (
-                pd.to_numeric(df_est["UCS (psi)"], errors="coerce")
-                * (1 - np.sin(phi_rad))
+                    pd.to_numeric(df_est["UCS (psi)"], errors="coerce")
+                    * (1 - np.sin(phi_rad))
             )
             / (2 * np.cos(phi_rad)),
             2
@@ -5469,8 +6126,8 @@ def _aplicar_parametros_mecanicos_df_est(df_est):
         )
     else:
         relacao_tensoes = pd.DataFrame({
-            "SH% Sobrecarga": np.full(len(df_est), 0.70),
-            "Sh% Sobrecarga": np.full(len(df_est), 0.68),
+            "SH% Sobrecarga": np.full(len(df_est), 0.80),
+            "Sh% Sobrecarga": np.full(len(df_est), 0.78),
         }, index=df_est.index)
 
     if st.session_state.get("usar_direcoes_tensoes", False):
@@ -5479,7 +6136,7 @@ def _aplicar_parametros_mecanicos_df_est(df_est):
             df_est["Profundidade (m)"]
         )
     else:
-        direcao_sh = pd.Series(np.zeros(len(df_est)), index=df_est.index)
+        direcao_sh = pd.Series(np.full(len(df_est), 90.0), index=df_est.index)
 
     df_est["SH (psi)"] = np.round(
         pd.to_numeric(relacao_tensoes["SH% Sobrecarga"], errors="coerce")
@@ -5556,21 +6213,21 @@ def _aplicar_parametros_mecanicos_df_est(df_est):
         loc=df_est.columns.get_loc('lzzl') + 1,
         column='τxy',
         value=round((lxxl * lyxl * df_est['SH (psi)']) + (lxyl * lyyl * df_est['Sh (psi)']) + (
-                    lxzl * lyzl * df_est['Sv (psi)']), 2)
+                lxzl * lyzl * df_est['Sv (psi)']), 2)
     )
 
     df_est.insert(
         loc=df_est.columns.get_loc('τxy') + 1,
         column='τyz',
         value=round((lyxl * lzxl * df_est['SH (psi)']) + (lyyl * lzyl * df_est['Sh (psi)']) + (
-                    lyzl * lzzl * df_est['Sv (psi)']), 2)
+                lyzl * lzzl * df_est['Sv (psi)']), 2)
     )
 
     df_est.insert(
         loc=df_est.columns.get_loc('τyz') + 1,
         column='τzx',
         value=round((lzxl * lxxl * df_est['SH (psi)']) + (lzyl * lxyl * df_est['Sh (psi)']) + (
-                    lzzl * lxzl * df_est['Sv (psi)']), 2)
+                lzzl * lxzl * df_est['Sv (psi)']), 2)
     )
 
     # === Direções θA e θB a partir dos cisalhamentos τyz e τzx ===
@@ -5627,6 +6284,293 @@ def _aplicar_parametros_mecanicos_df_est(df_est):
         value=thetaB_exibir
     )
 
+    # df_est.insert(
+    #     loc=df_est.columns.get_loc("θB (°)") + 1,
+    #     column="τθa",
+    #     value=np.round(
+    #         2 * (
+    #             pd.to_numeric(df_est["τyz"], errors="coerce")
+    #             * np.cos(np.radians(thetaA_exibir))
+    #             - pd.to_numeric(df_est["τzx"], errors="coerce")
+    #             * np.sin(np.radians(thetaA_exibir))
+    #         ),
+    #         2
+    #     )
+    # )
+    df_est.insert(
+        loc=df_est.columns.get_loc("θB (°)") + 1,
+        column="Pw (psi)",
+        value=np.round(
+            float(st.session_state.get("ppg", 9.0))
+            * 0.1704
+            * pd.to_numeric(df_est["Profundidade (m)"], errors="coerce"),
+            2
+        )
+    )
+
+    df_est.insert(
+        loc=df_est.columns.get_loc("Pw (psi)") + 1,
+        column="rw",
+        value=1
+        # value=float(st.session_state.get("rw", 1.0))
+    )
+
+    df_est.insert(
+        loc=df_est.columns.get_loc("rw") + 1,
+        column="r",
+        value=1
+        # value=float(st.session_state.get("r", 1.0))
+    )
+
+    df_est.insert(
+        loc=df_est.columns.get_loc('r') + 1,
+        column='σx (psi)',
+        value=round(((lxxl ** 2) * df_est['SH (psi)']) + ((lxyl ** 2) * df_est['Sh (psi)']) + (
+                (lxzl ** 2) * df_est['Sv (psi)']), 2)
+    )
+
+    df_est.insert(
+        loc=df_est.columns.get_loc('σx (psi)') + 1,
+        column='σy (psi)',
+        value=round(((lyxl ** 2) * df_est['SH (psi)']) + ((lyyl ** 2) * df_est['Sh (psi)']) + (
+                (lyzl ** 2) * df_est['Sv (psi)']), 2)
+    )
+
+    df_est.insert(
+        loc=df_est.columns.get_loc('σy (psi)') + 1,
+        column='σz (psi)',
+        value=round(((lzxl ** 2) * df_est['SH (psi)']) + ((lzyl ** 2) * df_est['Sh (psi)']) + (
+                (lzzl ** 2) * df_est['Sv (psi)']), 2)
+    )
+
+    C1 = (df_est['rw'] ** 2) / (df_est['r'] ** 2)
+    C2 = (df_est['rw'] ** 4) / (df_est['r'] ** 4)
+
+    df_est.insert(
+        loc=df_est.columns.get_loc('σz (psi)') + 1,
+        column='σr (psi)',
+        value=round((((((df_est['σx (psi)'] + df_est['σy (psi)']) / 2) * (1 - C1)) + (
+                    ((df_est['σx (psi)'] + df_est['σy (psi)']) / 2) * (1 + (
+                    3 * C2) - (4 * C1)) * (np.cos(np.radians(2 * df_est['θA (°)'])))) + (
+                              (df_est['τxy']) * ((1 + (3 * C2) - (4 * C1))) * (
+                          np.sin(np.radians(2 * df_est['θA (°)'])))) + (df_est['Pw (psi)'] * C1))), 2)
+    )
+
+    df_est.insert(
+        loc=df_est.columns.get_loc('σr (psi)') + 1,
+        column='σθA (psi)',
+        value=round((((df_est['σx (psi)'] + df_est['σy (psi)']) / 2) * (1 + C1) - (
+                ((df_est['σx (psi)'] - df_est['σy (psi)']) / 2) * (1 + (3 * C2)) * (np.cos(
+            np.radians(2 * df_est['θA (°)'])))) - ((df_est['τxy']) * ((1 + (3 * C2))) * (np.sin(np.radians(
+            2 * df_est['θA (°)'])))) - (df_est['Pw (psi)'] * C1)), 2)
+    )
+
+    df_est.insert(
+        loc=df_est.columns.get_loc('σθA (psi)') + 1,
+        column='σθB (psi)',
+        value=round((((df_est['σx (psi)'] + df_est['σy (psi)']) / 2) * (1 + C1) - (
+                ((df_est['σx (psi)'] - df_est['σy (psi)']) / 2) * (1 + (3 * C2)) * (np.cos(
+            np.radians(2 * df_est['θB (°)'])))) - ((df_est['τxy']) * ((1 + (3 * C2))) * (np.sin(np.radians(
+            2 * df_est['θB (°)'])))) - (df_est['Pw (psi)'] * C1)), 2)
+    )
+
+    df_est.insert(
+        loc=df_est.columns.get_loc('σθB (psi)') + 1,
+        column='σaA (psi)',
+        value=round(
+            (df_est['σz (psi)'] - (df_est["Poisson"] * ((2 * (df_est['σx (psi)'] - df_est['σy (psi)']) * C1 * (np.cos(
+                np.radians(2 * df_est['θA (°)'])))) + (4 * df_est['τxy'] * C1 * (np.sin(np.radians(
+                2 * df_est['θA (°)']))))))), 2)
+    )
+
+    df_est.insert(
+        loc=df_est.columns.get_loc('σaA (psi)') + 1,
+        column='σaB (psi)',
+        value=round(
+            (df_est['σz (psi)'] - (df_est["Poisson"] * ((2 * (df_est['σx (psi)'] - df_est['σy (psi)']) * C1 * (np.cos(
+                np.radians(2 * df_est['θB (°)'])))) + (4 * df_est['τxy'] * C1 * (np.sin(np.radians(
+                2 * df_est['θB (°)']))))))), 2)
+    )
+
+    df_est.insert(
+        loc=df_est.columns.get_loc('σaB (psi)') + 1,
+        column='σr efetivo (psi)',
+        value=round(df_est['σr (psi)'] - (df_est[
+            'Gradiente de Pressão de Poros (lb/gal)']) * 0.1704 *
+                    df_est['Profundidade (m)'], 2)
+    )
+
+    df_est.insert(
+        loc=df_est.columns.get_loc('σr efetivo (psi)') + 1,
+        column='σθA efetivo (psi)',
+        value=round(df_est['σθA (psi)'] - (df_est[
+            'Gradiente de Pressão de Poros (lb/gal)']) * 0.1704 *
+                    df_est['Profundidade (m)'], 2)
+    )
+
+    df_est.insert(
+        loc=df_est.columns.get_loc('σθA efetivo (psi)') + 1,
+        column='σθB efetivo (psi)',
+        value=round(df_est['σθB (psi)'] - (df_est[
+            'Gradiente de Pressão de Poros (lb/gal)']) * 0.1704 *
+                    df_est['Profundidade (m)'], 2)
+    )
+
+    df_est.insert(
+        loc=df_est.columns.get_loc('σθB efetivo (psi)') + 1,
+        column='σaA efetivo (psi)',
+        value=round(df_est['σaA (psi)'] - (df_est[
+            'Gradiente de Pressão de Poros (lb/gal)']) * 0.1704 *
+                    df_est['Profundidade (m)'], 2)
+    )
+
+    df_est.insert(
+        loc=df_est.columns.get_loc('σθB efetivo (psi)') + 1,
+        column='σaB efetivo (psi)',
+        value=round(df_est['σaB (psi)'] - (df_est[
+            'Gradiente de Pressão de Poros (lb/gal)']) * 0.1704 *
+                    df_est['Profundidade (m)'], 2)
+    )
+
+    k_tvp = 0.1704 * pd.to_numeric(df_est["Profundidade (m)"], errors="coerce")
+    k_tvp = k_tvp.where(k_tvp != 0, np.nan)
+    pw_atual = pd.to_numeric(df_est["Pw (psi)"], errors="coerce")
+    peso_fluido_atual = pw_atual / k_tvp
+    coef_ok = np.where(C1 != 0, C1, np.nan)
+    den_coef = coef_ok * k_tvp
+
+    sigma_r_efetivo = pd.to_numeric(df_est["σr efetivo (psi)"], errors="coerce")
+    sigma_ta_efetivo = pd.to_numeric(df_est["σθA efetivo (psi)"], errors="coerce")
+    sigma_tb_efetivo = pd.to_numeric(df_est["σθB efetivo (psi)"], errors="coerce")
+
+    df_est["Tração Inferior"] = np.round(
+        peso_fluido_atual - (sigma_r_efetivo / den_coef),
+        2
+    )
+    df_est["Tração Superior (σθA)"] = np.round(
+        peso_fluido_atual + (sigma_ta_efetivo / den_coef),
+        2
+    )
+    df_est["Tração Superior (σθB)"] = np.round(
+        peso_fluido_atual + (sigma_tb_efetivo / den_coef),
+        2
+    )
+
+    phi_rad_tang = np.radians(pd.to_numeric(df_est["Φ (°)"], errors="coerce"))
+    m_tang = np.tan(phi_rad_tang)
+    s0_tang = pd.to_numeric(df_est["So (psi)"], errors="coerce")
+    def _pesos_tangencia_compressao(sigma_1_atual, coef_1, sigma_2_atual, coef_2):
+        a1 = coef_1 * k_tvp
+        b1 = sigma_1_atual - (a1 * peso_fluido_atual)
+        a2 = coef_2 * k_tvp
+        b2 = sigma_2_atual - (a2 * peso_fluido_atual)
+
+        a_centro = (a1 + a2) / 2
+        b_centro = (b1 + b2) / 2
+        a_delta = a2 - a1
+        b_delta = b2 - b1
+
+        a_linha = m_tang * a_centro
+        b_linha = (m_tang * b_centro) + s0_tang
+        fator = (m_tang ** 2) + 1
+
+        qa = (4 * a_linha ** 2) - (fator * a_delta ** 2)
+        qb = (8 * a_linha * b_linha) - (2 * fator * a_delta * b_delta)
+        qc = (4 * b_linha ** 2) - (fator * b_delta ** 2)
+
+        discriminante = (qb ** 2) - (4 * qa * qc)
+        raiz_disc = np.sqrt(discriminante.where(discriminante >= 0))
+
+        qa_ok = qa.where(qa.abs() > 1e-12)
+        peso_1 = (-qb + raiz_disc) / (2 * qa_ok)
+        peso_2 = (-qb - raiz_disc) / (2 * qa_ok)
+
+        qb_ok = qb.where(qb.abs() > 1e-12)
+        peso_linear = -qc / qb_ok
+        peso_1 = peso_1.where(qa.abs() > 1e-12, peso_linear)
+        peso_2 = peso_2.where(qa.abs() > 1e-12, peso_linear)
+
+        peso_inf = pd.concat([peso_1, peso_2], axis=1).min(axis=1, skipna=True)
+        peso_sup = pd.concat([peso_1, peso_2], axis=1).max(axis=1, skipna=True)
+
+        return peso_inf, peso_sup
+    comp_inf_ta, comp_sup_ta = _pesos_tangencia_compressao(
+        sigma_r_efetivo,
+        C1,
+        sigma_ta_efetivo,
+        -C1
+    )
+    comp_inf_tb, comp_sup_tb = _pesos_tangencia_compressao(
+        sigma_r_efetivo,
+        C1,
+        sigma_tb_efetivo,
+        -C1
+    )
+    sigma_aa_efetivo = pd.to_numeric(df_est["σaA efetivo (psi)"], errors="coerce")
+    sigma_ab_efetivo = pd.to_numeric(df_est["σaB efetivo (psi)"], errors="coerce")
+    comp_inf_aa, comp_sup_aa = _pesos_tangencia_compressao(
+        sigma_r_efetivo,
+        C1,
+        sigma_aa_efetivo,
+        0
+    )
+    comp_inf_ab, comp_sup_ab = _pesos_tangencia_compressao(
+        sigma_r_efetivo,
+        C1,
+        sigma_ab_efetivo,
+        0
+    )
+
+    df_est["Comp Inferior σθA"] = np.round(comp_inf_ta, 2)
+    df_est["Comp Superior σθA"] = np.round(comp_sup_ta, 2)
+    df_est["Comp Inferior σθB"] = np.round(comp_inf_tb, 2)
+    df_est["Comp Superior σθB"] = np.round(comp_sup_tb, 2)
+    df_est["Comp Inferior σaA"] = np.round(comp_inf_aa, 2)
+    df_est["Comp Superior σaA"] = np.round(comp_sup_aa, 2)
+    df_est["Comp Inferior σaB"] = np.round(comp_inf_ab, 2)
+    df_est["Comp Superior σaB"] = np.round(comp_sup_ab, 2)
+
+    colunas_max_inf_est = [
+        "Gradiente de Pressão de Poros (lb/gal)",
+        "Tração Inferior",
+        "Comp Inferior σθA",
+        "Comp Inferior σθB",
+        "Comp Inferior σaA",
+        "Comp Inferior σaB",
+    ]
+    df_est["Max Inf"] = np.round(
+        pd.concat(
+            [
+                pd.to_numeric(df_est[col], errors="coerce")
+                for col in colunas_max_inf_est
+                if col in df_est.columns
+            ],
+            axis=1
+        ).max(axis=1, skipna=True),
+        2
+    )
+
+    colunas_min_sup_est = [
+        "Tração Superior (σθA)",
+        "Tração Superior (σθB)",
+        "Comp Superior σθA",
+        "Comp Superior σθB",
+        "Comp Superior σaA",
+        "Comp Superior σaB",
+    ]
+    df_est["Min Sup"] = np.round(
+        pd.concat(
+            [
+                pd.to_numeric(df_est[col], errors="coerce")
+                for col in colunas_min_sup_est
+                if col in df_est.columns
+            ],
+            axis=1
+        ).min(axis=1, skipna=True),
+        2
+    )
+    df_est = aplicar_calibracao_fraturas_superiores(df_est)
+
     if st.session_state.get("tipo_poco") == "Offshore" and not df_est.empty:
         colunas_primeira_linha_offshore = [
             "Vsh",
@@ -5634,7 +6578,29 @@ def _aplicar_parametros_mecanicos_df_est(df_est):
             "Direção de Sh (°)",
             "lyzl",
             "θA (°)",
-            "θB (°)"
+            "θB (°)",
+            "τθa",
+            "Pw (psi)",
+            "rw",
+            "r",
+            "Tração Inferior",
+            "Tração Superior (σθA)",
+            "Tração Superior (σθB)",
+            "Fratura Superior Atual",
+            "Gradiente de Fratura Ref. Tensões Mínimas",
+            "Delta Calibração Fratura Superior",
+            "Tração Superior (σθA) Calibrada",
+            "Tração Superior (σθB) Calibrada",
+            "Comp Inferior σθA",
+            "Comp Superior σθA",
+            "Comp Inferior σθB",
+            "Comp Superior σθB",
+            "Comp Inferior σaA",
+            "Comp Superior σaA",
+            "Comp Inferior σaB",
+            "Comp Superior σaB",
+            "Max Inf",
+            "Min Sup"
         ]
 
         colunas_primeira_linha_offshore = [
@@ -5685,16 +6651,51 @@ def _aplicar_parametros_mecanicos_df_est(df_est):
         "τzx",
         "θA (°)",
         "θB (°)",
-        ]
+        "τθa",
+        "Pw (psi)",
+        "rw",
+        "r",
+        "σx (psi)",
+        "σy (psi)",
+        "σz (psi)",
+        "σr (psi)",
+        "σθA (psi)",
+        "σθB (psi)",
+        "σaA (psi)",
+        "σaB (psi)",
+        "σr efetivo (psi)",
+        "σθA efetivo (psi)",
+        "σθB efetivo (psi)",
+        "σaA efetivo (psi)",
+        "σaB efetivo (psi)",
+        "Tração Inferior",
+        "Tração Superior (σθA)",
+        "Tração Superior (σθB)",
+        "Fratura Superior Atual",
+        "Gradiente de Fratura Ref. Tensões Mínimas",
+        "Delta Calibração Fratura Superior",
+        "Tração Superior (σθA) Calibrada",
+        "Tração Superior (σθB) Calibrada",
+        "Comp Inferior σθA",
+        "Comp Superior σθA",
+        "Comp Inferior σθB",
+        "Comp Superior σθB",
+        "Comp Inferior σaA",
+        "Comp Superior σaA",
+        "Comp Inferior σaB",
+        "Comp Superior σaB",
+        "Max Inf",
+        "Min Sup",
+    ]
 
     colunas_ordenadas = [col for col in ordem_colunas if col in df_est.columns]
     colunas_restantes = [col for col in df_est.columns if col not in colunas_ordenadas]
     df_est = df_est[colunas_ordenadas + colunas_restantes]
 
-
     return df_est
 
 
+# ABA ENTRADA DE DADOS
 def pagina_entrada_dados():
     st.header("Entrada de Dados")
     c1, c2, c3 = st.columns((1, 1, 1))
@@ -6072,7 +7073,6 @@ def pagina_entrada_dados():
                 on_change=salvar_widget_persistente,
                 args=("field_name", "_w_field_name"),
             )
-
     # Função para calcular distância geodésica (em metros) entre dois pontos lat/lon
     def haversine(lat1, lon1, lat2, lon2):
         R = 6371000
@@ -6252,6 +7252,7 @@ def pagina_entrada_dados():
             m.save('filename.png')
 
 
+# ABA LITOLOGIA
 def pagina_coluna_litologica():
     st.header("Litologia")
 
@@ -6268,10 +7269,10 @@ def pagina_coluna_litologica():
     y_max_atual = st.session_state.get("y_max_s")
     y_max_parece_padrao_antigo = y_max_atual in (None, 1000, y_max_padrao_anterior)
     y_max_parece_lda = (
-        st.session_state.tipo_poco == "Offshore"
-        and y_max_atual is not None
-        and y_max_atual <= st.session_state.get("lda", 0) + 100
-        and y_max_atual < y_max_padrao_sobrecarga
+            st.session_state.tipo_poco == "Offshore"
+            and y_max_atual is not None
+            and y_max_atual <= st.session_state.get("lda", 0) + 100
+            and y_max_atual < y_max_padrao_sobrecarga
     )
 
     if y_max_parece_padrao_antigo or y_max_parece_lda:
@@ -6290,10 +7291,10 @@ def pagina_coluna_litologica():
         st.session_state.n_lbf = 1
 
     for chave, valor_padrao in (
-        ("s_gr", "Não"),
-        ("y_min_pp", 0),
-        ("y_max_pp", y_max_padrao_sobrecarga),
-        ("y_step_pp", 200),
+            ("s_gr", "Não"),
+            ("y_min_pp", 0),
+            ("y_max_pp", y_max_padrao_sobrecarga),
+            ("y_step_pp", 200),
     ):
         if chave not in st.session_state:
             st.session_state[chave] = valor_padrao
@@ -6349,7 +7350,7 @@ def pagina_coluna_litologica():
                             if f"prof_inicial_2_{i}" not in st.session_state:
                                 st.session_state[f"prof_inicial_2_{i}"] = topo_salvo
                             p_ini = st.number_input(
-                                f"Profundidade inicial **Intervalo {i + 1}**",
+                                f"Prof. inicial **Intervalo {i + 1}**",
                                 step=1.0,
                                 format="%f",
                                 min_value=0.0,
@@ -6358,7 +7359,7 @@ def pagina_coluna_litologica():
                         else:
                             st.session_state[f"prof_inicial_2_{i}"] = st.session_state.get(f"prof_final_2_{i - 1}", 0.0)
                             p_ini = st.number_input(
-                                f"Profundidade inicial **Intervalo {i + 1}**",
+                                f"Prof. inicial **Intervalo {i + 1}**",
                                 disabled=True,
                                 key=f"prof_inicial_2_{i}"
                             )
@@ -6372,7 +7373,7 @@ def pagina_coluna_litologica():
                         if i == int(st.session_state.n_id) - 1:
                             st.session_state[f"prof_final_2_{i}"] = float(prof_max + 100)
                             p_fim = st.number_input(
-                                f"Profundidade final **Intervalo {i + 1}**",
+                                f"Prof. final **Intervalo {i + 1}**",
                                 disabled=True,
                                 key=f"prof_final_2_{i}"
                             )
@@ -6380,7 +7381,7 @@ def pagina_coluna_litologica():
                             if f"prof_final_2_{i}" not in st.session_state:
                                 st.session_state[f"prof_final_2_{i}"] = base_salva
                             p_fim = st.number_input(
-                                f"Profundidade final **Intervalo {i + 1}**",
+                                f"Prof. final **Intervalo {i + 1}**",
                                 step=1.0,
                                 format="%f",
                                 min_value=0.0,
@@ -6513,32 +7514,31 @@ def pagina_coluna_litologica():
                 base_final = max(profundidades) if profundidades else 0
 
             st.session_state.pocos[selected]["tvd"] = base_final + 100
-
-        with st.expander(
-                "Visualização",
-                expanded=estado_expander_persistente("exp_lito_visualizacao", True)
-        ):
-            if not st.session_state.get("lito_import_ok", False):
-                st.info("A visualização da coluna litológica será exibida após carregar dados de litologia no Excel.")
-                return
-
-            fig = plot_correlacao_com_logs(
-                st.session_state.pocos,
-                [False, False, False],
-                True,
-                True,
-                list(st.session_state.pocos.keys()),
-                False,
-                escala=(30, 300)
-            )
-
-            st.session_state.fig_coluna_lito = fig
-            st.plotly_chart(fig, use_container_width=True)
+        # with st.expander(
+        #         "Visualização",
+        #         expanded=estado_expander_persistente("exp_lito_visualizacao", True)
+        # ):
+        #     if not st.session_state.get("lito_import_ok", False):
+        #         st.info("A visualização da coluna litológica será exibida após carregar dados de litologia no Excel.")
+        #         return
+        #
+        #     fig = plot_correlacao_com_logs(
+        #         st.session_state.pocos,
+        #         [False, False, False],
+        #         True,
+        #         True,
+        #         list(st.session_state.pocos.keys()),
+        #         False,
+        #         escala=(30, 300)
+        #     )
+        #
+        #     st.session_state.fig_coluna_lito = fig
+        #     st.plotly_chart(fig, use_container_width=True)
 
     with col_lbf:
         with st.expander(
-            "Linhas Base de Folhelhos",
-            expanded=estado_expander_persistente("exp_lito_lbf", True)
+                "Linhas Base de Folhelhos",
+                expanded=estado_expander_persistente("exp_lito_lbf", True)
         ):
             col_add_lbf_lito, col_rem_lbf_lito = st.columns(2)
 
@@ -6566,12 +7566,10 @@ def pagina_coluna_litologica():
                         st.rerun()
 
             _sincronizar_widgets_lbf_do_estado()
-
             def preparar_widget_lbf_litologia(chave_estado):
                 chave_widget = f"_w_{chave_estado}"
                 preparar_widget_persistente(chave_estado, chave_widget)
                 return chave_widget
-
             _renderizar_campos_lbf(preparar_widget_lbf_litologia, incluir_titulo=False, persistente=True)
             _atualizar_df_pp_lito_por_lbf()
 
@@ -6608,6 +7606,7 @@ def pagina_coluna_litologica():
             if isinstance(df_lbf_lito, pd.DataFrame) and not df_lbf_lito.empty:
                 lbfs_lito = _coletar_lbfs_poros()
                 df_lbf_lito = _calcular_lbf_pp(df_lbf_lito, lbfs_lito)
+                df_lbf_lito = _aplicar_limites_dados_df_pp(df_lbf_lito)
                 st.session_state.df_pp_lito = df_lbf_lito.copy()
                 st.session_state.df_lbf_litologia = df_lbf_lito.copy()
 
@@ -6621,6 +7620,7 @@ def pagina_coluna_litologica():
                 st.info("Calcule o Gradiente de Sobrecarga para gerar o gráfico da LBF.")
 
 
+# ABA GRADIENTE DE SOBRECARGA
 def pagina_sobrecarga():
     st.header("Gradiente de Sobrecarga")
 
@@ -6637,10 +7637,10 @@ def pagina_sobrecarga():
     y_max_atual = st.session_state.get("y_max_s")
     y_max_parece_padrao_antigo = y_max_atual in (None, 1000, y_max_padrao_anterior)
     y_max_parece_lda = (
-        st.session_state.tipo_poco == "Offshore"
-        and y_max_atual is not None
-        and y_max_atual <= st.session_state.get("lda", 0) + 100
-        and y_max_atual < y_max_padrao_sobrecarga
+            st.session_state.tipo_poco == "Offshore"
+            and y_max_atual is not None
+            and y_max_atual <= st.session_state.get("lda", 0) + 100
+            and y_max_atual < y_max_padrao_sobrecarga
     )
 
     if y_max_parece_padrao_antigo or y_max_parece_lda:
@@ -6657,7 +7657,6 @@ def pagina_sobrecarga():
     profundidades = poco.get("profundidade", [])
     litologias = poco.get("litologia", [])
     formacoes = poco.get("formation", [])
-
 
     tipo_sobrecarga_anterior = st.session_state.get("_sobrecarga_tipo_poco_anterior")
     if tipo_sobrecarga_anterior != st.session_state.tipo_poco:
@@ -6727,7 +7726,7 @@ def pagina_sobrecarga():
                                         min_value=0.0)
                     else:
                         preparar_widget_persistente("lda", "_w_lda")
-                        st.number_input("Insira o valor da ***Lâmina D'água (m)***", step=1.0, format='%.2f',
+                        st.number_input("Insira o valor da ***Lâmina D'água (m)***", step=200.0, format='%.2f',
                                         key='_w_lda', min_value=0.0)
 
                     sincronizar_widgets_persistentes([
@@ -7250,10 +8249,10 @@ def pagina_sobrecarga():
                 )
                 add_watermark(
                     ax,
-                    logo_path="logo2.png",
+                    logo_path="logo_syga.png",
                     xy=(0.50, 0.5),
                     zoom=0.2,
-                    alpha=0.2,
+                    alpha=0.3,
                     zorder=0
                 )
 
@@ -7273,6 +8272,7 @@ def pagina_sobrecarga():
             pass
 
 
+# ABA GRADIENTE DE PRESSÃO DE POROS
 def pagina_poros():
     st.header("Gradiente de Pressão de Poros")
 
@@ -7348,14 +8348,15 @@ def pagina_poros():
                 ("fex", padrao_fluido_retro),
                 ("janela_spp", 20),
                 ("limite_spp", 0.10),
+                ("prof_inicio_curvas_pp", 0.0),
                 ("boyance", "Não"),
                 ("o_boyance", ["Base Aren. = Topo Folh."]),
         ):
             if chave not in st.session_state:
                 st.session_state[chave] = valor_padrao
-
         def reset_config_pp():
             st.session_state.x_min_pp = 0
+            st.session_state.prof_inicio_curvas_pp = 0.0
 
             if st.session_state.get("ogp", "Gradiente (lb/gal)") == "Pressão (psi)":
                 max_x_pp = pd.to_numeric(
@@ -7383,12 +8384,12 @@ def pagina_poros():
                     "x_min_pp",
                     "x_max_pp",
                     "x_step_pp",
+                    "prof_inicio_curvas_pp",
                     "y_min_pp",
                     "y_max_pp",
                     "y_step_pp"
             ):
                 st.session_state[f"_w_{chave}"] = st.session_state[chave]
-
         def chaves_form_poros():
             chaves = ["expoente", "anormal", "gn"]
 
@@ -7422,7 +8423,6 @@ def pagina_poros():
                 ])
 
             return chaves
-
         def restaurar_widgets_form_poros():
             for chave in chaves_form_poros():
                 chave_widget = f"_w_{chave}"
@@ -7432,11 +8432,9 @@ def pagina_poros():
 
                 elif chave_widget in st.session_state:
                     del st.session_state[chave_widget]
-
         def marcar_submit_poros(pares):
             sincronizar_widgets_persistentes(pares)
             st.session_state["_submit_poros_agora"] = True
-
         if not st.session_state.get("_submit_poros_agora", False):
             restaurar_widgets_form_poros()
 
@@ -7510,13 +8508,11 @@ def pagina_poros():
 
                 with st.form("p_poros", border=False):
                     pares_form_poros = []
-
                     def preparar_widget_form_poros(chave_estado):
                         chave_widget = f"_w_{chave_estado}"
                         preparar_widget_persistente(chave_estado, chave_widget)
                         pares_form_poros.append((chave_estado, chave_widget))
                         return chave_widget
-
                     with st.expander("Informações Gerais", expanded=True):
                         st.number_input(
                             "Expoente de Eaton",
@@ -7537,13 +8533,12 @@ def pagina_poros():
                             step=1.0,
                             format="%.2f",
                             key=preparar_widget_form_poros("gn"),
-                            value=8.5
                         )
 
                     st.markdown("### Trendings")
 
                     for i in range(st.session_state.n_trending):
-                        with st.expander(f"Trending {i + 1}", expanded=True):
+                        with st.expander(f"Trending {i + 1}", expanded=False):
                             if st.session_state.n_trending > 1:
                                 colun1, colun2 = st.columns(2)
 
@@ -7644,6 +8639,7 @@ def pagina_poros():
                     df_pp_calc = _calcular_lbf_pp(df_pp_calc, lbfs)
                     df_pp_calc = _calcular_pressao_poros_por_partes(df_pp_calc)
 
+                    df_pp_calc = _aplicar_limites_dados_df_pp(df_pp_calc)
                     st.session_state.df_pp = df_pp_calc.copy()
                     st.session_state.df_pp_lito = df_pp_calc.copy()
                     df_pp = st.session_state.df_pp.copy()
@@ -7651,8 +8647,11 @@ def pagina_poros():
                 else:
                     trendings = _coletar_trendings_poros()
                     lbfs = _coletar_lbfs_poros()
-                    df_pp = st.session_state.get("df_pp", df_pp)
-                    
+                    df_pp = _aplicar_limites_dados_df_pp(
+                        st.session_state.get("df_pp", df_pp)
+                    )
+                    st.session_state.df_pp = df_pp.copy()
+
         with c2:
             with st.container(border=True):
                 preparar_widget_persistente("graf", "_w_graf")
@@ -7674,6 +8673,7 @@ def pagina_poros():
                         df_gr_poros = montar_df_pp_base(df_sobrecarga_calc)
                         df_gr_poros = _calcular_lbf_pp(df_gr_poros, lbfs)
                         df_gr_poros = _calcular_trending_pp(df_gr_poros, trendings)
+                        df_gr_poros = _aplicar_limites_dados_df_pp(df_gr_poros)
                         st.session_state.df_pp_lito = df_gr_poros.copy()
 
                     except Exception:
@@ -7785,7 +8785,7 @@ def pagina_poros():
                                 opcoes_sim_nao,
                                 key="_w_fex",
                                 disabled=(
-                                    st.session_state.get("option") != "Retroanálise"
+                                        st.session_state.get("option") != "Retroanálise"
                                 ),
                                 on_change=salvar_widget_persistente,
                                 args=("fex", "_w_fex")
@@ -7809,19 +8809,19 @@ def pagina_poros():
 
                             with col_add_boyance:
                                 if st.button(
-                                    "Adicionar Intervalo Boyance",
-                                    type="primary",
-                                    use_container_width=True,
-                                    key="b_add_boyance"
+                                        "Adicionar Intervalo Boyance",
+                                        type="primary",
+                                        use_container_width=True,
+                                        key="b_add_boyance"
                                 ):
                                     st.session_state.n_boyance += 1
 
                             with col_rem_boyance:
                                 if st.button(
-                                    "Remover Intervalo Boyance",
-                                    type="primary",
-                                    use_container_width=True,
-                                    key="b_rem_boyance"
+                                        "Remover Intervalo Boyance",
+                                        type="primary",
+                                        use_container_width=True,
+                                        key="b_rem_boyance"
                                 ):
                                     if st.session_state.n_boyance > 1:
                                         idx = st.session_state.n_boyance - 1
@@ -7911,7 +8911,6 @@ def pagina_poros():
                                         args=(chave_fpr, chave_w_fpr)
                                     )
 
-
                     with st.expander("***Testes de Formação***", expanded=False):
                         opcoes_sim_nao_testes = ["Sim", "Não"]
                         col_txt_rft, col_txt_colapso = st.columns(2)
@@ -7943,8 +8942,8 @@ def pagina_poros():
                         st.markdown("##### Pontos de RFT")
 
                         if (
-                            "rft_pontos_pp" not in st.session_state
-                            or not isinstance(st.session_state.rft_pontos_pp, pd.DataFrame)
+                                "rft_pontos_pp" not in st.session_state
+                                or not isinstance(st.session_state.rft_pontos_pp, pd.DataFrame)
                         ):
                             st.session_state.rft_pontos_pp = pd.DataFrame({
                                 "Profundidade (m)": [],
@@ -7975,19 +8974,19 @@ def pagina_poros():
 
                         with col_rft1:
                             if st.button(
-                                "Atualizar pontos RFT",
-                                use_container_width=True,
-                                type="primary",
-                                key="btn_atualizar_rft_pp"
+                                    "Atualizar pontos RFT",
+                                    use_container_width=True,
+                                    type="primary",
+                                    key="btn_atualizar_rft_pp"
                             ):
                                 st.session_state.rft_pontos_pp = rft_pontos_editado.copy()
 
                         with col_rft2:
                             if st.button(
-                                "Limpar pontos RFT",
-                                use_container_width=True,
-                                type="primary",
-                                key="btn_limpar_rft_pp"
+                                    "Limpar pontos RFT",
+                                    use_container_width=True,
+                                    type="primary",
+                                    key="btn_limpar_rft_pp"
                             ):
                                 st.session_state.rft_pontos_pp = pd.DataFrame({
                                     "Profundidade (m)": [],
@@ -7998,8 +8997,8 @@ def pagina_poros():
                         st.markdown("##### Gradiente de Colapso")
 
                         if (
-                            "colapso_pontos_pp" not in st.session_state
-                            or not isinstance(st.session_state.colapso_pontos_pp, pd.DataFrame)
+                                "colapso_pontos_pp" not in st.session_state
+                                or not isinstance(st.session_state.colapso_pontos_pp, pd.DataFrame)
                         ):
                             st.session_state.colapso_pontos_pp = pd.DataFrame({
                                 "Profundidade (m)": [],
@@ -8021,7 +9020,7 @@ def pagina_poros():
                                 "Gradiente de Colapso (lb/gal)": st.column_config.NumberColumn(
                                     "Gradiente de Colapso (lb/gal)",
                                     min_value=0.0,
-                                    format="%.4f"
+                                    format="%.2f"
                                 ),
                             }
                         )
@@ -8030,19 +9029,19 @@ def pagina_poros():
 
                         with col_colapso1:
                             if st.button(
-                                "Atualizar gradiente de colapso",
-                                use_container_width=True,
-                                type="primary",
-                                key="btn_atualizar_colapso_pp"
+                                    "Atualizar gradiente de colapso",
+                                    use_container_width=True,
+                                    type="primary",
+                                    key="btn_atualizar_colapso_pp"
                             ):
                                 st.session_state.colapso_pontos_pp = colapso_pontos_editado.copy()
 
                         with col_colapso2:
                             if st.button(
-                                "Limpar gradiente de colapso",
-                                use_container_width=True,
-                                type="primary",
-                                key="btn_limpar_colapso_pp"
+                                    "Limpar gradiente de colapso",
+                                    use_container_width=True,
+                                    type="primary",
+                                    key="btn_limpar_colapso_pp"
                             ):
                                 st.session_state.colapso_pontos_pp = pd.DataFrame({
                                     "Profundidade (m)": [],
@@ -8060,6 +9059,20 @@ def pagina_poros():
                             width="stretch",
                             on_change=salvar_widget_persistente,
                             args=("ogp", "_w_ogp")
+                        )
+
+                        preparar_widget_persistente(
+                            "prof_inicio_curvas_pp",
+                            "_w_prof_inicio_curvas_pp"
+                        )
+                        st.number_input(
+                            "Profundidade inicial das curvas (m)",
+                            min_value=0.0,
+                            step=100.0,
+                            format="%.2f",
+                            key="_w_prof_inicio_curvas_pp",
+                            on_change=salvar_widget_persistente,
+                            args=("prof_inicio_curvas_pp", "_w_prof_inicio_curvas_pp")
                         )
 
                         preparar_widget_persistente("x_min_pp", "_w_x_min_pp")
@@ -8147,6 +9160,201 @@ def pagina_poros():
         )
 
 
+def _recalcular_gradientes_litologia_df_est(df_est):
+    if not isinstance(df_est, pd.DataFrame) or df_est.empty:
+        return df_est
+
+    df_est = df_est.copy()
+    def _coluna(opcoes):
+        return next((col for col in opcoes if col in df_est.columns), None)
+    col_prof = _coluna(["Profundidade (m)"])
+    col_pw = _coluna(["Pw (psi)"])
+    col_rw = _coluna(["rw"])
+    col_r = _coluna(["r"])
+    col_so = _coluna(["So (psi)"])
+    col_phi = _coluna(["\u03a6 (\u00b0)", "\u00ce\u00a6 (\u00c2\u00b0)"])
+    col_pp = _coluna(
+        ["Gradiente de Press\u00e3o de Poros (lb/gal)", "Gradiente de Press\u00c3\u00a3o de Poros (lb/gal)"])
+    col_sr = _coluna(
+        ["\u03c3r efetivo (psi)", "\u00cf\u0192r efetivo (psi)", "\u03c3r efetivo(psi)", "\u00cf\u0192r efetivo(psi)"])
+    col_sta = _coluna(
+        ["\u03c3\u03b8A efetivo (psi)", "\u00cf\u0192\u00ce\u00b8A efetivo (psi)", "\u03c3\u03b8A efetivo(psi)",
+         "\u00cf\u0192\u00ce\u00b8A efetivo(psi)"])
+    col_stb = _coluna(
+        ["\u03c3\u03b8B efetivo (psi)", "\u00cf\u0192\u00ce\u00b8B efetivo (psi)", "\u03c3\u03b8B efetivo(psi)",
+         "\u00cf\u0192\u00ce\u00b8B efetivo(psi)"])
+    col_saa = _coluna(["\u03c3aA efetivo (psi)", "\u00cf\u0192aA efetivo (psi)", "\u03c3aA efetivo(psi)",
+                       "\u00cf\u0192aA efetivo(psi)"])
+    col_sab = _coluna(["\u03c3aB efetivo (psi)", "\u00cf\u0192aB efetivo (psi)", "\u03c3aB efetivo(psi)",
+                       "\u00cf\u0192aB efetivo(psi)"])
+
+    colunas_obrigatorias = [col_prof, col_pw, col_rw, col_r, col_so, col_phi, col_sr, col_sta, col_stb]
+    if any(col is None for col in colunas_obrigatorias):
+        return df_est
+
+    col_tracao_inf = _coluna(
+        ["Tra\u00e7\u00e3o Inferior", "Tra\u00c3\u00a7\u00c3\u00a3o Inferior"]) or "Tra\u00e7\u00e3o Inferior"
+    col_tracao_sup_ta = _coluna(["Tra\u00e7\u00e3o Superior (\u03c3\u03b8A)",
+                                 "Tra\u00c3\u00a7\u00c3\u00a3o Superior (\u00cf\u0192\u00ce\u00b8A)"]) or "Tra\u00e7\u00e3o Superior (\u03c3\u03b8A)"
+    col_tracao_sup_tb = _coluna(["Tra\u00e7\u00e3o Superior (\u03c3\u03b8B)",
+                                 "Tra\u00c3\u00a7\u00c3\u00a3o Superior (\u00cf\u0192\u00ce\u00b8B)"]) or "Tra\u00e7\u00e3o Superior (\u03c3\u03b8B)"
+    col_comp_inf_ta = _coluna(
+        ["Comp Inferior \u03c3\u03b8A", "Comp Inferior \u00cf\u0192\u00ce\u00b8A"]) or "Comp Inferior \u03c3\u03b8A"
+    col_comp_sup_ta = _coluna(
+        ["Comp Superior \u03c3\u03b8A", "Comp Superior \u00cf\u0192\u00ce\u00b8A"]) or "Comp Superior \u03c3\u03b8A"
+    col_comp_inf_tb = _coluna(
+        ["Comp Inferior \u03c3\u03b8B", "Comp Inferior \u00cf\u0192\u00ce\u00b8B"]) or "Comp Inferior \u03c3\u03b8B"
+    col_comp_sup_tb = _coluna(
+        ["Comp Superior \u03c3\u03b8B", "Comp Superior \u00cf\u0192\u00ce\u00b8B"]) or "Comp Superior \u03c3\u03b8B"
+    col_comp_inf_aa = _coluna(["Comp Inferior \u03c3aA", "Comp Inferior \u00cf\u0192aA"]) or "Comp Inferior \u03c3aA"
+    col_comp_sup_aa = _coluna(["Comp Superior \u03c3aA", "Comp Superior \u00cf\u0192aA"]) or "Comp Superior \u03c3aA"
+    col_comp_inf_ab = _coluna(["Comp Inferior \u03c3aB", "Comp Inferior \u00cf\u0192aB"]) or "Comp Inferior \u03c3aB"
+    col_comp_sup_ab = _coluna(["Comp Superior \u03c3aB", "Comp Superior \u00cf\u0192aB"]) or "Comp Superior \u03c3aB"
+
+    prof = pd.to_numeric(df_est[col_prof], errors="coerce")
+    k_tvp = (0.1704 * prof).where(lambda s: s != 0, np.nan)
+    pw_atual = pd.to_numeric(df_est[col_pw], errors="coerce")
+    peso_fluido_atual = pw_atual / k_tvp
+    rw = pd.to_numeric(df_est[col_rw], errors="coerce")
+    r = pd.to_numeric(df_est[col_r], errors="coerce")
+    c1 = ((rw ** 2) / (r ** 2)).where(r != 0, np.nan)
+    den_coef = c1 * k_tvp
+
+    sigma_r_efetivo = pd.to_numeric(df_est[col_sr], errors="coerce")
+    sigma_ta_efetivo = pd.to_numeric(df_est[col_sta], errors="coerce")
+    sigma_tb_efetivo = pd.to_numeric(df_est[col_stb], errors="coerce")
+
+    df_est[col_tracao_inf] = np.round(peso_fluido_atual - (sigma_r_efetivo / den_coef), 2)
+    df_est[col_tracao_sup_ta] = np.round(peso_fluido_atual + (sigma_ta_efetivo / den_coef), 2)
+    df_est[col_tracao_sup_tb] = np.round(peso_fluido_atual + (sigma_tb_efetivo / den_coef), 2)
+
+    phi_rad_tang = np.radians(pd.to_numeric(df_est[col_phi], errors="coerce"))
+    m_tang = np.tan(phi_rad_tang)
+    s0_tang = pd.to_numeric(df_est[col_so], errors="coerce")
+    def _pesos_tangencia_compressao(sigma_1_atual, coef_1, sigma_2_atual, coef_2):
+        a1 = coef_1 * k_tvp
+        b1 = sigma_1_atual - (a1 * peso_fluido_atual)
+        a2 = coef_2 * k_tvp
+        b2 = sigma_2_atual - (a2 * peso_fluido_atual)
+        a_centro = (a1 + a2) / 2
+        b_centro = (b1 + b2) / 2
+        a_delta = a2 - a1
+        b_delta = b2 - b1
+        a_linha = m_tang * a_centro
+        b_linha = (m_tang * b_centro) + s0_tang
+        fator = (m_tang ** 2) + 1
+        qa = (4 * a_linha ** 2) - (fator * a_delta ** 2)
+        qb = (8 * a_linha * b_linha) - (2 * fator * a_delta * b_delta)
+        qc = (4 * b_linha ** 2) - (fator * b_delta ** 2)
+        discriminante = (qb ** 2) - (4 * qa * qc)
+        raiz_disc = np.sqrt(discriminante.where(discriminante >= 0))
+        qa_ok = qa.where(qa.abs() > 1e-12)
+        peso_1 = (-qb + raiz_disc) / (2 * qa_ok)
+        peso_2 = (-qb - raiz_disc) / (2 * qa_ok)
+        qb_ok = qb.where(qb.abs() > 1e-12)
+        peso_linear = -qc / qb_ok
+        peso_1 = peso_1.where(qa.abs() > 1e-12, peso_linear)
+        peso_2 = peso_2.where(qa.abs() > 1e-12, peso_linear)
+        peso_inf = pd.concat([peso_1, peso_2], axis=1).min(axis=1, skipna=True)
+        peso_sup = pd.concat([peso_1, peso_2], axis=1).max(axis=1, skipna=True)
+        return peso_inf, peso_sup
+    comp_inf_ta, comp_sup_ta = _pesos_tangencia_compressao(sigma_r_efetivo, c1, sigma_ta_efetivo, -c1)
+    comp_inf_tb, comp_sup_tb = _pesos_tangencia_compressao(sigma_r_efetivo, c1, sigma_tb_efetivo, -c1)
+    df_est[col_comp_inf_ta] = np.round(comp_inf_ta, 2)
+    df_est[col_comp_sup_ta] = np.round(comp_sup_ta, 2)
+    df_est[col_comp_inf_tb] = np.round(comp_inf_tb, 2)
+    df_est[col_comp_sup_tb] = np.round(comp_sup_tb, 2)
+
+    if col_saa is not None:
+        sigma_aa_efetivo = pd.to_numeric(df_est[col_saa], errors="coerce")
+        comp_inf_aa, comp_sup_aa = _pesos_tangencia_compressao(sigma_r_efetivo, c1, sigma_aa_efetivo, 0)
+        df_est[col_comp_inf_aa] = np.round(comp_inf_aa, 2)
+        df_est[col_comp_sup_aa] = np.round(comp_sup_aa, 2)
+    if col_sab is not None:
+        sigma_ab_efetivo = pd.to_numeric(df_est[col_sab], errors="coerce")
+        comp_inf_ab, comp_sup_ab = _pesos_tangencia_compressao(sigma_r_efetivo, c1, sigma_ab_efetivo, 0)
+        df_est[col_comp_inf_ab] = np.round(comp_inf_ab, 2)
+        df_est[col_comp_sup_ab] = np.round(comp_sup_ab, 2)
+
+    colunas_max_inf = [col_pp, col_tracao_inf, col_comp_inf_ta, col_comp_inf_tb, col_comp_inf_aa, col_comp_inf_ab]
+    colunas_max_inf = [col for col in colunas_max_inf if col in df_est.columns]
+    if colunas_max_inf:
+        df_est["Max Inf"] = np.round(
+            pd.concat([pd.to_numeric(df_est[col], errors="coerce") for col in colunas_max_inf], axis=1)
+            .max(axis=1, skipna=True),
+            2
+        )
+
+    colunas_min_sup = [col_tracao_sup_ta, col_tracao_sup_tb, col_comp_sup_ta, col_comp_sup_tb, col_comp_sup_aa,
+                       col_comp_sup_ab]
+    colunas_min_sup = [col for col in colunas_min_sup if col in df_est.columns]
+    if colunas_min_sup:
+        df_est["Min Sup"] = np.round(
+            pd.concat([pd.to_numeric(df_est[col], errors="coerce") for col in colunas_min_sup], axis=1)
+            .min(axis=1, skipna=True),
+            2
+        )
+
+    return aplicar_calibracao_fraturas_superiores(df_est)
+
+
+def _aplicar_ajustes_litologia_pontos_df_est(df_est):
+    if not st.session_state.get("ajustes_litologia_aplicados_est", False):
+        return df_est
+    if not isinstance(df_est, pd.DataFrame) or df_est.empty:
+        return df_est
+
+    pontos = st.session_state.get("ajustes_litologia_pontos_est", pd.DataFrame())
+    if not isinstance(pontos, pd.DataFrame) or pontos.empty:
+        return df_est
+
+    df_est = df_est.copy()
+    col_prof = "Profundidade (m)" if "Profundidade (m)" in df_est.columns else None
+    col_so = "So (psi)" if "So (psi)" in df_est.columns else None
+    col_phi = next((col for col in ("\u03a6 (\u00b0)", "\u00ce\u00a6 (\u00c2\u00b0)") if col in df_est.columns), None)
+    label_phi = "\u00c2ngulo de fric\u00e7\u00e3o (\u03a6)"
+    if any(col is None for col in (col_prof, col_so, col_phi)):
+        return df_est
+
+    prof_est = pd.to_numeric(df_est[col_prof], errors="coerce")
+    def _interpolar_coluna(col_destino, col_pontos):
+        if col_pontos not in pontos.columns:
+            return False
+        pontos_validos = pontos[["Profundidade (m)", col_pontos]].copy()
+        pontos_validos["Profundidade (m)"] = pd.to_numeric(pontos_validos["Profundidade (m)"], errors="coerce")
+        pontos_validos[col_pontos] = pd.to_numeric(pontos_validos[col_pontos], errors="coerce")
+        pontos_validos = pontos_validos.dropna(subset=["Profundidade (m)", col_pontos])
+        pontos_validos = (
+            pontos_validos
+            .sort_values("Profundidade (m)")
+            .drop_duplicates("Profundidade (m)", keep="last")
+        )
+        if len(pontos_validos) < 2:
+            return False
+
+        mascara = prof_est.between(
+            float(pontos_validos["Profundidade (m)"].min()),
+            float(pontos_validos["Profundidade (m)"].max()),
+            inclusive="both"
+        )
+        prof_alvo = prof_est[mascara].dropna()
+        if prof_alvo.empty:
+            return False
+
+        df_est.loc[prof_alvo.index, col_destino] = np.interp(
+            prof_alvo.to_numpy(dtype=float),
+            pontos_validos["Profundidade (m)"].to_numpy(dtype=float),
+            pontos_validos[col_pontos].to_numpy(dtype=float)
+        )
+        return True
+    alterou = _interpolar_coluna(col_so, "So (psi)")
+    alterou = _interpolar_coluna(col_phi, label_phi) or alterou
+    if alterou:
+        df_est = _recalcular_gradientes_litologia_df_est(df_est)
+    return df_est
+
+
+# ABA ESTABILIDADE DE POÇO
 def pagina_estabilidade():
     st.header("Estabilidade de Poço")
     df_pp = st.session_state.get("df_pp", pd.DataFrame())
@@ -8154,13 +9362,27 @@ def pagina_estabilidade():
     if st.session_state.submenu_estabilidade == "Tensões em Volta do Poço":
         st.subheader("Tensões em Volta do Poço")
 
-        df_est = _montar_df_estabilidade(df_pp)
+        df_est_cache = st.session_state.get("df_est", pd.DataFrame())
+        if isinstance(df_est_cache, pd.DataFrame) and not df_est_cache.empty:
+            df_est = df_est_cache.copy()
+        else:
+            df_est = _montar_df_estabilidade(df_pp)
 
         tab_dados, tab_tabela = st.tabs(["Dados", "Tabela de dados calculados"])
 
         with tab_dados:
             st.markdown("### Dados")
-            c1, c2 = st.columns((0.5, 1))
+            c1, c2, c3 = st.columns(((1, 1, 1)))
+
+            defaults_calibracao_fraturas = {
+                "calibrar_fraturas_superiores_tensoes_minimas": "Não",
+                "usar_fraturas_superiores_calibradas_min_sup": "Sim",
+                "suavizar_delta_fratura_superior": "Sim",
+                "janela_suavizacao_delta_fratura_superior": 20,
+            }
+            for chave, valor in defaults_calibracao_fraturas.items():
+                st.session_state.setdefault(chave, valor)
+
             with c1:
                 with st.container(border=True):
                     opcoes_lft = ["Calculado", "Constante"]
@@ -8202,6 +9424,173 @@ def pagina_estabilidade():
                         sincronizar_widgets_persistentes([
                             ("phi_constante", "_w_phi_constante"),
                         ])
+                    @st.dialog("Alterar dados de litologia", width="large")
+                    def _dialog_alterar_dados_litologia_estabilidade():
+                        df_est_dialog = st.session_state.get("df_est", pd.DataFrame())
+                        if not isinstance(df_est_dialog, pd.DataFrame) or df_est_dialog.empty:
+                            st.warning("Dados de estabilidade ainda n\u00e3o dispon\u00edveis.")
+                            if st.button("Fechar", use_container_width=True):
+                                st.rerun()
+                            return
+
+                        col_prof_dialog = "Profundidade (m)" if "Profundidade (m)" in df_est_dialog.columns else None
+                        col_so_dialog = "So (psi)" if "So (psi)" in df_est_dialog.columns else None
+                        col_phi_dialog = next(
+                            (col for col in ("\u03a6 (\u00b0)", "\u00ce\u00a6 (\u00c2\u00b0)") if
+                             col in df_est_dialog.columns),
+                            None
+                        )
+                        if any(col is None for col in (col_prof_dialog, col_so_dialog, col_phi_dialog)):
+                            st.warning("As colunas Profundidade, So ou \u03a6 n\u00e3o foram encontradas no df_est.")
+                            if st.button("Fechar", use_container_width=True):
+                                st.rerun()
+                            return
+
+                        prof_dialog = pd.to_numeric(df_est_dialog[col_prof_dialog], errors="coerce").dropna()
+                        prof_min_dialog = float(prof_dialog.min()) if not prof_dialog.empty else 0.0
+                        prof_max_dialog = float(prof_dialog.max()) if not prof_dialog.empty else prof_min_dialog + 1.0
+                        so_serie_dialog = pd.to_numeric(df_est_dialog[col_so_dialog], errors="coerce").dropna()
+                        phi_serie_dialog = pd.to_numeric(df_est_dialog[col_phi_dialog], errors="coerce").dropna()
+                        so_padrao_inicio = float(so_serie_dialog.iloc[0]) if not so_serie_dialog.empty else 0.0
+                        so_padrao_fim = float(
+                            so_serie_dialog.iloc[-1]) if not so_serie_dialog.empty else so_padrao_inicio
+                        phi_padrao_inicio = float(phi_serie_dialog.iloc[0]) if not phi_serie_dialog.empty else 30.0
+                        phi_padrao_fim = float(
+                            phi_serie_dialog.iloc[-1]) if not phi_serie_dialog.empty else phi_padrao_inicio
+                        label_phi_litologia = "\u00c2ngulo de fric\u00e7\u00e3o (\u03a6)"
+
+                        colunas_pontos_est = ["Profundidade (m)", "So (psi)", label_phi_litologia]
+                        if (
+                                "ajustes_litologia_pontos_est" not in st.session_state
+                                or not isinstance(st.session_state.ajustes_litologia_pontos_est, pd.DataFrame)
+                                or any(col not in st.session_state.ajustes_litologia_pontos_est.columns for col in
+                                       colunas_pontos_est)
+                        ):
+                            st.session_state.ajustes_litologia_pontos_est = pd.DataFrame({
+                                "Profundidade (m)": [prof_min_dialog, prof_max_dialog],
+                                "So (psi)": [so_padrao_inicio, so_padrao_fim],
+                                label_phi_litologia: [phi_padrao_inicio, phi_padrao_fim],
+                            })
+
+                        with st.form("form_ajustes_litologia_pontos_est", clear_on_submit=False):
+                            pontos_editados = st.data_editor(
+                                st.session_state.ajustes_litologia_pontos_est,
+                                num_rows="dynamic",
+                                use_container_width=True,
+                                hide_index=True,
+                                key="editor_ajustes_litologia_pontos_est",
+                                column_config={
+                                    "Profundidade (m)": st.column_config.NumberColumn(
+                                        "Profundidade (m)", min_value=0.0, format="%.2f"
+                                    ),
+                                    "So (psi)": st.column_config.NumberColumn(
+                                        "So (psi)", min_value=0.0, format="%.2f"
+                                    ),
+                                    label_phi_litologia: st.column_config.NumberColumn(
+                                        label_phi_litologia, min_value=0.0, max_value=90.0, format="%.2f"
+                                    ),
+                                }
+                            )
+                            col_aplicar_lito, col_restaurar_lito = st.columns(2)
+                            with col_aplicar_lito:
+                                aplicar_pontos_lito = st.form_submit_button(
+                                    "Aplicar interpola\u00e7\u00e3o",
+                                    type="primary",
+                                    use_container_width=True
+                                )
+                            with col_restaurar_lito:
+                                restaurar_pontos_lito = st.form_submit_button(
+                                    "Restaurar padr\u00f5es originais",
+                                    use_container_width=True
+                                )
+
+                        if aplicar_pontos_lito:
+                            st.session_state.ajustes_litologia_pontos_est = pontos_editados.copy()
+                            df_editado = df_est_dialog.copy()
+                            if (
+                                    "df_est_litologia_original" not in st.session_state
+                                    or not isinstance(st.session_state.df_est_litologia_original, pd.DataFrame)
+                                    or st.session_state.df_est_litologia_original.empty
+                                    or st.session_state.get(
+                                "df_est_litologia_assinatura") != _assinatura_df_estabilidade(df_pp)
+                            ):
+                                st.session_state.df_est_litologia_original = df_est_dialog.copy()
+                                st.session_state.df_est_litologia_assinatura = _assinatura_df_estabilidade(df_pp)
+
+                            prof_editado = pd.to_numeric(df_editado[col_prof_dialog], errors="coerce")
+                            alterou = False
+                            def _aplicar_interpolacao_litologia(coluna_destino, coluna_pontos):
+                                pontos_validos = pontos_editados[["Profundidade (m)", coluna_pontos]].copy()
+                                pontos_validos["Profundidade (m)"] = pd.to_numeric(
+                                    pontos_validos["Profundidade (m)"], errors="coerce"
+                                )
+                                pontos_validos[coluna_pontos] = pd.to_numeric(
+                                    pontos_validos[coluna_pontos], errors="coerce"
+                                )
+                                pontos_validos = pontos_validos.dropna(subset=["Profundidade (m)", coluna_pontos])
+                                pontos_validos = (
+                                    pontos_validos
+                                    .sort_values("Profundidade (m)")
+                                    .drop_duplicates("Profundidade (m)", keep="last")
+                                )
+                                if len(pontos_validos) < 2 or prof_editado.dropna().empty:
+                                    return False
+
+                                mascara_interp = prof_editado.between(
+                                    float(pontos_validos["Profundidade (m)"].min()),
+                                    float(pontos_validos["Profundidade (m)"].max()),
+                                    inclusive="both"
+                                )
+                                if not mascara_interp.any():
+                                    return False
+
+                                prof_alvo = prof_editado[mascara_interp].dropna()
+                                if prof_alvo.empty:
+                                    return False
+
+                                df_editado.loc[prof_alvo.index, coluna_destino] = np.interp(
+                                    prof_alvo.to_numpy(dtype=float),
+                                    pontos_validos["Profundidade (m)"].to_numpy(dtype=float),
+                                    pontos_validos[coluna_pontos].to_numpy(dtype=float)
+                                )
+                                return True
+                            alterou = _aplicar_interpolacao_litologia(col_so_dialog, "So (psi)") or alterou
+                            alterou = _aplicar_interpolacao_litologia(col_phi_dialog, label_phi_litologia) or alterou
+
+                            if alterou:
+                                st.session_state.ajustes_litologia_aplicados_est = True
+                                df_editado = _recalcular_gradientes_litologia_df_est(df_editado)
+                                st.session_state.df_est = df_editado.copy()
+                                st.session_state.df_est_assinatura = _assinatura_df_estabilidade(df_pp)
+                                st.success("Dados de litologia interpolados no df_est.")
+                                st.rerun()
+                            else:
+                                st.warning("Informe pelo menos dois pontos v\u00e1lidos para So ou \u03a6.")
+
+                        if restaurar_pontos_lito:
+                            df_original_lito = st.session_state.get("df_est_litologia_original", pd.DataFrame())
+                            if isinstance(df_original_lito, pd.DataFrame) and not df_original_lito.empty:
+                                st.session_state.df_est = df_original_lito.copy()
+                                st.session_state.df_est_assinatura = _assinatura_df_estabilidade(df_pp)
+                                st.session_state.df_est_litologia_original = pd.DataFrame()
+                                st.session_state.df_est_litologia_assinatura = None
+                                st.session_state.ajustes_litologia_aplicados_est = False
+                                st.session_state.ajustes_litologia_pontos_est = pd.DataFrame({
+                                    "Profundidade (m)": [prof_min_dialog, prof_max_dialog],
+                                    "So (psi)": [so_padrao_inicio, so_padrao_fim],
+                                    label_phi_litologia: [phi_padrao_inicio, phi_padrao_fim],
+                                })
+                                st.success("Padr\u00f5es originais restaurados.")
+                                st.rerun()
+                            else:
+                                st.warning("N\u00e3o h\u00e1 altera\u00e7\u00f5es para restaurar.")
+                    if st.button(
+                            "Alterar dados de litologia",
+                            use_container_width=True,
+                            key="btn_alterar_dados_litologia_est",
+                            type="primary"
+                    ):
+                        _dialog_alterar_dados_litologia_estabilidade()
 
                     if "ucs" not in st.session_state:
                         st.session_state.ucs = "Mechpro"
@@ -8219,9 +9608,17 @@ def pagina_estabilidade():
                     )
                     st.session_state.ucs = ucs_atual or st.session_state.get("ucs", "Mechpro")
 
-                    if "direcoes_tensoes_df" not in st.session_state:
+                    if (
+                            "direcoes_tensoes_df" not in st.session_state
+                            or not isinstance(st.session_state.direcoes_tensoes_df, pd.DataFrame)
+                            or st.session_state.direcoes_tensoes_df.empty
+                    ):
                         st.session_state.direcoes_tensoes_df = _df_direcoes_tensoes_padrao()
-                    if "relacao_tensoes_df" not in st.session_state:
+                    if (
+                            "relacao_tensoes_df" not in st.session_state
+                            or not isinstance(st.session_state.relacao_tensoes_df, pd.DataFrame)
+                            or st.session_state.relacao_tensoes_df.empty
+                    ):
                         st.session_state.relacao_tensoes_df = _df_relacao_tensoes_padrao()
                     if "usar_direcoes_tensoes" not in st.session_state:
                         st.session_state.usar_direcoes_tensoes = False
@@ -8253,10 +9650,10 @@ def pagina_estabilidade():
                         col_dir1, col_dir2 = st.columns(2)
                         with col_dir1:
                             if st.button(
-                                "Inserir direções",
-                                use_container_width=True,
-                                type="primary",
-                                key="btn_inserir_direcoes_tensoes"
+                                    "Inserir direções",
+                                    use_container_width=True,
+                                    type="primary",
+                                    key="btn_inserir_direcoes_tensoes"
                             ):
                                 st.session_state.direcoes_tensoes_df = _normalizar_direcoes_tensoes(
                                     direcoes_tensoes_editado
@@ -8266,10 +9663,10 @@ def pagina_estabilidade():
 
                         with col_dir2:
                             if st.button(
-                                "Resetar direções",
-                                use_container_width=True,
-                                type="primary",
-                                key="btn_resetar_direcoes_tensoes"
+                                    "Resetar direções",
+                                    use_container_width=True,
+                                    type="primary",
+                                    key="btn_resetar_direcoes_tensoes"
                             ):
                                 st.session_state.direcoes_tensoes_df = _df_direcoes_tensoes_padrao()
                                 st.session_state.usar_direcoes_tensoes = False
@@ -8304,10 +9701,10 @@ def pagina_estabilidade():
                         col_rel1, col_rel2 = st.columns(2)
                         with col_rel1:
                             if st.button(
-                                "Inserir relação",
-                                use_container_width=True,
-                                type="primary",
-                                key="btn_inserir_relacao_tensoes"
+                                    "Inserir relação",
+                                    use_container_width=True,
+                                    type="primary",
+                                    key="btn_inserir_relacao_tensoes"
                             ):
                                 st.session_state.relacao_tensoes_df = _normalizar_relacao_tensoes(
                                     relacao_tensoes_editado
@@ -8317,24 +9714,1738 @@ def pagina_estabilidade():
 
                         with col_rel2:
                             if st.button(
-                                "Resetar relação",
-                                use_container_width=True,
-                                type="primary",
-                                key="btn_resetar_relacao_tensoes"
+                                    "Resetar relação",
+                                    use_container_width=True,
+                                    type="primary",
+                                    key="btn_resetar_relacao_tensoes"
                             ):
                                 st.session_state.relacao_tensoes_df = _df_relacao_tensoes_padrao()
                                 st.session_state.usar_relacao_tensoes = False
                                 st.rerun()
 
-                    df_est = _aplicar_parametros_mecanicos_df_est(df_est)
+                    for chave, label, valor_padrao, step in (
+                            ("ppg", "Peso do fluido (lb/gal)", 9.0, 0.5),
+                            # ("rw", "Raio do poço", 1.0, 1.0),
+                            # ("r", "Raio de investigação", 1.0, 1.0),
+                    ):
+                        if chave not in st.session_state:
+                            st.session_state[chave] = valor_padrao
+
+                        preparar_widget_persistente(chave, f"_w_{chave}")
+                        st.number_input(
+                            label,
+                            min_value=0.0,
+                            step=step,
+                            format="%.2f",
+                            key=f"_w_{chave}",
+                            on_change=salvar_widget_persistente,
+                            args=(chave, f"_w_{chave}")
+                        )
+
+                    profundidades_mohr = pd.to_numeric(
+                        df_est.get("Profundidade (m)", pd.Series(dtype=float)),
+                        errors="coerce"
+                    ).dropna()
+                    prof_min_mohr = float(profundidades_mohr.min()) if not profundidades_mohr.empty else 0.0
+                    prof_max_mohr = float(profundidades_mohr.max()) if not profundidades_mohr.empty else 1000.0
+                    prof_padrao_mohr = (
+                        float(profundidades_mohr.iloc[1])
+                        if len(profundidades_mohr) >= 2
+                        else prof_min_mohr
+                    )
+
+                    if prof_max_mohr <= prof_min_mohr:
+                        prof_max_mohr = prof_min_mohr + 1.0
+
+                    if "profundidade_mohr" not in st.session_state:
+                        st.session_state.profundidade_mohr = prof_padrao_mohr
+
+                    profundidade_mohr_atual = pd.to_numeric(
+                        st.session_state.get("profundidade_mohr"),
+                        errors="coerce"
+                    )
+                    if pd.isna(profundidade_mohr_atual):
+                        st.session_state.profundidade_mohr = prof_padrao_mohr
+                    else:
+                        st.session_state.profundidade_mohr = min(
+                            max(float(profundidade_mohr_atual), prof_min_mohr),
+                            prof_max_mohr
+                        )
+
+                    preparar_widget_persistente("profundidade_mohr", "_w_profundidade_mohr")
+                    st.number_input(
+                        "Profundidade para Círculos de Mohr (m)",
+                        min_value=prof_min_mohr,
+                        max_value=prof_max_mohr,
+                        step=1.0,
+                        format="%.2f",
+                        key="_w_profundidade_mohr",
+                        on_change=salvar_widget_persistente,
+                        args=("profundidade_mohr", "_w_profundidade_mohr")
+                    )
+
+                    opcoes_estados_mohr = [
+                        "σθA",
+                        "σθB",
+                        "σaA",
+                        "σaB",
+                    ]
+                    estados_mohr_atual = st.session_state.get("estados_mohr")
+                    if not isinstance(estados_mohr_atual, list):
+                        st.session_state.estados_mohr = opcoes_estados_mohr.copy()
+                    else:
+                        st.session_state.estados_mohr = [
+                            estado for estado in estados_mohr_atual
+                            if estado in opcoes_estados_mohr
+                        ]
+                        if not st.session_state.estados_mohr:
+                            st.session_state.estados_mohr = opcoes_estados_mohr.copy()
+
+                    preparar_widget_persistente("estados_mohr", "_w_estados_mohr")
+                    st.multiselect(
+                        "Círculos de Mohr",
+                        opcoes_estados_mohr,
+                        key="_w_estados_mohr",
+                        on_change=salvar_widget_persistente,
+                        args=("estados_mohr", "_w_estados_mohr")
+                    )
+
+                    opcoes_estado_tracao_mohr = [
+                        "Peso de Fluido Escolhido",
+                        "Tração Inferior",
+                        "Tração Superior (σθA)",
+                        "Tração Superior (σθB)",
+                        "Comp Inferior σθA",
+                        "Comp Superior σθA",
+                        "Comp Inferior σθB",
+                        "Comp Superior σθB",
+                        "Comp Inferior σaA",
+                        "Comp Superior σaA",
+                        "Comp Inferior σaB",
+                        "Comp Superior σaB",
+                    ]
+                    if st.session_state.get("estado_tracao_mohr") not in opcoes_estado_tracao_mohr:
+                        st.session_state.estado_tracao_mohr = "Peso de Fluido Escolhido"
+                        st.session_state["_w_estado_tracao_mohr"] = (
+                            "Peso de Fluido Escolhido"
+                        )
+
+                    preparar_widget_persistente("estado_tracao_mohr", "_w_estado_tracao_mohr")
+                    st.selectbox(
+                        "Estado de Falha",
+                        opcoes_estado_tracao_mohr,
+                        key="_w_estado_tracao_mohr",
+                        on_change=salvar_widget_persistente,
+                        args=("estado_tracao_mohr", "_w_estado_tracao_mohr")
+                    )
+
+                    opcoes_suavizar_perfis_est = ["Não", "Sim"]
+                    if st.session_state.get("suavizar_perfis_estabilidade") not in opcoes_suavizar_perfis_est:
+                        st.session_state.suavizar_perfis_estabilidade = "Sim"
+
+                    preparar_widget_persistente(
+                        "suavizar_perfis_estabilidade",
+                        "_w_suavizar_perfis_estabilidade"
+                    )
+                    st.selectbox(
+                        "Suavizar perfis",
+                        opcoes_suavizar_perfis_est,
+                        key="_w_suavizar_perfis_estabilidade",
+                        on_change=salvar_widget_persistente,
+                        args=("suavizar_perfis_estabilidade", "_w_suavizar_perfis_estabilidade")
+                    )
+
+                    sincronizar_widgets_persistentes([
+                        ("ppg", "_w_ppg"),
+                        ("profundidade_mohr", "_w_profundidade_mohr"),
+                        ("estados_mohr", "_w_estados_mohr"),
+                        ("estado_tracao_mohr", "_w_estado_tracao_mohr"),
+                        ("suavizar_perfis_estabilidade", "_w_suavizar_perfis_estabilidade"),
+                        ("rw", "_w_rw"),
+                        ("r", "_w_r"),
+                    ])
+
+                    assinatura_estabilidade = _assinatura_df_estabilidade(df_pp)
+                    df_est_cache = st.session_state.get("df_est", pd.DataFrame())
+                    if (
+                            st.session_state.get("df_est_assinatura") == assinatura_estabilidade
+                            and isinstance(df_est_cache, pd.DataFrame)
+                            and not df_est_cache.empty
+                    ):
+                        df_est = df_est_cache.copy()
+                    else:
+                        df_est = _montar_df_estabilidade(df_pp)
+                        df_est = _aplicar_suavizacao_perfis_estabilidade(df_est)
+                        df_est = _aplicar_parametros_mecanicos_df_est(df_est)
+                        st.session_state.df_est = df_est.copy()
+                        st.session_state.df_est_assinatura = assinatura_estabilidade
+
+                    df_est = _aplicar_ajustes_litologia_pontos_df_est(df_est)
+                    df_est = aplicar_calibracao_fraturas_superiores(df_est)
                     st.session_state.df_est = df_est.copy()
 
             with c2:
                 with st.container(border=True):
-                    st.dataframe(df_est, use_container_width=True, hide_index=True)
-            # with c3:
-            #     with st.container(border=True):
-            #         pass
+                    with st.expander("Critério de Falha - Mohr Coulomb", expanded=True):
+                        # st.markdown("### Critério de Falha - Mohr Coulomb")
+                        def _coluna_existente(opcoes):
+                            return next((col for col in opcoes if col in df_est.columns), None)
+                        colunas_criterio = {
+                            "Profundidade": _coluna_existente(["Profundidade (m)"]),
+                            "So": _coluna_existente(["So (psi)"]),
+                            "Phi": _coluna_existente(["Φ (°)"]),
+                            "sr": _coluna_existente(["σr efetivo (psi)", "σr efetivo(psi)"]),
+                            "steta_a": _coluna_existente(["σθA efetivo (psi)", "σθA efetivo(psi)"]),
+                            "steta_b": _coluna_existente(["σθB efetivo (psi)", "σθB efetivo(psi)"]),
+                            "sa_a": _coluna_existente(["σaA efetivo (psi)", "σaA efetivo(psi)"]),
+                            "sa_b": _coluna_existente(["σaB efetivo (psi)", "σaB efetivo(psi)"]),
+                            "Pw": _coluna_existente(["Pw (psi)"]),
+                            "rw": _coluna_existente(["rw"]),
+                            "r": _coluna_existente(["r"]),
+                            "tracao_inf": _coluna_existente(["Tração Inferior"]),
+                            "tracao_sup_a": _coluna_existente(["Tração Superior (σθA)"]),
+                            "tracao_sup_b": _coluna_existente(["Tração Superior (σθB)"]),
+                            "comp_inf_ta": _coluna_existente(["Comp Inferior σθA"]),
+                            "comp_sup_ta": _coluna_existente(["Comp Superior σθA"]),
+                            "comp_inf_tb": _coluna_existente(["Comp Inferior σθB"]),
+                            "comp_sup_tb": _coluna_existente(["Comp Superior σθB"]),
+                            "comp_inf_aa": _coluna_existente(["Comp Inferior σaA"]),
+                            "comp_sup_aa": _coluna_existente(["Comp Superior σaA"]),
+                            "comp_inf_ab": _coluna_existente(["Comp Inferior σaB"]),
+                            "comp_sup_ab": _coluna_existente(["Comp Superior σaB"]),
+                            "max_inf": _coluna_existente(["Max Inf"]),
+                            "min_sup": _coluna_existente(["Min Sup"]),
+                        }
+
+                        if df_est.empty or any(col is None for col in colunas_criterio.values()):
+                            st.info("Calcule os dados de estabilidade para plotar o critério de falha.")
+                        else:
+                            df_criterio = pd.DataFrame({
+                                nome: pd.to_numeric(df_est[coluna], errors="coerce")
+                                for nome, coluna in colunas_criterio.items()
+                            }).dropna()
+
+                            if df_criterio.empty:
+                                st.info("Não há valores válidos para plotar o critério de falha.")
+                            else:
+                                profundidade_desejada = float(st.session_state.get("profundidade_mohr", 0.0))
+                                idx_profundidade = (
+                                        df_criterio["Profundidade"] - profundidade_desejada
+                                ).abs().idxmin()
+                                linha_criterio = df_criterio.loc[idx_profundidade]
+                                linha_est_mohr = df_est.loc[idx_profundidade]
+                                profundidade_plotada = float(linha_criterio["Profundidade"])
+                                so_psi = float(linha_criterio["So"])
+                                phi_graus = float(linha_criterio["Phi"])
+                                sr_ef = float(linha_criterio["sr"])
+                                steta_a_ef = float(linha_criterio["steta_a"])
+                                steta_b_ef = float(linha_criterio["steta_b"])
+                                sa_a_ef = float(linha_criterio["sa_a"])
+                                sa_b_ef = float(linha_criterio["sa_b"])
+                                pw_atual = float(linha_criterio["Pw"])
+                                rw_mohr = float(linha_criterio["rw"])
+                                r_mohr = float(linha_criterio["r"])
+                                max_inf_mohr = float(linha_criterio["max_inf"])
+                                min_sup_mohr = float(linha_criterio["min_sup"])
+                                k_mohr = 0.1704 * profundidade_plotada
+                                c1_mohr = (rw_mohr ** 2) / (r_mohr ** 2) if r_mohr != 0 else np.nan
+                                peso_fluido_atual = pw_atual / k_mohr if k_mohr != 0 else np.nan
+                                fs_mohr = float(st.session_state.get("fs_estabilidade", 0.5))
+                                max_inf_serie_mohr = pd.to_numeric(df_est["Max Inf"], errors="coerce")
+                                max_inf_fs_base_mohr = max_inf_serie_mohr + fs_mohr
+                                max_inf_fs_mohr = pd.Series(np.nan, index=df_est.index, dtype=float)
+                                mask_max_inf_fs_mohr = max_inf_fs_base_mohr.notna()
+                                max_inf_fs_mohr.loc[mask_max_inf_fs_mohr] = np.maximum.accumulate(
+                                    max_inf_fs_base_mohr.loc[mask_max_inf_fs_mohr].to_numpy()
+                                )
+                                max_inferior_mohr = float(max_inf_fs_mohr.loc[idx_profundidade])
+                                min_superior_mohr = min_sup_mohr - fs_mohr
+
+                                tracao_sup_a_cal_mohr = pd.to_numeric(
+                                    linha_est_mohr.get(
+                                        "Tração Superior (σθA) Calibrada",
+                                        np.nan,
+                                    ),
+                                    errors="coerce",
+                                )
+                                tracao_sup_b_cal_mohr = pd.to_numeric(
+                                    linha_est_mohr.get(
+                                        "Tração Superior (σθB) Calibrada",
+                                        np.nan,
+                                    ),
+                                    errors="coerce",
+                                )
+                                calibracao_tracao_mohr_ativa = (
+                                    st.session_state.get(
+                                        "calibrar_fraturas_superiores_tensoes_minimas",
+                                        "Não",
+                                    ) == "Sim"
+                                )
+
+                                mapa_estado_tracao = {
+                                    "Peso de Fluido Escolhido": peso_fluido_atual,
+                                    "Tração Inferior": float(linha_criterio["tracao_inf"]),
+                                    "Tração Superior (σθA)": (
+                                        float(tracao_sup_a_cal_mohr)
+                                        if calibracao_tracao_mohr_ativa
+                                        and np.isfinite(tracao_sup_a_cal_mohr)
+                                        else float(linha_criterio["tracao_sup_a"])
+                                    ),
+                                    "Tração Superior (σθB)": (
+                                        float(tracao_sup_b_cal_mohr)
+                                        if calibracao_tracao_mohr_ativa
+                                        and np.isfinite(tracao_sup_b_cal_mohr)
+                                        else float(linha_criterio["tracao_sup_b"])
+                                    ),
+                                    "Comp Inferior σθA": float(linha_criterio["comp_inf_ta"]),
+                                    "Comp Superior σθA": float(linha_criterio["comp_sup_ta"]),
+                                    "Comp Inferior σθB": float(linha_criterio["comp_inf_tb"]),
+                                    "Comp Superior σθB": float(linha_criterio["comp_sup_tb"]),
+                                    "Comp Inferior σaA": float(linha_criterio["comp_inf_aa"]),
+                                    "Comp Superior σaA": float(linha_criterio["comp_sup_aa"]),
+                                    "Comp Inferior σaB": float(linha_criterio["comp_inf_ab"]),
+                                    "Comp Superior σaB": float(linha_criterio["comp_sup_ab"]),
+                                }
+                                estado_tracao_mohr = st.session_state.get(
+                                    "estado_tracao_mohr",
+                                    "Peso de Fluido Escolhido"
+                                )
+                                peso_fluido_mohr = mapa_estado_tracao.get(
+                                    estado_tracao_mohr,
+                                    peso_fluido_atual
+                                )
+                                delta_pw_mohr = (
+                                    (peso_fluido_mohr - peso_fluido_atual) * k_mohr
+                                    if np.isfinite(peso_fluido_mohr)
+                                       and np.isfinite(peso_fluido_atual)
+                                       and np.isfinite(k_mohr)
+                                       and np.isfinite(c1_mohr)
+                                    else 0.0
+                                )
+                                c1_delta_mohr = c1_mohr if np.isfinite(c1_mohr) else 0.0
+
+                                sr_ef = sr_ef + c1_delta_mohr * delta_pw_mohr
+                                steta_a_ef = steta_a_ef - c1_delta_mohr * delta_pw_mohr
+                                steta_b_ef = steta_b_ef - c1_delta_mohr * delta_pw_mohr
+
+                                usando_fratura_calibrada_mohr = (
+                                    calibracao_tracao_mohr_ativa
+                                    and (
+                                        (
+                                            estado_tracao_mohr
+                                            == "Tração Superior (σθA)"
+                                            and np.isfinite(tracao_sup_a_cal_mohr)
+                                        )
+                                        or (
+                                            estado_tracao_mohr
+                                            == "Tração Superior (σθB)"
+                                            and np.isfinite(tracao_sup_b_cal_mohr)
+                                        )
+                                    )
+                                )
+                                estado_critico_fratura_mohr = None
+                                if usando_fratura_calibrada_mohr:
+                                    if estado_tracao_mohr == "Tração Superior (σθA)":
+                                        steta_a_ef = 0.0
+                                        estado_critico_fratura_mohr = "σθA"
+                                    else:
+                                        steta_b_ef = 0.0
+                                        estado_critico_fratura_mohr = "σθB"
+
+                                st.caption(
+                                    f"Profundidade plotada: {profundidade_plotada:.2f} m | "
+                                    f"Estado: {estado_tracao_mohr} ({peso_fluido_mohr:.2f} lb/gal)"
+                                )
+
+                                df_pw_tangencia = pd.DataFrame({
+                                    "Círculo": ["σr x σθA", "σr x σθB", "σr x σaA", "σr x σaB"],
+                                    "Comp Inferior (lb/gal)": [
+                                        linha_criterio["comp_inf_ta"],
+                                        linha_criterio["comp_inf_tb"],
+                                        linha_criterio["comp_inf_aa"],
+                                        linha_criterio["comp_inf_ab"],
+                                    ],
+                                    "Comp Superior (lb/gal)": [
+                                        linha_criterio["comp_sup_ta"],
+                                        linha_criterio["comp_sup_tb"],
+                                        linha_criterio["comp_sup_aa"],
+                                        linha_criterio["comp_sup_ab"],
+                                    ],
+                                })
+
+                                estados_mohr = st.session_state.get(
+                                    "estados_mohr",
+                                    ["σθA", "σθB", "σaA", "σaB"]
+                                )
+                                if not isinstance(estados_mohr, list) or not estados_mohr:
+                                    estados_mohr = ["σθA", "σθB", "σaA", "σaB"]
+                                else:
+                                    estados_mohr = estados_mohr.copy()
+                                if (
+                                    estado_critico_fratura_mohr is not None
+                                    and estado_critico_fratura_mohr not in estados_mohr
+                                ):
+                                    estados_mohr.append(
+                                        estado_critico_fratura_mohr
+                                    )
+
+                                circulos_mohr_base = [
+                                    ("σθA", sr_ef, steta_a_ef, "σr efetivo x σθA efetivo", "lightblue"),
+                                    ("σθB", sr_ef, steta_b_ef, "σr efetivo x σθB efetivo", "gold"),
+                                    ("σaA", sr_ef, sa_a_ef, "σr efetivo x σaA efetivo", "lightgreen"),
+                                    ("σaB", sr_ef, sa_b_ef, "σr efetivo x σaB efetivo", "plum"),
+                                ]
+                                circulos_mohr = [
+                                    circulo for circulo in circulos_mohr_base
+                                    if circulo[0] in estados_mohr
+                                ]
+                                raios = [abs(x2 - x1) / 2 for _, x1, x2, _, _ in circulos_mohr]
+                                maior_raio = max(raios) if raios else 0.0
+                                valores_tensoes_base = {
+                                    "σr": sr_ef,
+                                    "σθA": steta_a_ef,
+                                    "σθB": steta_b_ef,
+                                    "σaA": sa_a_ef,
+                                    "σaB": sa_b_ef,
+                                }
+                                valores_tensoes = [sr_ef] + [
+                                    valores_tensoes_base[estado]
+                                    for estado in estados_mohr
+                                    if estado in valores_tensoes_base
+                                ]
+                                margem_x = max(maior_raio * 0.15, 10.0)
+                                x_min = min(0.0, min(valores_tensoes)) - margem_x
+                                x_max = max(so_psi * 2.0, max(valores_tensoes)) + margem_x
+
+                                if x_max <= x_min:
+                                    x_max = x_min + 1.0
+
+                                x_compressao_inicio = 0.0
+                                y_compressao_inicio = so_psi
+                                x_reta = np.linspace(x_compressao_inicio, x_max, 100)
+                                y_reta = (
+                                        np.tan(np.radians(phi_graus))
+                                        * (x_reta - x_compressao_inicio)
+                                        + y_compressao_inicio
+                                )
+
+                                fig_criterio = go.Figure()
+                                ang = np.linspace(0, np.pi, 200)
+                                for _, x1, x2, nome, cor in circulos_mohr:
+                                    centro = (x1 + x2) / 2
+                                    raio = abs(x2 - x1) / 2
+                                    x_circulo = centro + raio * np.cos(ang)
+                                    y_circulo = raio * np.sin(ang)
+
+                                    fig_criterio.add_trace(go.Scatter(
+                                        x=x_circulo,
+                                        y=y_circulo,
+                                        mode="lines",
+                                        fill="toself",
+                                        fillcolor=cor,
+                                        opacity=0.45,
+                                        line=dict(color="black", width=2),
+                                        name=nome
+                                    ))
+
+                                marcadores_tensoes = [(sr_ef, "σr")] + [
+                                    (valores_tensoes_base[estado], estado)
+                                    for estado in estados_mohr
+                                    if estado in valores_tensoes_base
+                                ]
+                                for valor_tensao, texto_tensao in marcadores_tensoes:
+                                    fig_criterio.add_trace(go.Scatter(
+                                        x=[valor_tensao],
+                                        y=[0],
+                                        mode="markers+text",
+                                        text=[texto_tensao],
+                                        textposition="bottom center",
+                                        marker=dict(color="black", size=8),
+                                        showlegend=False
+                                    ))
+
+                                fig_criterio.add_trace(go.Scatter(
+                                    x=[0.0, 0.0],
+                                    y=[0.0, so_psi],
+                                    mode="lines",
+                                    line=dict(color="red", width=3),
+                                    name="Critério de Falha por Tração"
+                                ))
+                                fig_criterio.add_trace(go.Scatter(
+                                    x=x_reta,
+                                    y=y_reta,
+                                    mode="lines",
+                                    line=dict(color="green", width=3),
+                                    name="Critério de Falha por Compressão"
+                                ))
+                                if "Comp" in estado_tracao_mohr:
+                                    ponto_tangencia_comp = None
+                                    for nome_circulo_comp, x1_comp, x2_comp, _, _ in circulos_mohr_base:
+                                        if nome_circulo_comp in estado_tracao_mohr:
+                                            centro_comp = (x1_comp + x2_comp) / 2
+                                            m_comp = np.tan(np.radians(phi_graus))
+                                            denom_comp = m_comp ** 2 + 1
+                                            dist_comp = (m_comp * centro_comp + so_psi) / denom_comp
+                                            x_tang_comp = centro_comp - m_comp * dist_comp
+                                            y_tang_comp = dist_comp
+                                            if np.isfinite(x_tang_comp) and np.isfinite(y_tang_comp):
+                                                ponto_tangencia_comp = (x_tang_comp, y_tang_comp)
+                                            break
+
+                                    if ponto_tangencia_comp is not None:
+                                        x_tang_comp, y_tang_comp = ponto_tangencia_comp
+                                        fig_criterio.add_trace(go.Scatter(
+                                            x=[x_tang_comp],
+                                            y=[y_tang_comp],
+                                            mode="markers+text",
+                                            text=[f"{peso_fluido_mohr:.2f} lb/gal"],
+                                            textposition="top center",
+                                            marker=dict(color="red", size=12, symbol="circle"),
+                                            name="Falha por Compressão",
+                                            showlegend=True
+                                        ))
+
+                                fig_criterio.update_layout(
+                                    xaxis_title="Tensão normal efetiva (psi)",
+                                    yaxis_title="Tensão cisalhante (psi)",
+                                    height=520,
+                                    margin=dict(l=10, r=10, t=40, b=135),
+                                    legend=dict(
+                                        orientation="h",
+                                        yanchor="top",
+                                        y=-0.2,
+                                        xanchor="center",
+                                        x=0.5,
+                                        entrywidth=0.48,
+                                        entrywidthmode="fraction",
+                                        font=dict(size=10),
+                                    )
+                                )
+                                y_max = max(float(np.nanmax(y_reta)), maior_raio, so_psi, 1.0)
+                                y_min = -max(y_max * 0.08, 10.0)
+                                fig_criterio.update_xaxes(range=[x_min, x_max])
+                                fig_criterio.update_yaxes(
+                                    range=[y_min, y_max * 1.05],
+                                    scaleanchor="x",
+                                    scaleratio=1
+                                )
+
+                                poco_estavel_mohr = (
+                                        np.isfinite(peso_fluido_atual)
+                                        and np.isfinite(max_inferior_mohr)
+                                        and np.isfinite(min_superior_mohr)
+                                        and max_inferior_mohr < peso_fluido_atual < min_superior_mohr
+                                )
+                                estado_poco_mohr = "Poço Estável" if poco_estavel_mohr else "Poço Instável"
+                                cor_estado_mohr = "green" if poco_estavel_mohr else "red"
+
+                                card_estado, card_peso, card_janela = st.columns(3)
+                                with card_estado:
+                                    st.markdown(
+                                        f"""
+                                        <div style="border:2px solid black;border-radius:8px;padding:4px 5px;
+                                                    text-align:center;font-weight:bold;font-size:12px;line-height:1.15;">
+                                            Estado do Poço<br>
+                                            <span style="color:{cor_estado_mohr};font-size:14px;">{estado_poco_mohr}</span>
+                                        </div>
+                                        """,
+                                        unsafe_allow_html=True
+                                    )
+                                with card_peso:
+                                    st.markdown(
+                                        f"""
+                                        <div style="border:2px solid black;border-radius:8px;padding:4px 5px;
+                                                    text-align:center;font-weight:bold;font-size:12px;line-height:1.15;">
+                                            Peso do Fluido<br>
+                                            <span style="color:red;font-size:14px;">{peso_fluido_atual:.2f}</span> lb/gal
+                                        </div>
+                                        """,
+                                        unsafe_allow_html=True
+                                    )
+                                with card_janela:
+                                    st.markdown(
+                                        f"""
+                                        <div style="border:2px solid black;border-radius:8px;padding:4px 5px;
+                                                    text-align:center;font-weight:bold;font-size:12px;line-height:1.15;">
+                                            Janela Operacional<br>
+                                            <span style="color:red;font-size:14px;">{max_inferior_mohr:.2f}</span>
+                                            <span style="color:black;font-size:14px;"> &lt; ρ &lt; </span>
+                                            <span style="color:red;font-size:14px;">{min_superior_mohr:.2f}</span>
+                                        </div>
+                                        """,
+                                        unsafe_allow_html=True
+                                    )
+
+                                st.plotly_chart(fig_criterio, use_container_width=True)
+
+                    with st.expander("Trajetória do Poço", expanded=False):
+                        st.markdown("### Trajetória do Poço")
+                        try:
+                            plotar_trajetoria_3d_estabilidade(
+                                st.session_state.get("profundidade_mohr")
+                            )
+                        except Exception as e:
+                            st.warning(f"Erro ao calcular/plotar trajetória: {e}")
+
+                    with st.expander("Tabela de Dados da Trajetória", expanded=False):
+                        df_traj_est = st.session_state.get("df_out_traj", pd.DataFrame())
+                        if isinstance(df_traj_est, pd.DataFrame) and not df_traj_est.empty:
+                            st.dataframe(df_traj_est, use_container_width=True, hide_index=True)
+                        else:
+                            st.info("Trajetória não encontrada.")
+
+            with c3:
+                with st.container(border=True):
+                    st.markdown("### Janela Operacional")
+
+                    df_est_estado_jo = st.session_state.get("df_est", pd.DataFrame())
+                    if (
+                            (not isinstance(df_est, pd.DataFrame) or df_est.empty)
+                            and isinstance(df_est_estado_jo, pd.DataFrame)
+                            and not df_est_estado_jo.empty
+                    ):
+                        df_est = df_est_estado_jo.copy()
+
+                    if isinstance(df_est, pd.DataFrame) and not df_est.empty:
+                        df_est = aplicar_calibracao_fraturas_superiores(df_est)
+                        st.session_state.df_est = df_est.copy()
+
+                    colunas_jo_obrig = ["Profundidade (m)", "Max Inf", "Min Sup"]
+                    if df_est.empty or any(col not in df_est.columns for col in colunas_jo_obrig):
+                        pass
+                    else:
+                        colunas_jo_opcionais = [
+                            "Gradiente de Sobrecarga (lb/gal)",
+                            "Gradiente de Pressão de Poros (lb/gal)",
+                            "Gradiente de Fratura (lb/gal)",
+                            "Tração Inferior",
+                            "Tração Superior (σθA)",
+                            "Tração Superior (σθB)",
+                            "Fratura Superior Atual",
+                            "Gradiente de Fratura Ref. Tensões Mínimas",
+                            "Delta Calibração Fratura Superior",
+                            "Tração Superior (σθA) Calibrada",
+                            "Tração Superior (σθB) Calibrada",
+                            "Comp Inferior σθA",
+                            "Comp Superior σθA",
+                            "Comp Inferior σθB",
+                            "Comp Superior σθB",
+                            "Comp Inferior σaA",
+                            "Comp Superior σaA",
+                            "Comp Inferior σaB",
+                            "Comp Superior σaB",
+                        ]
+                        colunas_jo_plot = colunas_jo_obrig + [
+                            col for col in colunas_jo_opcionais
+                            if col in df_est.columns and col not in colunas_jo_obrig
+                        ]
+                        df_jo_plot = df_est[colunas_jo_plot].copy()
+                        for col in colunas_jo_plot:
+                            df_jo_plot[col] = pd.to_numeric(df_jo_plot[col], errors="coerce")
+
+                        df_jo_plot = df_jo_plot.dropna(subset=["Profundidade (m)", "Max Inf", "Min Sup"])
+
+                        if df_jo_plot.empty:
+                            pass
+                        else:
+                            if "fs_estabilidade" not in st.session_state:
+                                st.session_state.fs_estabilidade = 0.5
+
+                            fs_estabilidade = float(st.session_state.get("fs_estabilidade", 0.5))
+                            x_max_inf_base = pd.Series(df_jo_plot["Max Inf"], index=df_jo_plot.index, dtype=float)
+                            x_min_sup_base = pd.Series(df_jo_plot["Min Sup"], index=df_jo_plot.index, dtype=float)
+                            x_fs_base_inf = x_max_inf_base + fs_estabilidade
+                            x_fs_inf = pd.Series(np.nan, index=df_jo_plot.index, dtype=float)
+                            mask_fs_inf = x_fs_base_inf.notna()
+                            x_fs_inf.loc[mask_fs_inf] = np.maximum.accumulate(
+                                x_fs_base_inf.loc[mask_fs_inf].to_numpy()
+                            )
+                            df_jo_plot["FS Inf"] = x_fs_inf
+                            df_jo_plot["FS Sup"] = np.maximum(
+                                x_min_sup_base - fs_estabilidade,
+                                df_jo_plot["FS Inf"]
+                            )
+
+                            colunas_comp_inf_jo = [
+                                "Comp Inferior σθA",
+                                "Comp Inferior σθB",
+                                "Comp Inferior σaA",
+                                "Comp Inferior σaB",
+                            ]
+                            colunas_comp_inf_jo = [
+                                col for col in colunas_comp_inf_jo
+                                if col in df_jo_plot.columns
+                            ]
+                            if colunas_comp_inf_jo:
+                                df_jo_plot["Compressão Inferior"] = (
+                                    pd.concat(
+                                        [
+                                            pd.to_numeric(
+                                                df_jo_plot[col],
+                                                errors="coerce",
+                                            )
+                                            for col in colunas_comp_inf_jo
+                                        ],
+                                        axis=1,
+                                    )
+                                    .max(axis=1, skipna=True)
+                                )
+
+                            colunas_comp_sup_jo = [
+                                "Comp Superior σθA",
+                                "Comp Superior σθB",
+                                "Comp Superior σaA",
+                                "Comp Superior σaB",
+                            ]
+                            colunas_comp_sup_jo = [
+                                col for col in colunas_comp_sup_jo
+                                if col in df_jo_plot.columns
+                            ]
+                            if colunas_comp_sup_jo:
+                                df_jo_plot["Compressão Superior"] = (
+                                    pd.concat(
+                                        [
+                                            pd.to_numeric(
+                                                df_jo_plot[col],
+                                                errors="coerce",
+                                            )
+                                            for col in colunas_comp_sup_jo
+                                        ],
+                                        axis=1,
+                                    )
+                                    .min(axis=1, skipna=True)
+                                )
+
+                            if (
+                                    st.session_state.get(
+                                        "calibrar_fraturas_superiores_tensoes_minimas",
+                                        "Não",
+                                    ) == "Sim"
+                                    and st.session_state.get(
+                                        "usar_fraturas_superiores_calibradas_min_sup",
+                                        "Sim",
+                                    ) == "Sim"
+                                    and (
+                                        "Tração Superior (σθA) Calibrada" in df_jo_plot.columns
+                                        or "Tração Superior (σθB) Calibrada" in df_jo_plot.columns
+                                    )
+                            ):
+                                tracao_sup_a_jo = pd.to_numeric(
+                                    df_jo_plot.get(
+                                        "Tração Superior (σθA) Calibrada",
+                                        pd.Series(np.nan, index=df_jo_plot.index),
+                                    ),
+                                    errors="coerce",
+                                ).combine_first(
+                                    pd.to_numeric(
+                                        df_jo_plot.get(
+                                            "Tração Superior (σθA)",
+                                            pd.Series(np.nan, index=df_jo_plot.index),
+                                        ),
+                                        errors="coerce",
+                                    )
+                                )
+                                tracao_sup_b_jo = pd.to_numeric(
+                                    df_jo_plot.get(
+                                        "Tração Superior (σθB) Calibrada",
+                                        pd.Series(np.nan, index=df_jo_plot.index),
+                                    ),
+                                    errors="coerce",
+                                ).combine_first(
+                                    pd.to_numeric(
+                                        df_jo_plot.get(
+                                            "Tração Superior (σθB)",
+                                            pd.Series(np.nan, index=df_jo_plot.index),
+                                        ),
+                                        errors="coerce",
+                                    )
+                                )
+                            else:
+                                tracao_sup_a_jo = pd.to_numeric(
+                                    df_jo_plot.get(
+                                        "Tração Superior (σθA)",
+                                        pd.Series(np.nan, index=df_jo_plot.index),
+                                    ),
+                                    errors="coerce",
+                                )
+                                tracao_sup_b_jo = pd.to_numeric(
+                                    df_jo_plot.get(
+                                        "Tração Superior (σθB)",
+                                        pd.Series(np.nan, index=df_jo_plot.index),
+                                    ),
+                                    errors="coerce",
+                                )
+
+                            if tracao_sup_a_jo.notna().any() or tracao_sup_b_jo.notna().any():
+                                df_jo_plot["Tração Superior"] = (
+                                    pd.concat(
+                                        [tracao_sup_a_jo, tracao_sup_b_jo],
+                                        axis=1,
+                                    )
+                                    .min(axis=1, skipna=True)
+                                )
+
+                            calibracao_fraturas_ativa_jo = (
+                                st.session_state.get(
+                                    "calibrar_fraturas_superiores_tensoes_minimas",
+                                    "Não",
+                                ) == "Sim"
+                            )
+                            coluna_tracao_sup_a_jo = (
+                                "Tração Superior (σθA) Calibrada"
+                                if calibracao_fraturas_ativa_jo
+                                and "Tração Superior (σθA) Calibrada" in df_jo_plot.columns
+                                else "Tração Superior (σθA)"
+                            )
+                            coluna_tracao_sup_b_jo = (
+                                "Tração Superior (σθB) Calibrada"
+                                if calibracao_fraturas_ativa_jo
+                                and "Tração Superior (σθB) Calibrada" in df_jo_plot.columns
+                                else "Tração Superior (σθB)"
+                            )
+
+                            curvas_jo_padrao = [
+                                ("Lim. Inf.", "Max Inf", "Lim. Inf.", "blue", "-", 2.0, 100),
+                                ("Lim. Sup.", "Min Sup", "Lim. Sup.", "red", "-", 2.0, 100),
+                                ("FS inf", "FS Inf", "FS inf", "gold", "--", 2.0, 42),
+                                ("FS sup", "FS Sup", "FS sup", "tomato", "--", 2.0, 42),
+                                ("Gradiente de Sobrecarga", "Gradiente de Sobrecarga (lb/gal)", "Gradiente de Sobrecarga", "black", "-", 2.0, 20),
+                                ("Gradiente de Pressão de Poros", "Gradiente de Pressão de Poros (lb/gal)", "Gradiente de Pressão de Poros", "orange", "-", 2.0, 25),
+                                ("Gradiente de Fratura", "Gradiente de Fratura (lb/gal)", "Gradiente de Fratura", "brown", "-", 2.0, 25),
+                                ("Tração Inferior", "Tração Inferior", "Tração Inferior", "teal", "-", 2.0, 30),
+                                ("Tração Superior", "Tração Superior", "Tração Superior", "#006400", "-", 2.0, 45),
+                                ("Tração Superior (σθA)", coluna_tracao_sup_a_jo, "Tração Superior (σθA)", "darkgreen" if calibracao_fraturas_ativa_jo else "green", "-", 2.0, 90 if calibracao_fraturas_ativa_jo else 30),
+                                ("Tração Superior (σθB)", coluna_tracao_sup_b_jo, "Tração Superior (σθB)", "indigo" if calibracao_fraturas_ativa_jo else "purple", "-", 2.0, 90 if calibracao_fraturas_ativa_jo else 30),
+                                ("Compressão Inferior", "Compressão Inferior", "Compressão Inferior", "#0057B8", "-",2.0, 45),
+                                ("Comp Inferior σθA", "Comp Inferior σθA", "Comp Inferior σθA", "turquoise", "-", 2.0, 30),
+                                ("Comp Inferior σθB", "Comp Inferior σθB", "Comp Inferior σθB", "navy", "-", 2.0, 30),
+                                ("Comp Inferior σaA", "Comp Inferior σaA", "Comp Inferior σaA", "magenta", "-", 2.0, 30),
+                                ("Comp Inferior σaB", "Comp Inferior σaB", "Comp Inferior σaB", "dodgerblue", "-", 2.0,30),
+                                ("Compressão Superior", "Compressão Superior", "Compressão Superior", "#8B0000", "-", 2.0, 45),
+                                ("Comp Superior σθA", "Comp Superior σθA", "Comp Superior σθA", "lime", "-", 2.0, 30),
+                                ("Comp Superior σθB", "Comp Superior σθB", "Comp Superior σθB", "gray", "-", 2.0, 30),
+                                ("Comp Superior σaA", "Comp Superior σaA", "Comp Superior σaA", "olive", "-", 2.0, 30),
+                                ("Comp Superior σaB", "Comp Superior σaB", "Comp Superior σaB", "deeppink", "-", 2.0,30),
+                            ]
+                            curvas_jo_padrao = [
+                                curva for curva in curvas_jo_padrao
+                                if curva[1] in df_jo_plot.columns
+                            ]
+                            labels_jo = [label for label, *_ in curvas_jo_padrao]
+                            df_mud_jo = st.session_state.get("df_mud", pd.DataFrame())
+                            if (
+                                    isinstance(df_mud_jo, pd.DataFrame)
+                                    and not df_mud_jo.empty
+                                    and "Peso do Fluido Planejado (lb/gal)" in df_mud_jo.columns
+                                    and "Profundidade (m)" in df_mud_jo.columns
+                            ):
+                                labels_jo.append("Peso do Fluido (Planejado)")
+                            if (
+                                    st.session_state.get("option") == "Retroanálise"
+                                    and isinstance(df_mud_jo, pd.DataFrame)
+                                    and not df_mud_jo.empty
+                                    and "Peso do Fluido Executado (lb/gal)" in df_mud_jo.columns
+                                    and "Profundidade (m)" in df_mud_jo.columns
+                            ):
+                                labels_jo.append("Peso do Fluido (Executado)")
+
+                            controles_adicionais_jo = [
+                                "Teste RFT",
+                                "Gradiente de Colapso",
+                                "LOT",
+                                "Preenchimento da Janela",
+                            ]
+                            labels_jo.extend(controles_adicionais_jo)
+                            curvas_default_jo = [
+                                "Lim. Inf.",
+                                "Lim. Sup.",
+                                "FS inf",
+                                "FS sup",
+                                *controles_adicionais_jo,
+                            ]
+
+                            curvas_jo_atual = st.session_state.get("curvas_estabilidade_jo")
+                            if not isinstance(curvas_jo_atual, list):
+                                st.session_state.curvas_estabilidade_jo = [
+                                    curva for curva in curvas_default_jo
+                                    if curva in labels_jo
+                                ]
+                                st.session_state.controles_adicionais_est_jo_v1 = True
+                                st.session_state.pop("_w_curvas_estabilidade_jo", None)
+                            else:
+                                if not st.session_state.get(
+                                        "controles_adicionais_est_jo_v1",
+                                        False
+                                ):
+                                    curvas_jo_atual = list(dict.fromkeys([
+                                        *curvas_jo_atual,
+                                        *controles_adicionais_jo,
+                                    ]))
+                                    st.session_state.controles_adicionais_est_jo_v1 = True
+                                    st.session_state.pop("_w_curvas_estabilidade_jo", None)
+                                st.session_state.curvas_estabilidade_jo = [
+                                    curva for curva in curvas_jo_atual
+                                    if curva in labels_jo
+                                ]
+
+                            if not st.session_state.curvas_estabilidade_jo:
+                                st.session_state.curvas_estabilidade_jo = [
+                                    curva for curva in curvas_default_jo
+                                    if curva in labels_jo
+                                ]
+
+                            curvas_selecionadas = st.session_state.get(
+                                "curvas_estabilidade_jo",
+                                curvas_default_jo
+                            )
+
+                            y_min_base = 0.0
+                            y_max_base = float(df_jo_plot["Profundidade (m)"].iloc[-1]) + 100.0
+                            if y_max_base <= y_min_base:
+                                y_max_base = y_min_base + 100.0
+
+                            opcoes_modo_est_jo = ["Gradiente (lb/gal)", "Pressão (psi)"]
+                            if st.session_state.get("og_est_jo") not in opcoes_modo_est_jo:
+                                st.session_state.og_est_jo = "Gradiente (lb/gal)"
+                            modo_est_jo = st.session_state.get("og_est_jo", "Gradiente (lb/gal)")
+                            fator_pressao_est_jo = (
+                                    0.1704
+                                    * pd.to_numeric(df_jo_plot["Profundidade (m)"], errors="coerce")
+                            )
+                            def _serie_x_est_jo(coluna):
+                                serie = pd.to_numeric(df_jo_plot[coluna], errors="coerce")
+                                if modo_est_jo == "Pressão (psi)":
+                                    serie = serie * fator_pressao_est_jo
+                                profundidade_inicial_jo = max(
+                                    0.0,
+                                    float(st.session_state.get("prof_inicio_curvas_est_jo", 0.0))
+                                )
+                                profundidades_jo = pd.to_numeric(
+                                    df_jo_plot["Profundidade (m)"],
+                                    errors="coerce"
+                                )
+                                serie = serie.where(profundidades_jo >= profundidade_inicial_jo)
+                                return serie
+                            colunas_x_base_jo = [
+                                col for label, col, *_ in curvas_jo_padrao
+                                if label in curvas_selecionadas
+                            ]
+                            if not colunas_x_base_jo:
+                                colunas_x_base_jo = [col for _, col, *_ in curvas_jo_padrao]
+
+                            x_base = pd.concat(
+                                [
+                                    _serie_x_est_jo(col)
+                                    for col in colunas_x_base_jo
+                                ],
+                                axis=0
+                            ).dropna()
+                            x_min_base = float(x_base.min()) if not x_base.empty else 0.0
+                            x_max_base = float(x_base.max()) if not x_base.empty else 5000.0
+                            if x_max_base <= x_min_base:
+                                x_max_base = x_min_base + 1.0
+                            margem_x_jo = max((x_max_base - x_min_base) * 0.08, 0.5)
+
+                            if modo_est_jo == "Pressão (psi)":
+                                padrao_x_min_est_jo = 0.0
+                                padrao_x_max_est_jo = math.ceil((x_max_base + 500.0) / 500.0) * 500.0
+                                padrao_x_step_est_jo = 500.0
+                            else:
+                                padrao_x_min_est_jo = 7.0
+                                padrao_x_max_est_jo = 21.0
+                                padrao_x_step_est_jo = 2.0
+                            padrao_y_min_est_jo = 0.0
+                            if st.session_state.get("modo_defaults_est_jo") != modo_est_jo:
+                                st.session_state.x_min_est_jo = padrao_x_min_est_jo
+                                st.session_state.x_max_est_jo = padrao_x_max_est_jo
+                                st.session_state.x_step_est_jo = padrao_x_step_est_jo
+                                st.session_state.y_min_est_jo = padrao_y_min_est_jo
+                                st.session_state.y_max_est_jo = y_max_base
+                                st.session_state.y_step_est_jo = 200.0
+                                st.session_state.defaults_est_jo_v2_aplicados = True
+                                st.session_state.defaults_est_jo_v3_aplicados = True
+                                st.session_state.modo_defaults_est_jo = modo_est_jo
+
+                            for chave, valor_padrao in (
+                                    ("x_min_est_jo", padrao_x_min_est_jo),
+                                    ("x_max_est_jo", padrao_x_max_est_jo),
+                                    ("x_step_est_jo", padrao_x_step_est_jo),
+                                    ("prof_inicio_curvas_est_jo", 0.0),
+                                    ("y_min_est_jo", padrao_y_min_est_jo),
+                                    ("y_max_est_jo", y_max_base),
+                                    ("y_step_est_jo", 200.0),
+                            ):
+                                if chave not in st.session_state:
+                                    st.session_state[chave] = valor_padrao
+
+                            with st.expander("****Configurações do Gráfico****", expanded=False):
+                                with st.expander(
+                                        "****Calibração das Fraturas Superiores****",
+                                        expanded=False,
+                                ):
+                                    for chave, label, opcoes in (
+                                            (
+                                                "calibrar_fraturas_superiores_tensoes_minimas",
+                                                "Calibrar fraturas superiores pelo Método das Tensões Mínimas?",
+                                                ["Não", "Sim"],
+                                            ),
+                                            (
+                                                "usar_fraturas_superiores_calibradas_min_sup",
+                                                "Usar fraturas superiores calibradas no Min Sup?",
+                                                ["Sim", "Não"],
+                                            ),
+                                            (
+                                                "suavizar_delta_fratura_superior",
+                                                "Suavizar delta de calibração?",
+                                                ["Sim", "Não"],
+                                            ),
+                                    ):
+                                        chave_widget = f"_w_{chave}"
+                                        preparar_widget_persistente(chave, chave_widget)
+                                        st.selectbox(
+                                            label,
+                                            opcoes,
+                                            key=chave_widget,
+                                            on_change=salvar_widget_persistente,
+                                            args=(chave, chave_widget),
+                                        )
+
+                                    preparar_widget_persistente(
+                                        "janela_suavizacao_delta_fratura_superior",
+                                        "_w_janela_suavizacao_delta_fratura_superior",
+                                    )
+                                    st.number_input(
+                                        "Janela de suavização do delta",
+                                        min_value=1,
+                                        max_value=200,
+                                        step=1,
+                                        key="_w_janela_suavizacao_delta_fratura_superior",
+                                        on_change=salvar_widget_persistente,
+                                        args=(
+                                            "janela_suavizacao_delta_fratura_superior",
+                                            "_w_janela_suavizacao_delta_fratura_superior",
+                                        ),
+                                    )
+
+                                    df_f_calibracao = st.session_state.get(
+                                        "df_f",
+                                        pd.DataFrame(),
+                                    )
+                                    referencia_calibracao_ok = (
+                                        isinstance(df_f_calibracao, pd.DataFrame)
+                                        and not df_f_calibracao.empty
+                                        and "Profundidade (m)" in df_f_calibracao.columns
+                                        and "Gradiente de Fratura (lb/gal)" in df_f_calibracao.columns
+                                        and pd.to_numeric(
+                                            df_f_calibracao["Gradiente de Fratura (lb/gal)"],
+                                            errors="coerce",
+                                        ).notna().any()
+                                    )
+
+                                with st.expander("****Curvas e preenchimentos****", expanded=False):
+                                    preparar_widget_persistente("curvas_estabilidade_jo", "_w_curvas_estabilidade_jo")
+                                    st.multiselect(
+                                        "Curvas Plotadas no Gráfico",
+                                        labels_jo,
+                                        key="_w_curvas_estabilidade_jo",
+                                        on_change=salvar_widget_persistente,
+                                        args=("curvas_estabilidade_jo", "_w_curvas_estabilidade_jo")
+                                    )
+
+                                    preparar_widget_persistente("fs_estabilidade", "_w_fs_estabilidade")
+                                    st.number_input(
+                                        "Fator de Segurança da Janela Operacional",
+                                        min_value=0.0,
+                                        step=0.1,
+                                        format="%.2f",
+                                        key="_w_fs_estabilidade",
+                                        on_change=salvar_widget_persistente,
+                                        args=("fs_estabilidade", "_w_fs_estabilidade")
+                                    )
+
+                                    for chave_cfg, padrao_cfg in (
+                                            ("ctjo_est", "Sim"),
+                                            ("rosa_jo_est", "Sim"),
+                                            ("marcador_profundidade_est_jo", "Sim"),
+                                            ("leg_est_jo", "Não"),
+                                    ):
+                                        if st.session_state.get(chave_cfg) not in ["Sim", "Não"]:
+                                            st.session_state[chave_cfg] = padrao_cfg
+
+                                    preparar_widget_persistente("ctjo_est", "_w_ctjo_est")
+                                    st.selectbox(
+                                        "Exibir configuração das tensões",
+                                        ["Sim", "Não"],
+                                        key="_w_ctjo_est",
+                                        on_change=salvar_widget_persistente,
+                                        args=("ctjo_est", "_w_ctjo_est")
+                                    )
+
+                                    preparar_widget_persistente("rosa_jo_est", "_w_rosa_jo_est")
+                                    st.selectbox(
+                                        "Exibir rosa dos ventos",
+                                        ["Sim", "Não"],
+                                        key="_w_rosa_jo_est",
+                                        on_change=salvar_widget_persistente,
+                                        args=("rosa_jo_est", "_w_rosa_jo_est")
+                                    )
+
+                                    preparar_widget_persistente(
+                                        "marcador_profundidade_est_jo",
+                                        "_w_marcador_profundidade_est_jo"
+                                    )
+                                    st.selectbox(
+                                        "Exibir profundidade analisada",
+                                        ["Sim", "Não"],
+                                        key="_w_marcador_profundidade_est_jo",
+                                        on_change=salvar_widget_persistente,
+                                        args=("marcador_profundidade_est_jo", "_w_marcador_profundidade_est_jo")
+                                    )
+
+                                    preparar_widget_persistente("leg_est_jo", "_w_leg_est_jo")
+                                    st.selectbox(
+                                        "Exibir legendas",
+                                        ["Sim", "Não"],
+                                        key="_w_leg_est_jo",
+                                        on_change=salvar_widget_persistente,
+                                        args=("leg_est_jo", "_w_leg_est_jo")
+                                    )
+
+                                    legendas_est_jo = {
+                                        "Inferior direito": "lower right",
+                                        "Melhor posição": "best",
+                                        "Superior direito": "upper right",
+                                        "Superior esquerdo": "upper left",
+                                        "Inferior esquerdo": "lower left",
+                                        "Direita": "right",
+                                        "Centro esquerdo": "center left",
+                                        "Centro direito": "center right",
+                                        "Inferior central": "lower center",
+                                        "Superior central": "upper center",
+                                        "Central": "center",
+                                        "Personalizada": "custom",
+                                    }
+                                    if st.session_state.get("pos_leg_est_jo") not in legendas_est_jo:
+                                        st.session_state.pos_leg_est_jo = "Superior direito"
+                                    if "fontsize_leg_est_jo" not in st.session_state:
+                                        st.session_state.fontsize_leg_est_jo = 8
+                                    if "x_leg_est_jo" not in st.session_state:
+                                        st.session_state.x_leg_est_jo = 0.98
+                                    if "y_leg_est_jo" not in st.session_state:
+                                        st.session_state.y_leg_est_jo = 0.98
+
+                                    if st.session_state.get("leg_est_jo") == "Sim":
+                                        preparar_widget_persistente("pos_leg_est_jo", "_w_pos_leg_est_jo")
+                                        st.selectbox(
+                                            "Posição da legenda",
+                                            list(legendas_est_jo.keys()),
+                                            key="_w_pos_leg_est_jo",
+                                            on_change=salvar_widget_persistente,
+                                            args=("pos_leg_est_jo", "_w_pos_leg_est_jo")
+                                        )
+
+                                        if st.session_state.get("pos_leg_est_jo") == "Personalizada":
+                                            col_leg_x, col_leg_y = st.columns(2)
+                                            with col_leg_x:
+                                                preparar_widget_persistente("x_leg_est_jo", "_w_x_leg_est_jo")
+                                                st.number_input(
+                                                    "Legenda X",
+                                                    min_value=-1.0,
+                                                    max_value=2.0,
+                                                    step=0.01,
+                                                    format="%.2f",
+                                                    key="_w_x_leg_est_jo",
+                                                    on_change=salvar_widget_persistente,
+                                                    args=("x_leg_est_jo", "_w_x_leg_est_jo")
+                                                )
+                                            with col_leg_y:
+                                                preparar_widget_persistente("y_leg_est_jo", "_w_y_leg_est_jo")
+                                                st.number_input(
+                                                    "Legenda Y",
+                                                    min_value=-1.0,
+                                                    max_value=2.0,
+                                                    step=0.01,
+                                                    format="%.2f",
+                                                    key="_w_y_leg_est_jo",
+                                                    on_change=salvar_widget_persistente,
+                                                    args=("y_leg_est_jo", "_w_y_leg_est_jo")
+                                                )
+
+                                        preparar_widget_persistente("fontsize_leg_est_jo", "_w_fontsize_leg_est_jo")
+                                        st.number_input(
+                                            "Tamanho da fonte da legenda",
+                                            min_value=4,
+                                            max_value=40,
+                                            step=1,
+                                            key="_w_fontsize_leg_est_jo",
+                                            on_change=salvar_widget_persistente,
+                                            args=("fontsize_leg_est_jo", "_w_fontsize_leg_est_jo")
+                                        )
+
+                                with st.expander("****Eixos****", expanded=False):
+                                    preparar_widget_persistente("og_est_jo", "_w_og_est_jo")
+                                    st.segmented_control(
+                                        "Opção de Gráfico",
+                                        opcoes_modo_est_jo,
+                                        selection_mode="single",
+                                        key="_w_og_est_jo",
+                                        on_change=salvar_widget_persistente,
+                                        width="stretch",
+                                        args=("og_est_jo", "_w_og_est_jo"),
+                                    )
+                                    preparar_widget_persistente(
+                                        "prof_inicio_curvas_est_jo",
+                                        "_w_prof_inicio_curvas_est_jo"
+                                    )
+                                    st.number_input(
+                                        "Profundidade inicial das curvas (m)",
+                                        min_value=0.0,
+                                        step=100.0,
+                                        format="%.2f",
+                                        key="_w_prof_inicio_curvas_est_jo",
+                                        on_change=salvar_widget_persistente,
+                                        args=(
+                                            "prof_inicio_curvas_est_jo",
+                                            "_w_prof_inicio_curvas_est_jo"
+                                        )
+                                    )
+                                    for chave, label, step, min_value in (
+                                            ("x_min_est_jo", "Eixo X - mínimo", 0.5, None),
+                                            ("x_max_est_jo", "Eixo X - máximo", 0.5, None),
+                                            ("x_step_est_jo", "Passo do eixo X", 0.5, 0.01),
+                                            ("y_min_est_jo", "Eixo Y - mínimo", 100.0, None),
+                                            ("y_max_est_jo", "Eixo Y - máximo", 100.0, None),
+                                            ("y_step_est_jo", "Passo do eixo Y", 50.0, 0.01),
+                                    ):
+                                        preparar_widget_persistente(chave, f"_w_{chave}")
+                                        kwargs = {
+                                            "label": label,
+                                            "step": step,
+                                            "format": "%.2f",
+                                            "key": f"_w_{chave}",
+                                            "on_change": salvar_widget_persistente,
+                                            "args": (chave, f"_w_{chave}")
+                                        }
+                                        if min_value is not None:
+                                            kwargs["min_value"] = min_value
+                                        st.number_input(**kwargs)
+
+                                    if st.button(
+                                            "Resetar Eixos - Janela Operacional",
+                                            type="primary",
+                                            use_container_width=True,
+                                            key="btn_resetar_eixos_est_jo"
+                                    ):
+                                        st.session_state.x_min_est_jo = padrao_x_min_est_jo
+                                        st.session_state.x_max_est_jo = padrao_x_max_est_jo
+                                        st.session_state.x_step_est_jo = padrao_x_step_est_jo
+                                        st.session_state.prof_inicio_curvas_est_jo = 0.0
+                                        st.session_state.y_min_est_jo = padrao_y_min_est_jo
+                                        st.session_state.y_max_est_jo = y_max_base
+                                        st.session_state.y_step_est_jo = 200.0
+                                        for chave_reset in (
+                                                "_w_x_min_est_jo",
+                                                "_w_x_max_est_jo",
+                                                "_w_x_step_est_jo",
+                                                "_w_prof_inicio_curvas_est_jo",
+                                                "_w_y_min_est_jo",
+                                                "_w_y_max_est_jo",
+                                                "_w_y_step_est_jo",
+                                        ):
+                                            st.session_state.pop(chave_reset, None)
+                                        st.rerun()
+
+                            sincronizar_widgets_persistentes([
+                                ("og_est_jo", "_w_og_est_jo"),
+                                (
+                                    "calibrar_fraturas_superiores_tensoes_minimas",
+                                    "_w_calibrar_fraturas_superiores_tensoes_minimas",
+                                ),
+                                (
+                                    "usar_fraturas_superiores_calibradas_min_sup",
+                                    "_w_usar_fraturas_superiores_calibradas_min_sup",
+                                ),
+                                (
+                                    "suavizar_delta_fratura_superior",
+                                    "_w_suavizar_delta_fratura_superior",
+                                ),
+                                (
+                                    "janela_suavizacao_delta_fratura_superior",
+                                    "_w_janela_suavizacao_delta_fratura_superior",
+                                ),
+                                ("curvas_estabilidade_jo", "_w_curvas_estabilidade_jo"),
+                                ("fs_estabilidade", "_w_fs_estabilidade"),
+                                ("ctjo_est", "_w_ctjo_est"),
+                                ("rosa_jo_est", "_w_rosa_jo_est"),
+                                ("marcador_profundidade_est_jo", "_w_marcador_profundidade_est_jo"),
+                                ("leg_est_jo", "_w_leg_est_jo"),
+                                ("pos_leg_est_jo", "_w_pos_leg_est_jo"),
+                                ("x_leg_est_jo", "_w_x_leg_est_jo"),
+                                ("y_leg_est_jo", "_w_y_leg_est_jo"),
+                                ("fontsize_leg_est_jo", "_w_fontsize_leg_est_jo"),
+                                ("x_min_est_jo", "_w_x_min_est_jo"),
+                                ("x_max_est_jo", "_w_x_max_est_jo"),
+                                ("x_step_est_jo", "_w_x_step_est_jo"),
+                                ("prof_inicio_curvas_est_jo", "_w_prof_inicio_curvas_est_jo"),
+                                ("y_min_est_jo", "_w_y_min_est_jo"),
+                                ("y_max_est_jo", "_w_y_max_est_jo"),
+                                ("y_step_est_jo", "_w_y_step_est_jo"),
+                            ])
+
+                            fs_estabilidade = float(st.session_state.get("fs_estabilidade", 0.5))
+                            x_max_inf_base = pd.Series(df_jo_plot["Max Inf"], index=df_jo_plot.index, dtype=float)
+                            x_min_sup_base = pd.Series(df_jo_plot["Min Sup"], index=df_jo_plot.index, dtype=float)
+                            x_fs_base_inf = x_max_inf_base + fs_estabilidade
+                            x_fs_inf = pd.Series(np.nan, index=df_jo_plot.index, dtype=float)
+                            mask_fs_inf = x_fs_base_inf.notna()
+                            x_fs_inf.loc[mask_fs_inf] = np.maximum.accumulate(
+                                x_fs_base_inf.loc[mask_fs_inf].to_numpy()
+                            )
+                            df_jo_plot["FS Inf"] = x_fs_inf
+                            df_jo_plot["FS Sup"] = np.maximum(
+                                x_min_sup_base - fs_estabilidade,
+                                df_jo_plot["FS Inf"]
+                            )
+
+                            selected = st.session_state.get(
+                                "well_selected",
+                                st.session_state.get("poco", "Poço")
+                            )
+                            _garantir_litologia_importada(selected)
+                            poco = st.session_state.get("pocos", {}).get(selected, {})
+                            profundidades = poco.get("profundidade", [])
+                            litologias = poco.get("litologia", [])
+
+                            usar_coluna_idade = (
+                                    st.session_state.get("idg") == "Sim"
+                                    and "df_idade" in st.session_state
+                                    and isinstance(st.session_state.df_idade, pd.DataFrame)
+                                    and not st.session_state.df_idade.empty
+                            )
+
+                            fig_jo = plt.figure(figsize=(8, 10))
+                            if usar_coluna_idade:
+                                gs = gridspec.GridSpec(
+                                    1, 4,
+                                    width_ratios=[0.10, 0.18, 0.21, 1],
+                                    wspace=0
+                                )
+                                ax_idade = fig_jo.add_subplot(gs[0])
+                                ax_lito = fig_jo.add_subplot(gs[1], sharey=ax_idade)
+                                ax_gap = fig_jo.add_subplot(gs[2])
+                                ax_gap.axis("off")
+                                ax_jo = fig_jo.add_subplot(gs[3], sharey=ax_idade)
+                                idade_formacao(
+                                    ax_idade,
+                                    st.session_state.df_idade,
+                                    float(st.session_state.get("y_max_est_jo", y_max_base)),
+                                    float(st.session_state.get("y_min_est_jo", y_min_base))
+                                )
+                                ax_idade.tick_params(
+                                    axis="y",
+                                    which="both",
+                                    left=False,
+                                    right=False,
+                                    labelleft=False,
+                                    labelright=False
+                                )
+                                ax_idade.set_ylabel("")
+                                plt.setp(ax_lito.get_yticklabels(), visible=False)
+                            else:
+                                gs = gridspec.GridSpec(
+                                    1, 3,
+                                    width_ratios=[0.18, 0.21, 1],
+                                    wspace=0
+                                )
+                                ax_lito = fig_jo.add_subplot(gs[0])
+                                ax_gap = fig_jo.add_subplot(gs[1])
+                                ax_gap.axis("off")
+                                ax_jo = fig_jo.add_subplot(gs[2], sharey=ax_lito)
+
+                            df_lito_est = df_est.copy()
+                            if (
+                                    st.session_state.get(
+                                        "tipo_coluna_litologica_graficos",
+                                        "Permeável / Não permeável"
+                                    ) == "Permeável / Não permeável"
+                                    and "df_pp_lito" in st.session_state
+                                    and isinstance(st.session_state.df_pp_lito, pd.DataFrame)
+                                    and not st.session_state.df_pp_lito.empty
+                            ):
+                                df_lito_est = st.session_state.df_pp_lito.copy()
+
+                            if "Profundidade (m)" not in df_lito_est.columns and "Profundidade" in df_lito_est.columns:
+                                df_lito_est["Profundidade (m)"] = df_lito_est["Profundidade"]
+
+                            lito(
+                                ax_lito,
+                                df_lito_est,
+                                profundidades,
+                                litologias,
+                                float(st.session_state.get("y_max_est_jo", y_max_base)),
+                                y_min=float(st.session_state.get("y_min_est_jo", y_min_base)),
+                                y_max=float(st.session_state.get("y_max_est_jo", y_max_base))
+                            )
+
+                            profundidade_inicial_curvas_jo = max(
+                                0.0,
+                                float(st.session_state.get("prof_inicio_curvas_est_jo", 0.0))
+                            )
+                            y_vals = df_jo_plot["Profundidade (m)"].to_numpy(dtype=float)
+                            x_max_inf = _serie_x_est_jo("Max Inf").to_numpy(dtype=float)
+                            x_min_sup = _serie_x_est_jo("Min Sup").to_numpy(dtype=float)
+                            x_fs_inf = _serie_x_est_jo("FS Inf").to_numpy(dtype=float)
+                            x_fs_sup = _serie_x_est_jo("FS Sup").to_numpy(dtype=float)
+
+                            if "Preenchimento da Janela" in curvas_selecionadas:
+                                mask_verde = x_fs_sup > x_fs_inf
+                                if np.any(mask_verde):
+                                    ax_jo.fill_betweenx(
+                                        y_vals,
+                                        x_fs_inf,
+                                        x_fs_sup,
+                                        where=mask_verde,
+                                        interpolate=True,
+                                        color="lightgreen",
+                                        alpha=0.25,
+                                        label="Janela Operacional"
+                                    )
+
+                                mask_inf = x_fs_inf > x_max_inf
+                                if np.any(mask_inf):
+                                    ax_jo.fill_betweenx(
+                                        y_vals,
+                                        x_max_inf,
+                                        x_fs_inf,
+                                        where=mask_inf,
+                                        interpolate=True,
+                                        color="lightcoral",
+                                        alpha=0.25
+                                    )
+
+                                mask_sup = x_min_sup > x_fs_sup
+                                if np.any(mask_sup):
+                                    ax_jo.fill_betweenx(
+                                        y_vals,
+                                        x_fs_sup,
+                                        x_min_sup,
+                                        where=mask_sup,
+                                        interpolate=True,
+                                        color="lightcoral",
+                                        alpha=0.25
+                                    )
+
+                            for label, coluna, legenda, cor, estilo, largura, zorder_curva in curvas_jo_padrao:
+                                if label not in curvas_selecionadas:
+                                    continue
+                                if coluna not in df_jo_plot.columns:
+                                    continue
+                                serie_x_plot = _serie_x_est_jo(coluna)
+                                serie_y_plot = pd.to_numeric(df_jo_plot["Profundidade (m)"], errors="coerce")
+                                mascara_plot = serie_x_plot.notna() & serie_y_plot.notna()
+                                if not mascara_plot.any():
+                                    continue
+                                ax_jo.plot(
+                                    serie_x_plot[mascara_plot],
+                                    serie_y_plot[mascara_plot],
+                                    color=cor,
+                                    linestyle=estilo,
+                                    linewidth=largura,
+                                    label=legenda,
+                                    zorder=zorder_curva
+                                )
+
+                            if "Teste RFT" in curvas_selecionadas:
+                                plotar_rft(
+                                    ax_jo,
+                                    modo_grafico=modo_est_jo,
+                                    label="Teste RFT",
+                                    profundidade_minima=profundidade_inicial_curvas_jo
+                                )
+                            if "Gradiente de Colapso" in curvas_selecionadas:
+                                plotar_gradiente_colapso(
+                                    ax_jo,
+                                    modo_grafico=modo_est_jo,
+                                    label="Gradiente de Colapso",
+                                    profundidade_minima=profundidade_inicial_curvas_jo
+                                )
+                            plotar_peso_fluido_jo(
+                                ax_jo,
+                                modo_grafico=modo_est_jo,
+                                mostrar_planejado="Peso do Fluido (Planejado)" in curvas_selecionadas,
+                                mostrar_executado="Peso do Fluido (Executado)" in curvas_selecionadas,
+                                profundidade_minima=profundidade_inicial_curvas_jo
+                            )
+                            plotar_lot_fit_jo(
+                                ax_jo,
+                                modo_grafico=modo_est_jo,
+                                mostrar_lot="LOT" in curvas_selecionadas,
+                                profundidade_minima=profundidade_inicial_curvas_jo
+                            )
+
+                            if (
+                                    st.session_state.get("marcador_profundidade_est_jo", "Sim") == "Sim"
+                            ):
+                                estado_marcador_jo = st.session_state.get(
+                                    "estado_tracao_mohr",
+                                    "Peso de Fluido Escolhido"
+                                )
+                                prof_marcador_jo = float(st.session_state.get("profundidade_mohr", y_vals[-1]))
+                                serie_prof_marcador_jo = pd.to_numeric(
+                                    df_jo_plot["Profundidade (m)"],
+                                    errors="coerce"
+                                )
+                                if serie_prof_marcador_jo.notna().any():
+                                    idx_marcador_jo = (serie_prof_marcador_jo - prof_marcador_jo).abs().idxmin()
+                                    y_marcador_jo = float(serie_prof_marcador_jo.loc[idx_marcador_jo])
+                                    x_marcador_jo = np.nan
+                                    if estado_marcador_jo == "Peso de Fluido Escolhido":
+                                        x_marcador_jo = float(st.session_state.get("ppg", np.nan))
+                                        if str(modo_est_jo).startswith("Press") and np.isfinite(x_marcador_jo):
+                                            x_marcador_jo *= 0.1704 * y_marcador_jo
+                                    elif (
+                                            st.session_state.get(
+                                                "calibrar_fraturas_superiores_tensoes_minimas",
+                                                "Não",
+                                            ) == "Sim"
+                                            and estado_marcador_jo in (
+                                                "Tração Superior (σθA)",
+                                                "Tração Superior (σθB)",
+                                            )
+                                    ):
+                                        coluna_calibrada_marcador_jo = (
+                                            f"{estado_marcador_jo} Calibrada"
+                                        )
+                                        if coluna_calibrada_marcador_jo in df_jo_plot.columns:
+                                            x_marcador_jo = _serie_x_est_jo(
+                                                coluna_calibrada_marcador_jo
+                                            ).loc[idx_marcador_jo]
+                                        elif estado_marcador_jo in df_jo_plot.columns:
+                                            x_marcador_jo = _serie_x_est_jo(
+                                                estado_marcador_jo
+                                            ).loc[idx_marcador_jo]
+                                    elif estado_marcador_jo in df_jo_plot.columns:
+                                        x_marcador_jo = _serie_x_est_jo(estado_marcador_jo).loc[idx_marcador_jo]
+
+                                    ax_jo.axhline(
+                                        y_marcador_jo,
+                                        color="red",
+                                        linestyle="--",
+                                        linewidth=1.4,
+                                        alpha=0.75,
+                                        zorder=1,
+                                        # label=f"Profundidade analisada ({y_marcador_jo:.2f} m)"
+                                    )
+                                    texto_marcador_jo = f"{y_marcador_jo:.2f} m"
+                                    if np.isfinite(x_marcador_jo):
+                                        unidade_marcador_jo = "psi" if str(modo_est_jo).startswith(
+                                            "Press") else "lb/gal"
+                                        texto_marcador_jo = (
+                                            # f"{texto_marcador_jo} | "
+                                            f"{estado_marcador_jo}: {x_marcador_jo:.2f} {unidade_marcador_jo}"
+                                        )
+                                        ax_jo.scatter(
+                                            [x_marcador_jo],
+                                            [y_marcador_jo],
+                                            color="red",
+                                            edgecolor="black",
+                                            linewidth=0.7,
+                                            s=58,
+                                            zorder=100,
+                                            label="Estado de Falha Selecionado"
+                                        )
+
+                                    offset_texto_marcador_jo = max((y_max_base - y_min_base) * 0.015, 10.0)
+                                    y_texto_marcador_jo = max(y_min_base, y_marcador_jo - offset_texto_marcador_jo)
+                                    ax_jo.text(
+                                        .99,
+                                        y_texto_marcador_jo + 40,
+                                        texto_marcador_jo,
+                                        transform=ax_jo.get_yaxis_transform(),
+                                        ha="right",
+                                        va="bottom",
+                                        fontsize=9,
+                                        color="black",
+                                        bbox=dict(
+                                            boxstyle="round,pad=0.25",
+                                            fc="white",
+                                            ec="black",
+                                            alpha=0.7
+                                        ),
+                                        zorder=86
+                                    )
+                            def _azimute_poco_est_jo():
+                                for df_azi in (
+                                        st.session_state.get("df2", None),
+                                        st.session_state.get("df_out_traj", None),
+                                        st.session_state.get("df_interp", None),
+                                        df_jo_plot
+                                ):
+                                    if not isinstance(df_azi, pd.DataFrame) or df_azi.empty:
+                                        continue
+                                    for col_azi in ("Azi", "Azi (°)", "Azimute", "Azimute (°)", "Azimuth"):
+                                        if col_azi in df_azi.columns:
+                                            serie_azi = pd.to_numeric(df_azi[col_azi], errors="coerce").dropna()
+                                            if not serie_azi.empty:
+                                                return _normalizar_angulo_360(float(serie_azi.iloc[-1]), np.nan)
+                                return np.nan
+                            try:
+                                prof_ref_tensoes = float(st.session_state.get("profundidade_mohr", y_vals[-1]))
+                                idx_tensoes = (
+                                        pd.to_numeric(df_est["Profundidade (m)"], errors="coerce") - prof_ref_tensoes
+                                ).abs().idxmin()
+                                linha_tensoes = df_est.loc[idx_tensoes]
+                                dir_shmax = _normalizar_angulo_360(linha_tensoes.get("Direção de SH (°)", np.nan), 0)
+                                dir_shmin = _normalizar_angulo_360(
+                                    linha_tensoes.get("Direção de Sh (°)", dir_shmax + 90), dir_shmax + 90)
+                                azimute_poco = _azimute_poco_est_jo()
+
+                                if st.session_state.get("rosa_jo_est", "Sim") == "Sim":
+                                    plotar_rosa_dos_ventos_inset_jo(
+                                        ax=ax_jo,
+                                        direcao_shmax=dir_shmax,
+                                        direcao_shmin=dir_shmin,
+                                        azimute_poco=azimute_poco,
+                                        posicao=(0.025, 0.828, 0.2, 0.2)
+                                    )
+
+                                if st.session_state.get("ctjo_est", "Sim") == "Sim":
+                                    prof_tensoes = float(linha_tensoes.get("Profundidade (m)", prof_ref_tensoes))
+                                    grad_sv = float(linha_tensoes.get("Gradiente de Sobrecarga (lb/gal)", np.nan))
+                                    sh_psi = float(linha_tensoes.get("SH (psi)", np.nan))
+                                    smin_psi = float(linha_tensoes.get("Sh (psi)", np.nan))
+                                    denom = 0.1704 * prof_tensoes * grad_sv
+                                    rel_shmax = sh_psi / denom if denom else np.nan
+                                    rel_shmin = smin_psi / denom if denom else np.nan
+
+                                    linhas_caixa = [
+                                        TextArea(
+                                            f"SH = {rel_shmax:.2f}·σv | Dir. SH = {dir_shmax:.1f}°",
+                                            textprops=dict(color="red", fontsize=9, fontweight="bold")
+                                        ),
+                                        TextArea(
+                                            f"Sh = {rel_shmin:.2f}·σv | Dir. Sh = {dir_shmin:.1f}°",
+                                            textprops=dict(color="green", fontsize=9, fontweight="bold")
+                                        )
+                                    ]
+                                    if pd.notna(azimute_poco):
+                                        linhas_caixa.append(
+                                            TextArea(
+                                                f"Azimute final do poço = {azimute_poco:.1f}°",
+                                                textprops=dict(color="black", fontsize=9, fontweight="bold")
+                                            )
+                                        )
+
+                                    caixa_texto = VPacker(children=linhas_caixa, align="right", pad=0, sep=2)
+                                    caixa_ancorada = AnchoredOffsetbox(
+                                        loc="upper right",
+                                        child=caixa_texto,
+                                        pad=0.25,
+                                        frameon=True,
+                                        bbox_to_anchor=(0.98, 0.99),
+                                        bbox_transform=ax_jo.transAxes,
+                                        borderpad=0.45
+                                    )
+                                    caixa_ancorada.patch.set_boxstyle("round,pad=0.35")
+                                    caixa_ancorada.patch.set_facecolor("white")
+                                    caixa_ancorada.patch.set_alpha(0.85)
+                                    caixa_ancorada.patch.set_edgecolor("black")
+                                    caixa_ancorada.set_zorder(20)
+                                    ax_jo.add_artist(caixa_ancorada)
+                            except Exception:
+                                pass
+
+                            x_min_jo = float(st.session_state.get("x_min_est_jo", padrao_x_min_est_jo))
+                            x_max_jo = float(st.session_state.get("x_max_est_jo", padrao_x_max_est_jo))
+                            x_step_jo = max(0.01, float(st.session_state.get("x_step_est_jo", padrao_x_step_est_jo)))
+                            y_min_jo = float(st.session_state.get("y_min_est_jo", padrao_y_min_est_jo))
+                            y_max_jo = float(st.session_state.get("y_max_est_jo", y_max_base))
+                            y_step_jo = max(0.01, float(st.session_state.get("y_step_est_jo", 200.0)))
+
+                            if x_max_jo <= x_min_jo:
+                                x_max_jo = x_min_jo + x_step_jo
+                            if y_max_jo <= y_min_jo:
+                                y_max_jo = y_min_jo + y_step_jo
+
+                            titulo_jo = "Janela Operacional (psi)" if modo_est_jo == "Pressão (psi)" else "Janela Operacional (lb/gal)"
+                            xlabel_jo = "Pressão (psi)" if modo_est_jo == "Pressão (psi)" else "Gradiente (lb/gal)"
+                            ax_jo.set_title(titulo_jo, fontsize=14, fontweight="bold")
+                            ax_jo.set_xlabel(xlabel_jo, fontsize=12)
+                            ax_jo.set_ylabel("Profundidade TVD (m)", fontsize=12)
+                            ax_jo.set_xlim(x_min_jo, x_max_jo)
+                            ax_jo.set_ylim(y_max_jo, y_min_jo)
+                            ax_lito.set_ylim(y_max_jo, y_min_jo)
+                            if usar_coluna_idade:
+                                ax_idade.set_ylim(y_max_jo, y_min_jo)
+                            y_ticks_jo = np.arange(y_min_jo, y_max_jo + y_step_jo * 0.001, y_step_jo)
+                            y_ticks_jo = y_ticks_jo[y_ticks_jo <= y_max_jo]
+                            ax_jo.set_yticks(y_ticks_jo)
+                            ax_jo.set_ylim(y_max_jo, y_min_jo)
+                            ax_lito.set_ylim(y_max_jo, y_min_jo)
+                            if usar_coluna_idade:
+                                ax_idade.set_ylim(y_max_jo, y_min_jo)
+                            ax_jo.tick_params(axis="y", which="both", left=True, labelleft=True)
+
+                            x_tick_ini_jo = math.ceil(x_min_jo)
+                            x_tick_fim_jo = math.floor(x_max_jo)
+                            x_tick_step_jo = max(1.0, x_step_jo)
+                            if x_tick_fim_jo >= x_tick_ini_jo:
+                                ax_jo.set_xticks(
+                                    np.arange(
+                                        x_tick_ini_jo,
+                                        x_tick_fim_jo + x_tick_step_jo * 0.5,
+                                        x_tick_step_jo
+                                    )
+                                )
+                            if np.isclose(x_step_jo, 1.0):
+                                ax_jo.set_xticks(
+                                    np.arange(x_min_jo, x_max_jo + 0.25, 0.5),
+                                    minor=True
+                                )
+
+                            ax_jo.xaxis.set_major_formatter(FuncFormatter(lambda valor, pos: f"{valor:.0f}"))
+                            ax_jo.grid(True, which="major", linestyle="--", alpha=0.5)
+                            if np.isclose(x_step_jo, 1.0):
+                                ax_jo.grid(True, which="minor", axis="x", linestyle="--", alpha=0.5)
+
+                            if st.session_state.get("leg_est_jo", "Não") == "Sim" and ax_jo.get_legend_handles_labels()[
+                                0]:
+                                pos_legenda_est_jo = st.session_state.get("pos_leg_est_jo", "Superior direito")
+                                loc_legenda_est_jo = legendas_est_jo.get(pos_legenda_est_jo, "upper right")
+                                fontsize_legenda_est_jo = int(st.session_state.get("fontsize_leg_est_jo", 8))
+                                kwargs_legenda_est_jo = {
+                                    "fontsize": fontsize_legenda_est_jo,
+                                    "frameon": True,
+                                    "shadow": True,
+                                    "fancybox": True,
+                                    "framealpha": 1,
+                                    "facecolor": "white",
+                                    "edgecolor": "gray",
+                                }
+                                if loc_legenda_est_jo == "custom":
+                                    kwargs_legenda_est_jo["loc"] = "center"
+                                    kwargs_legenda_est_jo["bbox_to_anchor"] = (
+                                        float(st.session_state.get("x_leg_est_jo", 0.98)),
+                                        float(st.session_state.get("y_leg_est_jo", 0.98)),
+                                    )
+                                    kwargs_legenda_est_jo["bbox_transform"] = ax_jo.transAxes
+                                else:
+                                    kwargs_legenda_est_jo["loc"] = loc_legenda_est_jo
+                                ax_jo.legend(**kwargs_legenda_est_jo)
+
+                            add_watermark(
+                                ax_jo,
+                                logo_path="logo_syga.png",
+                                xy=(0.50, 0.5),
+                                zoom=0.2,
+                                alpha=0.3,
+                                zorder=0
+                            )
+
+                            fig_jo.tight_layout()
+                            st.session_state.fig_jo = fig_jo
+                            st.pyplot(fig_jo)
+                            plt.close(fig_jo)
 
         with tab_tabela:
             st.markdown("### Tabela de dados calculados")
@@ -8359,25 +11470,30 @@ def pagina_estabilidade():
             prof_max_fratura = np.nan
 
         for chave, valor_padrao in (
-            ("lot_fratura", "Sim"),
-            ("auxiliar_fratura", "Não"),
-            ("ogf", "Gradiente (lb/gal)"),
-            ("gras", "Sim"),
-            ("grap", "Sim"),
-            ("janela_fratura", "Sim"),
-            ("mostrar_texto_lot_tabs4", "Sim"),
-            ("mostrar_texto_fit_tabs4", "Sim"),
-            ("x_min_f", 7.0),
-            ("x_max_f", 21.0),
-            ("x_step_f", 2.0),
-            ("y_min_f", 0.0),
-            ("y_max_f", float(int(prof_max_fratura) + 100) if pd.notna(prof_max_fratura) else 1000.0),
-            ("y_step_f", 200.0),
+                ("lot_fratura", "Sim"),
+                ("auxiliar_fratura", "Não"),
+                ("ogf", "Gradiente (lb/gal)"),
+                ("gras", "Sim"),
+                ("grap", "Sim"),
+                ("janela_fratura", "Sim"),
+                ("mostrar_texto_lot_tabs4", "Sim"),
+                ("mostrar_texto_fit_tabs4", "Sim"),
+                ("prof_inicio_curvas_f", 0.0),
+                ("x_min_f", 7.0),
+                ("x_max_f", 21.0),
+                ("x_step_f", 2.0),
+                ("x_min_k_f", 0.0),
+                ("x_max_k_f", 1.0),
+                ("x_step_k_f", 0.1),
+                ("y_min_f", 0.0),
+                ("y_max_f", float(int(prof_max_fratura) + 100) if pd.notna(prof_max_fratura) else 1000.0),
+                ("y_step_f", 200.0),
         ):
             if chave not in st.session_state:
                 st.session_state[chave] = valor_padrao
 
-        if "lot_pontos_fratura" not in st.session_state or not isinstance(st.session_state.lot_pontos_fratura, pd.DataFrame):
+        if "lot_pontos_fratura" not in st.session_state or not isinstance(st.session_state.lot_pontos_fratura,
+                                                                          pd.DataFrame):
             st.session_state.lot_pontos_fratura = _df_pontos_lot_padrao()
 
         with tab_dados:
@@ -8481,10 +11597,10 @@ def pagina_estabilidade():
 
                             with col_lot2:
                                 if st.button(
-                                    "Limpar LOT/FIT",
-                                    type="primary",
-                                    use_container_width=True,
-                                    key="btn_limpar_lot_fratura"
+                                        "Limpar LOT/FIT",
+                                        type="primary",
+                                        use_container_width=True,
+                                        key="btn_limpar_lot_fratura"
                                 ):
                                     st.session_state.lot_pontos_fratura = _df_pontos_lot_padrao()
                                     st.rerun()
@@ -8495,17 +11611,18 @@ def pagina_estabilidade():
 
                             if df_lots_yaml.empty:
                                 st.info("Nenhum LOT de poço próximo encontrado no YAML para o raio configurado.")
-                                pontos_lot_calibracao = pd.DataFrame(columns=["Tipo", "Profundidade (m)", "Peso Eq. (lb/gal)"])
+                                pontos_lot_calibracao = pd.DataFrame(
+                                    columns=["Tipo", "Profundidade (m)", "Peso Eq. (lb/gal)"])
                             else:
                                 st.dataframe(df_lots_yaml, use_container_width=True, hide_index=True)
                                 pontos_lot_calibracao = _converter_lots_yaml_para_fratura(df_lots_yaml)
                                 st.session_state.lot_pontos_yaml_fratura = pontos_lot_calibracao.copy()
 
                         if st.button(
-                            "Calibrar curva de K",
-                            type="primary",
-                            use_container_width=True,
-                            key="btn_calibrar_k_fratura"
+                                "Calibrar curva de K",
+                                type="primary",
+                                use_container_width=True,
+                                key="btn_calibrar_k_fratura"
                         ):
                             df_lot_calibrar = _normalizar_pontos_lot_fratura(pontos_lot_calibracao)
                             if st.session_state.get("lot_fratura", "Sim") == "Sim":
@@ -8560,10 +11677,10 @@ def pagina_estabilidade():
                             st.caption(f"Curva ajustada: profundidade = {a_k:.2f} * exp({b_k:.4f} * K)")
 
                         if st.button(
-                            "Calcular Gradiente de Fratura",
-                            type="primary",
-                            use_container_width=True,
-                            key="btn_calcular_gradiente_fratura"
+                                "Calcular Gradiente de Fratura",
+                                type="primary",
+                                use_container_width=True,
+                                key="btn_calcular_gradiente_fratura"
                         ):
                             df_f_calc = _calcular_df_f_fratura(df_pp, edited_gf_fratura)
 
@@ -8595,6 +11712,21 @@ def pagina_estabilidade():
                                 args=("ogf", "_w_ogf")
                             )
 
+                            preparar_widget_persistente(
+                                "prof_inicio_curvas_f",
+                                "_w_prof_inicio_curvas_f"
+                            )
+                            kwargs_prof_inicio_curvas = {
+                                "label": "Profundidade inicial das curvas (m)",
+                                "min_value": 0.0,
+                                "step": 100.0,
+                                "format": "%.2f",
+                                "key": "_w_prof_inicio_curvas_f",
+                                "on_change": salvar_widget_persistente,
+                                "args": ("prof_inicio_curvas_f", "_w_prof_inicio_curvas_f"),
+                            }
+                            st.number_input(**kwargs_prof_inicio_curvas)
+
                             col_cfg1, col_cfg2 = st.columns(2)
 
                             for idx, (chave, label) in enumerate(
@@ -8623,12 +11755,15 @@ def pagina_estabilidade():
 
                         with st.expander("***Eixos***", expanded=False):
                             for chave, label, step, min_value in (
-                                ("x_min_f", "Eixo X - mínimo", 0.5, None),
-                                ("x_max_f", "Eixo X - máximo", 0.5, None),
-                                ("x_step_f", "Passo do eixo X", 0.5, 0.01),
-                                ("y_min_f", "Eixo Y - mínimo", 100.0, None),
-                                ("y_max_f", "Eixo Y - máximo", 100.0, None),
-                                ("y_step_f", "Passo do eixo Y", 50.0, 0.01),
+                                    ("x_min_f", "Eixo X - mínimo", 0.5, None),
+                                    ("x_max_f", "Eixo X - máximo", 0.5, None),
+                                    ("x_step_f", "Passo do eixo X", 0.5, 0.01),
+                                    ("x_min_k_f", "Eixo X K - mínimo", 0.05, None),
+                                    ("x_max_k_f", "Eixo X K - máximo", 0.05, None),
+                                    ("x_step_k_f", "Passo do eixo X K", 0.05, 0.001),
+                                    ("y_min_f", "Eixo Y - mínimo", 100.0, None),
+                                    ("y_max_f", "Eixo Y - máximo", 100.0, None),
+                                    ("y_step_f", "Passo do eixo Y", 50.0, 0.01),
                             ):
                                 preparar_widget_persistente(chave, f"_w_{chave}")
                                 kwargs = {
@@ -8644,18 +11779,20 @@ def pagina_estabilidade():
                                 st.number_input(**kwargs)
 
                             if st.button(
-                                "Resetar Eixos - Gradiente de Fratura",
-                                type="primary",
-                                use_container_width=True,
-                                key="btn_reset_eixos_fratura"
+                                    "Resetar Eixos - Gradiente de Fratura",
+                                    type="primary",
+                                    use_container_width=True,
+                                    key="btn_reset_eixos_fratura"
                             ):
                                 if st.session_state.get("ogf", "Gradiente (lb/gal)") == "Pressão (psi)":
                                     st.session_state.x_min_f = 0.0
                                     max_pressao = pd.to_numeric(
-                                        st.session_state.get("df_f", pd.DataFrame()).get("Pressão de Fratura (psi)", pd.Series(dtype=float)),
+                                        st.session_state.get("df_f", pd.DataFrame()).get("Pressão de Fratura (psi)",
+                                                                                         pd.Series(dtype=float)),
                                         errors="coerce"
                                     ).max()
-                                    st.session_state.x_max_f = float(int(max_pressao) + 500) if pd.notna(max_pressao) else 5000.0
+                                    st.session_state.x_max_f = float(int(max_pressao) + 500) if pd.notna(
+                                        max_pressao) else 5000.0
                                     st.session_state.x_step_f = 500.0
                                 else:
                                     st.session_state.x_min_f = 7.0
@@ -8663,10 +11800,18 @@ def pagina_estabilidade():
                                     st.session_state.x_step_f = 2.0
 
                                 st.session_state.y_min_f = 0.0
-                                st.session_state.y_max_f = float(int(prof_max_fratura) + 100) if pd.notna(prof_max_fratura) else 1000.0
+                                st.session_state.y_max_f = float(int(prof_max_fratura) + 100) if pd.notna(
+                                    prof_max_fratura) else 1000.0
                                 st.session_state.y_step_f = 200.0
+                                st.session_state.x_min_k_f = 0.0
+                                st.session_state.x_max_k_f = 1.0
+                                st.session_state.x_step_k_f = 0.1
 
-                                for chave in ("x_min_f", "x_max_f", "x_step_f", "y_min_f", "y_max_f", "y_step_f"):
+                                for chave in (
+                                        "x_min_f", "x_max_f", "x_step_f",
+                                        "x_min_k_f", "x_max_k_f", "x_step_k_f",
+                                        "y_min_f", "y_max_f", "y_step_f"
+                                ):
                                     st.session_state[f"_w_{chave}"] = st.session_state[chave]
 
                                 st.rerun()
@@ -8683,81 +11828,14322 @@ def pagina_estabilidade():
                 st.info("Calcule o Gradiente de Fratura para visualizar a tabela.")
 
 
+def normalizar_texto_litologico(txt):
+    txt = str(txt).strip().lower()
+
+    trocas = {
+        "á": "a", "à": "a", "ã": "a", "â": "a",
+        "é": "e", "ê": "e",
+        "í": "i",
+        "ó": "o", "ô": "o", "õ": "o",
+        "ú": "u",
+        "ç": "c",
+    }
+
+    for antigo, novo in trocas.items():
+        txt = txt.replace(antigo, novo)
+
+    txt = " ".join(txt.split())
+    return txt
+
+
+def classificar_perm_nao_perm(valor):
+    txt = normalizar_texto_litologico(valor)
+
+    if (
+            "nao permeavel" in txt
+            or "nao-permeavel" in txt
+            or "impermeavel" in txt
+            or "folhelho" in txt
+            or "fm. nao permeavel" in txt
+            or "fm nao permeavel" in txt
+    ):
+        return "nao_permeavel"
+
+    if (
+            "permeavel" in txt
+            or "fm. permeavel" in txt
+            or "fm permeavel" in txt
+    ):
+        return "permeavel"
+
+    return "outro"
+
+
+def chegou_na_profundidade_final(prof, base_final=None, df_sapata=None, tol=0.5):
+    try:
+        if prof is None or pd.isna(prof):
+            return False
+
+        prof = float(prof)
+
+        if base_final is not None:
+            prof_final = float(base_final)
+
+        elif df_sapata is not None and isinstance(df_sapata, pd.DataFrame):
+            prof_final = pd.to_numeric(
+                df_sapata["Profundidade (m)"],
+                errors="coerce"
+            ).max()
+            prof_final = float(prof_final)
+
+        else:
+            return False
+
+        return prof >= prof_final - float(tol)
+
+    except Exception:
+        return False
+
+
+def encontrar_folhelho_acima_do_arenito(
+        prof_sapata,
+        profundidades=None,
+        litologias=None,
+        base_final=None,
+        margem=None
+):
+    """
+    Mantém o nome antigo para não quebrar chamadas existentes.
+
+    Nova lógica:
+    - usa st.session_state.df_perm_nao_perm;
+    - usa st.session_state.ef como espessura mínima da camada não permeável;
+    - verifica se a sapata caiu em Formação Permeável;
+    - verifica se caiu em Formação Não Permeável com espessura menor que ef;
+    - se houver problema, procura acima uma Formação Não Permeável com espessura >= ef;
+    - ajusta a sapata para base_da_formacao_nao_permeavel - ef.
+    """
+
+    try:
+        if prof_sapata is None or pd.isna(prof_sapata):
+            return None
+
+        prof_sapata = float(prof_sapata)
+
+        if chegou_na_profundidade_final(
+                prof_sapata,
+                base_final=base_final,
+                tol=0.5
+        ):
+            return None
+
+        if margem is None:
+            esp_min_nao_perm = float(st.session_state.get("ef", 10.0))
+        else:
+            esp_min_nao_perm = float(margem)
+
+        df_perm = st.session_state.get("df_perm_nao_perm", None)
+
+        if not isinstance(df_perm, pd.DataFrame) or df_perm.empty:
+            return None
+
+        col_topo = "Topo (m)"
+        col_base = "Base (m)"
+
+        if "Classificação" in df_perm.columns:
+            col_classe = "Classificação"
+        elif "Classificacao" in df_perm.columns:
+            col_classe = "Classificacao"
+        else:
+            return None
+
+        if col_topo not in df_perm.columns or col_base not in df_perm.columns:
+            return None
+
+        df_aux = df_perm[[col_topo, col_base, col_classe]].copy()
+
+        df_aux[col_topo] = pd.to_numeric(df_aux[col_topo], errors="coerce")
+        df_aux[col_base] = pd.to_numeric(df_aux[col_base], errors="coerce")
+
+        df_aux = df_aux.dropna(subset=[col_topo, col_base, col_classe])
+
+        if df_aux.empty:
+            return None
+
+        df_aux = df_aux.sort_values(col_topo).reset_index(drop=True)
+
+        df_aux["classe_norm"] = df_aux[col_classe].apply(classificar_perm_nao_perm)
+        df_aux["espessura"] = df_aux[col_base] - df_aux[col_topo]
+
+        mask_intervalo = (
+                (df_aux[col_topo] <= prof_sapata)
+                & (prof_sapata < df_aux[col_base])
+        )
+
+        if not mask_intervalo.any():
+            mask_intervalo = (
+                    (df_aux[col_topo] <= prof_sapata)
+                    & (prof_sapata <= df_aux[col_base])
+            )
+
+        if not mask_intervalo.any():
+            return None
+
+        idx_intervalo = mask_intervalo[mask_intervalo].index[0]
+        intervalo_sapata = df_aux.loc[idx_intervalo]
+
+        classe_sapata = intervalo_sapata["classe_norm"]
+        espessura_sapata = float(intervalo_sapata["espessura"])
+
+        intervalo_atual = {
+            "idx": int(idx_intervalo),
+            "topo": float(intervalo_sapata[col_topo]),
+            "base": float(intervalo_sapata[col_base]),
+            "espessura": espessura_sapata,
+            "classificacao": str(intervalo_sapata[col_classe]).strip(),
+            "classe_norm": classe_sapata,
+        }
+
+        precisa_avisar = False
+        motivo = None
+
+        if classe_sapata == "permeavel":
+            precisa_avisar = True
+            motivo = "formacao_permeavel"
+
+        elif classe_sapata == "nao_permeavel" and espessura_sapata < esp_min_nao_perm:
+            precisa_avisar = True
+            motivo = "nao_permeavel_espessura_insuficiente"
+
+        else:
+            return None
+
+        # Procura acima uma Formação Não Permeável com espessura mínima definida pelo usuário
+        for j in range(idx_intervalo - 1, -1, -1):
+            row = df_aux.loc[j]
+
+            if row["classe_norm"] != "nao_permeavel":
+                continue
+
+            topo_np = float(row[col_topo])
+            base_np = float(row[col_base])
+            espessura_np = float(row["espessura"])
+
+            if espessura_np < esp_min_nao_perm:
+                continue
+
+            prof_ajustada = base_np - esp_min_nao_perm
+
+            if prof_ajustada < topo_np:
+                continue
+
+            return {
+                "precisa_avisar": precisa_avisar,
+                "motivo": motivo,
+                "ajuste_disponivel": True,
+                "esp_min_nao_perm": float(esp_min_nao_perm),
+                "idx_nao_permeavel": int(j),
+                "topo_nao_permeavel": topo_np,
+                "base_nao_permeavel": base_np,
+                "espessura_nao_permeavel": espessura_np,
+                # Compatibilidade com o código antigo
+                "idx_folhelho": int(j),
+                "topo_folhelho": topo_np,
+                "base_folhelho": base_np,
+                "prof_ajustada": float(prof_ajustada),
+                "intervalo_atual": intervalo_atual,
+                # Compatibilidade com nomes antigos
+                "intervalo_arenito": intervalo_atual,
+                "intervalo_permeavel": intervalo_atual,
+            }
+
+        return {
+            "precisa_avisar": precisa_avisar,
+            "motivo": motivo,
+            "ajuste_disponivel": False,
+            "prof_ajustada": None,
+            "esp_min_nao_perm": float(esp_min_nao_perm),
+            "intervalo_atual": intervalo_atual,
+            # Compatibilidade
+            "intervalo_arenito": intervalo_atual,
+            "intervalo_permeavel": intervalo_atual,
+        }
+
+    except Exception as e:
+        st.error(f"Erro ao analisar Formação Permeável / Não Permeável: {e}")
+        return None
+
+
+@st.dialog("Sapata em Formação Permeável")
+def confirmar_ajuste_sapata_arenito():
+    pend = st.session_state.get("pendencia_ajuste_arenito", None)
+
+    if not pend:
+        st.warning("Nenhuma pendência de ajuste encontrada.")
+        return
+
+    nome_sapata = pend["nome_sapata"]
+    prof_original = float(pend["prof_original"])
+    decision_id = pend["decision_id"]
+
+    motivo = pend.get("motivo")
+    ajuste_disponivel = bool(pend.get("ajuste_disponivel", False))
+    prof_ajustada = pend.get("prof_ajustada", None)
+    intervalo_atual = pend.get("intervalo_atual", {})
+    esp_min_nao_perm = float(pend.get("esp_min_nao_perm", st.session_state.get("ef", 10.0)))
+
+    topo_atual = intervalo_atual.get("topo", None)
+    base_atual = intervalo_atual.get("base", None)
+    esp_atual = intervalo_atual.get("espessura", None)
+    classe_atual = intervalo_atual.get("classificacao", "Formação")
+
+    if motivo == "formacao_permeavel":
+        st.write(
+            f'{nome_sapata} ficou em uma Formação Permeável na profundidade de '
+            f'{prof_original:.2f} m.'
+        )
+
+    elif motivo == "nao_permeavel_espessura_insuficiente":
+        st.write(
+            f'{nome_sapata} ficou em uma Formação Não Permeável na profundidade de '
+            f'{prof_original:.2f} m, porém esse intervalo possui espessura menor que '
+            f'{esp_min_nao_perm:.2f} m.'
+        )
+
+    else:
+        st.write(
+            f'{nome_sapata} precisa de verificação litológica na profundidade de '
+            f'{prof_original:.2f} m.'
+        )
+
+    if topo_atual is not None and base_atual is not None and esp_atual is not None:
+        st.info(
+            f"Intervalo atual: {classe_atual} | "
+            f"Topo: {float(topo_atual):.2f} m | "
+            f"Base: {float(base_atual):.2f} m | "
+            f"Espessura: {float(esp_atual):.2f} m"
+        )
+
+    if ajuste_disponivel and prof_ajustada is not None:
+        prof_ajustada = float(prof_ajustada)
+
+        st.write(
+            f'Deseja assentar a sapata na Formação Não Permeável acima, '
+            f'em {prof_ajustada:.2f} m?'
+        )
+
+        c1, c2 = st.columns(2)
+
+        with c1:
+            if st.button(
+                    "Sim, ajustar",
+                    use_container_width=True,
+                    key=f"bt_confirma_ajuste_arenito_{decision_id}",
+                    type="primary"
+            ):
+                st.session_state.decisoes_ajuste_arenito[decision_id] = True
+                st.session_state.pendencia_ajuste_arenito = None
+                st.rerun()
+
+        with c2:
+            if st.button(
+                    "Não, manter",
+                    use_container_width=True,
+                    key=f"bt_ignora_ajuste_arenito_{decision_id}",
+                    type="primary"
+            ):
+                st.session_state.decisoes_ajuste_arenito[decision_id] = False
+                st.session_state.pendencia_ajuste_arenito = None
+                st.rerun()
+
+    else:
+        st.warning(
+            f"Não foi encontrada acima uma Formação Não Permeável com espessura mínima de "
+            f"{esp_min_nao_perm:.2f} m. "
+            "A sapata será mantida na profundidade calculada, mas deve ser revisada."
+        )
+
+        if st.button(
+                "Entendi, manter sapata",
+                use_container_width=True,
+                key=f"bt_sem_ajuste_arenito_{decision_id}",
+                type="primary"
+        ):
+            st.session_state.decisoes_ajuste_arenito[decision_id] = False
+            st.session_state.pendencia_ajuste_arenito = None
+            st.rerun()
+
+
+def calcular_bha(df_base, diametro_poco_m):
+    df_bha = pd.DataFrame(df_base).copy()
+
+    for col in ["Elemento do BHA", "OD (pol)", "Comprimento (m)"]:
+        if col not in df_bha.columns:
+            if col == "Elemento do BHA":
+                df_bha[col] = ""
+            else:
+                df_bha[col] = 0.0
+
+    df_bha["Elemento do BHA"] = df_bha["Elemento do BHA"].astype(str).fillna("")
+    df_bha["OD (pol)"] = pd.to_numeric(df_bha["OD (pol)"], errors="coerce").fillna(
+        0.0)
+    df_bha["Comprimento (m)"] = pd.to_numeric(
+        df_bha["Comprimento (m)"], errors="coerce"
+    ).fillna(0.0)
+
+    df_bha = df_bha.dropna(
+        subset=["Elemento do BHA", "OD (pol)", "Comprimento (m)"],
+        how="all"
+    ).copy()
+
+    df_bha["Elemento do BHA"] = df_bha["Elemento do BHA"].fillna("")
+    df_bha["OD (pol)"] = df_bha["OD (pol)"].fillna(0.0)
+    df_bha["Comprimento (m)"] = df_bha["Comprimento (m)"].fillna(0.0)
+
+    df_bha["OD (m)"] = df_bha["OD (pol)"] * 0.0254
+    df_bha["Comprimento Acumulado (m)"] = df_bha["Comprimento (m)"].cumsum()
+
+    df_bha["Cap. Anular (m3/m)"] = (math.pi / 4) * (
+            diametro_poco_m ** 2 - df_bha["OD (m)"] ** 2
+    )
+    df_bha["Cap. Anular (m3/m)"] = df_bha["Cap. Anular (m3/m)"].clip(lower=0)
+
+    df_bha["Vol. (m3)"] = df_bha["Cap. Anular (m3/m)"] * df_bha["Comprimento (m)"]
+    df_bha["Vol. Acum. (m3)"] = df_bha["Vol. (m3)"].cumsum()
+    df_bha["Vol. Acum. (bbl)"] = df_bha["Vol. Acum. (m3)"] * 6.28981
+
+    df_bha["Início do Trecho (m)"] = (
+            df_bha["Comprimento Acumulado (m)"] - df_bha["Comprimento (m)"]
+    )
+    df_bha["Fim do Trecho (m)"] = df_bha["Comprimento Acumulado (m)"]
+
+    return df_bha[
+        [
+            "Elemento do BHA",
+            "OD (pol)",
+            "OD (m)",
+            "Comprimento (m)",
+            "Comprimento Acumulado (m)",
+            "Início do Trecho (m)",
+            "Fim do Trecho (m)",
+            "Cap. Anular (m3/m)",
+            "Vol. (m3)",
+            "Vol. Acum. (m3)",
+            "Vol. Acum. (bbl)"
+        ]
+    ]
+
+
+def calcular_altura_kick_por_bha(df_bha_local, vk_bbl_local):
+    df_kick_local = df_bha_local.copy()
+
+    for col in [
+        "Comprimento (m)",
+        "Comprimento Acumulado (m)",
+        "Início do Trecho (m)",
+        "Fim do Trecho (m)",
+        "Cap. Anular (m3/m)",
+        "Vol. (m3)",
+        "Vol. Acum. (m3)",
+        "Vol. Acum. (bbl)"
+    ]:
+        if col in df_kick_local.columns:
+            df_kick_local[col] = pd.to_numeric(
+                df_kick_local[col], errors="coerce"
+            ).fillna(0.0)
+
+    vk_m3_local = float(vk_bbl_local) / 6.28981
+    volume_restante_local = vk_m3_local
+    altura_kick_local = 0.0
+    elemento_topo_kick_local = "Não definido"
+    intervalo_elemento_topo_kick_local = ""
+
+    for _, row in df_kick_local.iterrows():
+        cap = float(row["Cap. Anular (m3/m)"])
+        comp = float(row["Comprimento (m)"])
+        inicio = float(row["Início do Trecho (m)"])
+        fim = float(row["Fim do Trecho (m)"])
+        elem = str(row["Elemento do BHA"])
+
+        if cap <= 0 or comp <= 0:
+            continue
+
+        vol_trecho = cap * comp
+
+        if volume_restante_local <= vol_trecho:
+            altura_no_trecho = volume_restante_local / cap
+            altura_kick_local = inicio + altura_no_trecho
+            elemento_topo_kick_local = elem
+            intervalo_elemento_topo_kick_local = f"{inicio:.2f}–{fim:.2f} m"
+            volume_restante_local = 0.0
+            break
+        else:
+            volume_restante_local -= vol_trecho
+
+    if volume_restante_local > 1e-9:
+        altura_kick_local = float(df_kick_local["Comprimento Acumulado (m)"].max())
+        elemento_topo_kick_local = "Acima do último elemento do BHA"
+        intervalo_elemento_topo_kick_local = ""
+
+    return (
+        altura_kick_local,
+        elemento_topo_kick_local,
+        intervalo_elemento_topo_kick_local
+    )
+
+
+def sapata_repetida(bha, mapa_sapata_por_bha, sapatas_existentes):
+    return mapa_sapata_por_bha.get(bha, "") in sapatas_existentes
+
+
+def _asp_pol_para_float(valor):
+    """
+    Converte polegadas em texto ou número para float.
+
+    Exemplos:
+    '13 3/8"' -> 13.375
+    '9 5/8"'  -> 9.625
+    '17 1/2"' -> 17.5
+    12.25     -> 12.25
+    """
+    if valor is None or pd.isna(valor):
+        return np.nan
+
+    if isinstance(valor, (int, float, np.integer, np.floating)):
+        return float(valor)
+
+    s = str(valor).strip()
+    s = s.replace("Sapata", "")
+    s = s.replace('"', "")
+    s = s.replace("pol", "")
+    s = s.replace(",", ".")
+    s = re.sub(r"[^0-9/\.\s-]", "", s)
+    s = " ".join(s.split())
+
+    if not s:
+        return np.nan
+
+    try:
+        if " " in s and "/" in s:
+            inteiro, frac = s.split(" ", 1)
+            num, den = frac.split("/")
+            return float(inteiro) + float(num) / float(den)
+
+        if "/" in s:
+            num, den = s.split("/")
+            return float(num) / float(den)
+
+        return float(s)
+
+    except Exception:
+        return np.nan
+
+
+def _asp_fmt_pol(valor, max_denominador=16):
+    """
+    Formata polegadas em fração.
+
+    13.375 -> 13 3/8
+    9.625  -> 9 5/8
+    17.5   -> 17 1/2
+    """
+    if valor is None or pd.isna(valor):
+        return ""
+
+    valor = float(valor)
+    inteiro = int(valor)
+    decimal = valor - inteiro
+
+    if abs(decimal) < 1e-6:
+        return str(inteiro)
+
+    frac = Fraction(decimal).limit_denominator(max_denominador)
+
+    if frac.numerator == frac.denominator:
+        return str(inteiro + 1)
+
+    if inteiro == 0:
+        return f"{frac.numerator}/{frac.denominator}"
+
+    return f"{inteiro} {frac.numerator}/{frac.denominator}"
+
+
+def _asp_diam_fase_por_revestimento(diam_rev):
+    """
+    Estima o diâmetro da fase perfurada a partir do revestimento.
+    Usado para condutor e superfície, porque eles vêm de odrc/odrs.
+    """
+    mapa = {
+        30.0: 36.0,
+        20.0: 26.0,
+        13.375: 17.5,
+        9.625: 12.25,
+        7.0: 8.5,
+        5.5: 6.125,
+    }
+
+    if diam_rev is None or pd.isna(diam_rev):
+        return np.nan
+
+    diam_rev = float(diam_rev)
+
+    chave = min(mapa.keys(), key=lambda x: abs(x - diam_rev))
+
+    if abs(chave - diam_rev) <= 0.05:
+        return mapa[chave]
+
+    return diam_rev * 1.25
+
+
+def _asp_profundidade_final_poco():
+    """
+    Procura a profundidade final do poço nos dataframes já existentes do SYGA.
+    """
+    candidatos = []
+
+    for nome_df in ["df_sapata_kt", "df_suav", "df_pp", "df"]:
+        obj = st.session_state.get(nome_df, None)
+
+        if isinstance(obj, pd.DataFrame) and not obj.empty:
+            for col in ["Profundidade (m)", "Profundidade"]:
+                if col in obj.columns:
+                    prof = pd.to_numeric(obj[col], errors="coerce").dropna()
+                    if not prof.empty:
+                        candidatos.append(float(prof.max()))
+
+    if "y" in st.session_state:
+        try:
+            y = pd.to_numeric(pd.Series(st.session_state.y), errors="coerce").dropna()
+            if not y.empty:
+                candidatos.append(float(y.max()))
+        except Exception:
+            pass
+
+    if not candidatos:
+        return None
+
+    return max(candidatos)
+
+
+def _asp_preparar_dados(df):
+    df = df.copy()
+
+    colunas_necessarias = [
+        "fase",
+        "tipo_trecho",
+        "diam_furo",
+        "diam_rev",
+        "profundidade"
+    ]
+
+    for c in colunas_necessarias:
+        if c not in df.columns:
+            raise ValueError(f"Coluna ausente: {c}")
+
+    df["fase"] = df["fase"].astype(str)
+    df["tipo_trecho"] = df["tipo_trecho"].fillna("Revestido").astype(str)
+
+    for c in ["diam_furo", "diam_rev", "profundidade"]:
+        df[c] = pd.to_numeric(df[c], errors="coerce")
+
+    df = df.dropna(subset=["diam_furo", "profundidade"])
+    df = df[df["profundidade"] > 0].copy()
+
+    df = df.sort_values("profundidade").reset_index(drop=True)
+
+    if df.empty:
+        return df
+
+    tipo_norm = df["tipo_trecho"].str.lower().str.strip()
+    mask_aberto = tipo_norm == "poço aberto"
+
+    if mask_aberto.any():
+        if mask_aberto.sum() > 1:
+            raise ValueError("Só pode existir um trecho em poço aberto, e ele deve ser a última fase.")
+
+        if not bool(mask_aberto.iloc[-1]):
+            raise ValueError("O trecho em poço aberto só pode ser informado na última fase.")
+
+    df.loc[mask_aberto, "diam_rev"] = np.nan
+
+    mask_revestido = ~mask_aberto
+
+    if mask_revestido.any():
+        if df.loc[mask_revestido, "diam_rev"].isna().any():
+            raise ValueError("Todo trecho revestido precisa ter diâmetro de revestimento.")
+
+    profundidades = df["profundidade"].to_numpy(dtype=float)
+
+    if len(profundidades) > 1 and not np.all(np.diff(profundidades) > 0):
+        raise ValueError("As profundidades devem estar em ordem estritamente crescente.")
+
+    topo = [0.0]
+
+    for i in range(1, len(df)):
+        topo.append(float(df.loc[i - 1, "profundidade"]))
+
+    df["topo_intervalo"] = topo
+    df["base_intervalo"] = df["profundidade"]
+
+    return df
+
+
+def _asp_montar_df_esquematico_kt():
+    """
+    Monta automaticamente o dataframe do esquemático usando como fonte principal
+    as mesmas sapatas plotadas no gráfico de Kick Tolerance.
+
+    Fonte de verdade:
+    - st.session_state.sapatas_plot_kt
+
+    Regra:
+    - Se a sapata aparece no gráfico de KT, aparece no esquemático.
+    - Se não aparece no gráfico de KT, não é adicionada manualmente aqui.
+    - O trecho de poço aberto é criado apenas do último revestimento até o final do perfil.
+    """
+
+    rows = []
+
+    mapa_sapata_por_bha = {
+        '17 1/2"': '13 3/8"',
+        '12 1/4"': '9 5/8"',
+        '8 1/2"': '7"',
+        '6 1/8"': '5 1/2"',
+    }
+
+    mapa_rev_para_bha_aberto = {
+        30.0: '26"',
+        20.0: '17 1/2"',
+        13.375: '12 1/4"',
+        9.625: '8 1/2"',
+        7.0: '6 1/8"',
+        5.5: None,
+    }
+    def add_revestido(nome_fase, diam_furo, diam_rev, prof):
+        diam_furo = _asp_pol_para_float(diam_furo)
+        diam_rev = _asp_pol_para_float(diam_rev)
+
+        if prof is None or pd.isna(prof):
+            return
+
+        prof = float(prof)
+
+        if prof <= 0:
+            return
+
+        if pd.isna(diam_furo) or pd.isna(diam_rev):
+            return
+
+        rows.append({
+            "fase": nome_fase,
+            "tipo_trecho": "Revestido",
+            "diam_furo": float(diam_furo),
+            "diam_rev": float(diam_rev),
+            "profundidade": prof,
+        })
+    def add_poco_aberto(nome_fase, diam_furo, prof):
+        diam_furo = _asp_pol_para_float(diam_furo)
+
+        if prof is None or pd.isna(prof):
+            return
+
+        prof = float(prof)
+
+        if prof <= 0 or pd.isna(diam_furo):
+            return
+
+        rows.append({
+            "fase": nome_fase,
+            "tipo_trecho": "Poço aberto",
+            "diam_furo": float(diam_furo),
+            "diam_rev": np.nan,
+            "profundidade": prof,
+        })
+    def inferir_bha_aberto_por_ultimo_revestimento(df_auto_local):
+        if df_auto_local.empty or "diam_rev" not in df_auto_local.columns:
+            return None
+
+        df_rev_local = df_auto_local.dropna(subset=["diam_rev"]).copy()
+
+        if df_rev_local.empty:
+            return None
+
+        df_rev_local = (
+            df_rev_local
+            .sort_values("profundidade")
+            .reset_index(drop=True)
+        )
+
+        ultimo_rev = float(df_rev_local.iloc[-1]["diam_rev"])
+
+        chave = min(
+            mapa_rev_para_bha_aberto.keys(),
+            key=lambda x: abs(x - ultimo_rev)
+        )
+
+        if abs(chave - ultimo_rev) <= 0.05:
+            return mapa_rev_para_bha_aberto[chave]
+
+        return None
+    def inferir_diametros_da_sapata(sapata):
+        nome = str(sapata.get("nome", ""))
+        tipo = str(sapata.get("tipo", "")).lower().strip()
+        bha = sapata.get("bha", None)
+
+        diam_rev = _asp_pol_para_float(nome)
+
+        if pd.isna(diam_rev):
+            if "condutor" in tipo or "condutor" in nome.lower():
+                diam_rev = _asp_pol_para_float(st.session_state.get("odrc", None))
+
+            elif "superficie" in tipo or "superfície" in tipo or "superfície" in nome.lower():
+                diam_rev = _asp_pol_para_float(st.session_state.get("odrs", None))
+
+        if pd.isna(diam_rev) and bha in mapa_sapata_por_bha:
+            diam_rev = _asp_pol_para_float(mapa_sapata_por_bha[bha])
+
+        diam_furo = _asp_pol_para_float(bha)
+
+        if pd.isna(diam_furo) and not pd.isna(diam_rev):
+            diam_furo = _asp_diam_fase_por_revestimento(diam_rev)
+
+        return diam_furo, diam_rev
+    # ======================================================
+    # Fonte principal: mesmas sapatas usadas no gráfico do KT
+    # ======================================================
+    sapatas_plot = st.session_state.get("sapatas_plot_kt", [])
+
+    if not isinstance(sapatas_plot, list):
+        sapatas_plot = []
+
+    for sapata in sapatas_plot:
+        try:
+            prof = sapata.get("prof", None)
+        except AttributeError:
+            continue
+
+        if prof is None or pd.isna(prof):
+            continue
+
+        prof = float(prof)
+
+        diam_furo, diam_rev = inferir_diametros_da_sapata(sapata)
+
+        if pd.isna(diam_furo) or pd.isna(diam_rev):
+            continue
+
+        add_revestido(
+            nome_fase=f"Fase {len(rows)}",
+            diam_furo=diam_furo,
+            diam_rev=diam_rev,
+            prof=prof
+        )
+
+    df_auto = pd.DataFrame(rows)
+
+    if df_auto.empty:
+        return df_auto
+
+    df_auto = (
+        df_auto
+        .sort_values("profundidade")
+        .drop_duplicates(subset=["profundidade"], keep="first")
+        .reset_index(drop=True)
+    )
+
+    df_auto["fase"] = [f"Fase {i}" for i in range(len(df_auto))]
+
+    # ======================================================
+    # Poço aberto final
+    # ======================================================
+    prof_final = _asp_profundidade_final_poco()
+
+    if prof_final is not None and not df_auto.empty:
+        prof_final = float(prof_final)
+        prof_ultima_sapata = float(df_auto["profundidade"].max())
+
+        if prof_final > prof_ultima_sapata:
+            bha_aberto = inferir_bha_aberto_por_ultimo_revestimento(df_auto)
+
+            if bha_aberto is None:
+                curvas_kt = st.session_state.get("curvas_kt_plot", [])
+
+                if not curvas_kt:
+                    curvas_kt = st.session_state.get("curvas_kt_b2c", [])
+
+                if curvas_kt:
+                    bha_aberto = curvas_kt[-1].get("bha", None)
+
+            add_poco_aberto(
+                nome_fase=f"Fase {len(df_auto)}",
+                diam_furo=bha_aberto,
+                prof=prof_final
+            )
+
+    df_auto = pd.DataFrame(rows)
+
+    if df_auto.empty:
+        return df_auto
+
+    df_auto = (
+        df_auto
+        .sort_values("profundidade")
+        .reset_index(drop=True)
+    )
+
+    df_auto["fase"] = [f"Fase {i}" for i in range(len(df_auto))]
+
+    return df_auto
+
+
+def _asp_desenhar_cabecote(ax, x_lim, h_top):
+    mesa_larg = x_lim * 1.20
+    mesa_alt = h_top * 0.12
+
+    mesa = Rectangle(
+        (-mesa_larg / 2, -mesa_alt * 0.20),
+        mesa_larg,
+        mesa_alt,
+        facecolor="#d9d9d9",
+        edgecolor="black",
+        linewidth=1.2,
+        hatch="//////",
+        zorder=20
+    )
+    ax.add_patch(mesa)
+
+    n = 140
+    xs = np.linspace(-mesa_larg / 2, mesa_larg / 2, n)
+
+    for x in xs:
+        y0 = -mesa_alt * 0.20
+        y1 = y0 - np.random.uniform(h_top * 0.01, h_top * 0.045)
+        ax.plot([x, x], [y0, y1], color="#77b255", lw=1.5, zorder=19)
+
+    y0 = -h_top * 0.15
+    larguras = [x_lim * 0.42, x_lim * 0.36, x_lim * 0.28, x_lim * 0.20]
+    alturas = [h_top * 0.09, h_top * 0.08, h_top * 0.08, h_top * 0.07]
+    offsets = [0.00, -h_top * 0.08, -h_top * 0.16, -h_top * 0.23]
+
+    for w, h, off in zip(larguras, alturas, offsets):
+        ax.add_patch(
+            Rectangle(
+                (-w / 2, y0 + off),
+                w,
+                h,
+                facecolor="red",
+                edgecolor="black",
+                linewidth=1.1,
+                zorder=21
+            )
+        )
+
+    for side in [-1, 1]:
+        for yy in [y0 - h_top * 0.08, y0]:
+            ax.add_patch(
+                Rectangle(
+                    (side * x_lim * 0.12 - x_lim * 0.02, yy + h_top * 0.025),
+                    x_lim * 0.04,
+                    h_top * 0.02,
+                    facecolor="black",
+                    edgecolor="black",
+                    zorder=22
+                )
+            )
+
+
+def _asp_desenhar_cabecote_offshore(ax, x_lim, h_top, y_agua=None, y_leito=None):
+    y_mesa = -h_top * 0.18
+    mesa_larg = x_lim * 1.45
+    mesa_alt = h_top * 0.08
+
+    if y_agua is None:
+        y_agua = y_mesa + mesa_alt + h_top * 0.22
+
+    if y_leito is None:
+        y_leito = y_agua + h_top * 0.38
+
+    lamina = max(float(y_leito) - float(y_agua), h_top * 0.08)
+
+    # Convés / plataforma
+    ax.add_patch(Rectangle(
+        (-mesa_larg / 2, y_mesa),
+        mesa_larg,
+        mesa_alt,
+        facecolor="#c9d1d9",
+        edgecolor="black",
+        linewidth=1.2,
+        hatch="///",
+        zorder=25
+    ))
+
+    # Pernas da plataforma
+    perna_larg = x_lim * 0.08
+    perna_alt = h_top * 0.42
+
+    for x in [-x_lim * 0.32, x_lim * 0.32]:
+        ax.add_patch(Rectangle(
+            (x - perna_larg / 2, y_mesa + mesa_alt),
+            perna_larg,
+            perna_alt,
+            facecolor="#9aa6b2",
+            edgecolor="black",
+            linewidth=0.9,
+            zorder=22
+        ))
+
+    # Linha d'água
+    y_agua = y_mesa + mesa_alt + h_top * 0.22
+    x_cenario_ini = -x_lim * 1.35
+    x_cenario_fim = x_lim * 1.20
+
+    xs = np.linspace(x_cenario_ini, x_cenario_fim, 180)
+    ys = y_agua + h_top * 0.012 * np.sin(xs * 12)
+
+    ax.plot(
+        xs,
+        ys,
+        color="#0077b6",
+        linewidth=1.8,
+        alpha=0.9,
+        zorder=24
+    )
+
+    ax.fill_between(
+        xs,
+        ys,
+        y_leito,
+        color="#8bd3f7",
+        alpha=0.35,
+        zorder=1
+    )
+
+    # Anotação da lâmina d'água
+    lda = st.session_state.get("lda", y_leito - y_agua)
+
+    try:
+        lda = float(lda)
+    except Exception:
+        lda = y_leito - y_agua
+
+    x_min_plot = -x_lim * 1.38
+    x_lda = x_min_plot + x_lim * 0.18
+    x_texto_lda = x_lda + x_lim * 0.08
+    y_meio_lda = (y_agua + y_leito) / 2
+
+    ax.annotate(
+        "",
+        xy=(x_lda, y_agua),
+        xytext=(x_lda, y_leito),
+        arrowprops=dict(
+            arrowstyle="<->",
+            color="black",
+            lw=1.4
+        ),
+        zorder=34
+    )
+
+    ax.text(
+        x_texto_lda,
+        y_meio_lda,
+        f"Lâmina d'água: {lda:.1f} m",
+        ha="left",
+        va="center",
+        fontsize=10,
+        fontweight="bold",
+        color="black",
+        bbox=dict(
+            facecolor="white",
+            edgecolor="black",
+            boxstyle="round,pad=0.25",
+            alpha=0.9
+        ),
+        zorder=35
+    )
+
+    ax.plot(
+        [x_cenario_ini, x_cenario_fim],
+        [y_leito, y_leito],
+        color="#5c4033",
+        linewidth=1.8,
+        zorder=23
+    )
+
+    from matplotlib.colors import LinearSegmentedColormap
+    prof_solo = max(h_top * 1.1, lamina * 0.5)
+
+    cmap_solo = LinearSegmentedColormap.from_list(
+        "gradiente_solo",
+        ["#d8c3a5", "#ffffff"]
+    )
+
+    gradiente = np.linspace(0, 1, 256).reshape(256, 1)
+
+    ax.imshow(
+        gradiente,
+        extent=[
+            x_cenario_ini,
+            x_cenario_fim,
+            y_leito + prof_solo,
+            y_leito
+        ],
+        cmap=cmap_solo,
+        aspect="auto",
+        zorder=1,
+        alpha=0.75
+    )
+
+    # Cabeçote/subsea tree simplificado
+    larguras = [x_lim * 0.36, x_lim * 0.28, x_lim * 0.20]
+    alturas = [h_top * 0.07, h_top * 0.06, h_top * 0.06]
+    offsets = [0.0, h_top * 0.065, h_top * 0.12]
+
+    base_relativa_cabecote = max(
+        off + altura
+        for off, altura in zip(offsets, alturas)
+    )
+
+    y0 = y_leito - base_relativa_cabecote
+
+    for w, h, off in zip(larguras, alturas, offsets):
+        ax.add_patch(Rectangle(
+            (-w / 2, y0 + off),
+            w,
+            h,
+            facecolor="#b00020",
+            edgecolor="black",
+            linewidth=1.0,
+            zorder=26
+        ))
+
+    # Riser / condutor até o poço
+    ax.add_patch(Rectangle(
+        (-x_lim * 0.055, y_mesa + mesa_alt),
+        x_lim * 0.11,
+        y_leito - (y_mesa + mesa_alt),
+        facecolor="#6c757d",
+        edgecolor="black",
+        linewidth=0.8,
+        zorder=21
+    ))
+
+
+def _asp_desenhar_gradiente_solo_onshore(ax, x_lim, h_top, y_solo=0.0):
+    from matplotlib.colors import LinearSegmentedColormap
+    x_cenario_ini = -x_lim * 1.35
+    x_cenario_fim = x_lim * 1.20
+    prof_solo = max(h_top * 1.1, h_top * 0.5)
+
+    cmap_solo = LinearSegmentedColormap.from_list(
+        "gradiente_solo_onshore",
+        ["#d8c3a5", "#ffffff"]
+    )
+
+    gradiente = np.linspace(0, 1, 256).reshape(256, 1)
+
+    ax.imshow(
+        gradiente,
+        extent=[
+            x_cenario_ini,
+            x_cenario_fim,
+            y_solo + prof_solo,
+            y_solo
+        ],
+        cmap=cmap_solo,
+        aspect="auto",
+        zorder=1,
+        alpha=0.75
+    )
+
+    ax.plot(
+        [x_cenario_ini, x_cenario_fim],
+        [y_solo, y_solo],
+        color="#5c4033",
+        linewidth=1.8,
+        zorder=23
+    )
+
+
+def _asp_desenhar_sapata(ax, x_left, x_right, parede, y, dx, dy):
+    """
+    Sapata com base na profundidade correta e ponta para cima.
+    """
+    pol_esq = Polygon(
+        [
+            [x_left - dx, y],
+            [x_left + parede, y],
+            [x_left, y - dy],
+        ],
+        closed=True,
+        facecolor="black",
+        edgecolor="black",
+        zorder=15
+    )
+
+    pol_dir = Polygon(
+        [
+            [x_right - parede, y],
+            [x_right + dx, y],
+            [x_right, y - dy],
+        ],
+        closed=True,
+        facecolor="black",
+        edgecolor="black",
+        zorder=15
+    )
+
+    ax.add_patch(pol_esq)
+    ax.add_patch(pol_dir)
+
+
+def _asp_plotar_esquematico(df):
+    df = _asp_preparar_dados(df)
+    def _asp_md_por_tvd(tvd):
+        df_ref = st.session_state.get("df_out_traj", None)
+
+        if not isinstance(df_ref, pd.DataFrame) or df_ref.empty:
+            df_ref = st.session_state.get("df2", None)
+
+        if not isinstance(df_ref, pd.DataFrame) or df_ref.empty:
+            return np.nan
+
+        if "MD" not in df_ref.columns or "TVD" not in df_ref.columns:
+            return np.nan
+
+        base_ref = df_ref[["MD", "TVD"]].copy()
+        base_ref["MD"] = pd.to_numeric(base_ref["MD"], errors="coerce")
+        base_ref["TVD"] = pd.to_numeric(base_ref["TVD"], errors="coerce")
+
+        base_ref = (
+            base_ref
+            .dropna(subset=["MD", "TVD"])
+            .sort_values("TVD")
+            .drop_duplicates(subset=["TVD"], keep="last")
+        )
+
+        if base_ref.empty:
+            return np.nan
+
+        return float(np.interp(
+            float(tvd),
+            base_ref["TVD"],
+            base_ref["MD"]
+        ))
+    def _asp_tvd_por_md(md):
+        df_ref = st.session_state.get("df_out_traj", None)
+
+        if not isinstance(df_ref, pd.DataFrame) or df_ref.empty:
+            df_ref = st.session_state.get("df2", None)
+
+        if not isinstance(df_ref, pd.DataFrame) or df_ref.empty:
+            return np.nan
+
+        if "MD" not in df_ref.columns or "TVD" not in df_ref.columns:
+            return np.nan
+
+        base_ref = df_ref[["MD", "TVD"]].copy()
+        base_ref["MD"] = pd.to_numeric(base_ref["MD"], errors="coerce")
+        base_ref["TVD"] = pd.to_numeric(base_ref["TVD"], errors="coerce")
+
+        base_ref = (
+            base_ref
+            .dropna(subset=["MD", "TVD"])
+            .sort_values("MD")
+            .drop_duplicates(subset=["MD"], keep="last")
+        )
+
+        if base_ref.empty:
+            return np.nan
+
+        return float(np.interp(
+            float(md),
+            base_ref["MD"],
+            base_ref["TVD"]
+        ))
+    if df.empty:
+        return None, None
+    def _asp_md_inicio_horizontal():
+        df_ref = st.session_state.get("df_out_traj", None)
+
+        if not isinstance(df_ref, pd.DataFrame) or df_ref.empty:
+            df_ref = st.session_state.get("df2", None)
+
+        if not isinstance(df_ref, pd.DataFrame) or df_ref.empty:
+            return np.nan
+
+        if "MD" not in df_ref.columns:
+            return np.nan
+
+        if "Inclinação (°)" in df_ref.columns:
+            inc_col = "Inclinação (°)"
+        elif "Inc" in df_ref.columns:
+            inc_col = "Inc"
+        else:
+            return np.nan
+
+        base_ref = df_ref[["MD", inc_col]].copy()
+        base_ref["MD"] = pd.to_numeric(base_ref["MD"], errors="coerce")
+        base_ref[inc_col] = pd.to_numeric(base_ref[inc_col], errors="coerce")
+
+        base_ref = (
+            base_ref
+            .dropna(subset=["MD", inc_col])
+            .sort_values("MD")
+            .reset_index(drop=True)
+        )
+
+        if base_ref.empty:
+            return np.nan
+
+        inc = base_ref[inc_col].to_numpy(dtype=float)
+        md = base_ref["MD"].to_numpy(dtype=float)
+
+        idx_90 = np.where(inc >= 90.0)[0]
+
+        if len(idx_90) == 0:
+            return np.nan
+
+        i = int(idx_90[0])
+
+        if i == 0:
+            return float(md[0])
+
+        return float(np.interp(
+            90.0,
+            [inc[i - 1], inc[i]],
+            [md[i - 1], md[i]]
+        ))
+    parede_padrao = 0.45
+
+    prof_final = float(df["base_intervalo"].max())
+    diam_max = float(df["diam_furo"].max())
+
+    tipo_norm = df["tipo_trecho"].str.lower().str.strip()
+
+    df_revestido = df[tipo_norm != "poço aberto"].copy()
+
+    ultima_eh_poco_aberto = tipo_norm.iloc[-1] == "poço aberto"
+
+    if ultima_eh_poco_aberto:
+        df_aberto = df.tail(1).copy()
+    else:
+        df_aberto = df.iloc[0:0].copy()
+
+    x_lim = diam_max * 0.95
+    h_top = max(120.0, prof_final * 0.12)
+
+    is_onshore = st.session_state.get("tipo_poco", "Onshore") == "Onshore"
+    def _asp_session_float(chave, padrao=0.0):
+        valor = st.session_state.get(chave, padrao)
+        try:
+            if valor is None or pd.isna(valor):
+                return float(padrao)
+            return float(valor)
+        except Exception:
+            return float(padrao)
+    y_agua = _asp_session_float("rtkb")
+    y_leito = y_agua + _asp_session_float("lda")
+    topo_operacional = 0.0 if is_onshore else y_leito
+    def _asp_topo_visual(topo):
+        return max(float(topo), topo_operacional)
+    fig = plt.figure(figsize=(8, 10.4))
+    ax = fig.add_subplot(111)
+
+    fig.patch.set_facecolor("white")
+    ax.set_facecolor("white")
+
+    cor_interna = "#b8d5e5"
+    cor_cimento = "#a6a6a6"
+    cor_furo = "#d9d9d9"
+    cor_poco_aberto = "#d8c3a5"
+
+    # Marca d'água, se a função existir no teu código
+    try:
+        add_watermark(
+            ax,
+            logo_path="logo2.png",
+            xy=(0.22, 0.13),
+            zoom=0.16,
+            alpha=1,
+            zorder=0.5
+        )
+    except Exception:
+        pass
+
+    # 1) Cabeçote
+    if is_onshore:
+        _asp_desenhar_gradiente_solo_onshore(ax, x_lim, h_top, y_solo=0.0)
+        _asp_desenhar_cabecote(ax, x_lim, h_top)
+    else:
+        _asp_desenhar_cabecote_offshore(
+            ax,
+            x_lim,
+            h_top,
+            y_agua=y_agua,
+            y_leito=y_leito
+        )
+
+    # 2) Hatch/fundo apenas no poço aberto
+    for _, row in df_aberto.iterrows():
+        topo_aberto = float(row["topo_intervalo"])
+        base_aberto = float(row["base_intervalo"])
+        diam_furo = float(row["diam_furo"])
+
+        ax.add_patch(
+            Rectangle(
+                (-diam_furo / 2, topo_aberto),
+                diam_furo,
+                base_aberto - topo_aberto,
+                facecolor=cor_poco_aberto,
+                edgecolor="black",
+                linewidth=0.0,
+                hatch=".",
+                zorder=1
+            )
+        )
+
+    # 3) Cimento dos trechos revestidos
+    if not df_revestido.empty:
+        df_cimento = df_revestido.sort_values("base_intervalo").reset_index(drop=True)
+
+        for i, row in df_cimento.iterrows():
+            sapata = float(row["base_intervalo"])
+            diam_rev = float(row["diam_rev"])
+
+            topo_cimento = topo_operacional
+            altura_cimento = sapata - topo_cimento
+
+            if altura_cimento <= 0:
+                continue
+
+            x_left_rev_ext = -diam_rev / 2
+            x_right_rev_ext = diam_rev / 2
+
+            if i == 0:
+                diam_furo = float(row["diam_furo"])
+                x_left_lim = -diam_furo / 2
+                x_right_lim = diam_furo / 2
+            else:
+                diam_rev_anterior = float(df_cimento.loc[i - 1, "diam_rev"])
+                x_left_lim = -diam_rev_anterior / 2 + parede_padrao
+                x_right_lim = diam_rev_anterior / 2 - parede_padrao
+
+            if x_left_rev_ext > x_left_lim:
+                ax.add_patch(
+                    Rectangle(
+                        (x_left_lim, topo_cimento),
+                        x_left_rev_ext - x_left_lim,
+                        altura_cimento,
+                        facecolor=cor_cimento,
+                        edgecolor="none",
+                        alpha=0.95,
+                        zorder=2
+                    )
+                )
+
+            if x_right_lim > x_right_rev_ext:
+                ax.add_patch(
+                    Rectangle(
+                        (x_right_rev_ext, topo_cimento),
+                        x_right_lim - x_right_rev_ext,
+                        altura_cimento,
+                        facecolor=cor_cimento,
+                        edgecolor="none",
+                        alpha=0.95,
+                        zorder=2
+                    )
+                )
+
+    # 4) Revestimentos e sapatas
+    dy_sapata = max(8.0, prof_final * 0.008)
+    dx_sapata = max(0.6, diam_max * 0.06)
+
+    if not df_revestido.empty:
+        df_rev_plot = df_revestido.sort_values(
+            "diam_rev",
+            ascending=False
+        ).reset_index(drop=True)
+
+        for _, row in df_rev_plot.iterrows():
+            diam_rev = float(row["diam_rev"])
+            sapata = float(row["base_intervalo"])
+
+            x_left = -diam_rev / 2
+            x_right = diam_rev / 2
+            parede = parede_padrao
+
+            topo_revestimento = topo_operacional
+            altura_revestimento = sapata - topo_revestimento
+
+            if altura_revestimento <= 0:
+                continue
+
+            ax.add_patch(
+                Rectangle(
+                    (x_left, topo_revestimento),
+                    parede,
+                    altura_revestimento,
+                    facecolor="black",
+                    edgecolor="black",
+                    linewidth=0.8,
+                    zorder=10
+                )
+            )
+
+            ax.add_patch(
+                Rectangle(
+                    (x_right - parede, topo_revestimento),
+                    parede,
+                    altura_revestimento,
+                    facecolor="black",
+                    edgecolor="black",
+                    linewidth=0.8,
+                    zorder=10
+                )
+            )
+
+            _asp_desenhar_sapata(
+                ax=ax,
+                x_left=x_left,
+                x_right=x_right,
+                parede=parede,
+                y=sapata,
+                dx=dx_sapata,
+                dy=dy_sapata
+            )
+
+            texto = f'Sapata {_asp_fmt_pol(diam_rev)}"'
+
+            ax.annotate(
+                texto,
+                xy=(x_left - dx_sapata * 0.15, sapata),
+                xytext=(-x_lim * 0.72, sapata),
+                ha="right",
+                va="center",
+                fontsize=11,
+                fontweight="bold",
+                arrowprops=dict(
+                    arrowstyle="-",
+                    linestyle=(0, (8, 4)),
+                    color="black",
+                    lw=1.0
+                ),
+                zorder=30
+            )
+
+    # 5) Borda do poço aberto sem linha no topo
+    for _, row in df_aberto.iterrows():
+        topo_aberto = float(row["topo_intervalo"])
+        base_aberto = float(row["base_intervalo"])
+        diam_furo = float(row["diam_furo"])
+
+        topo_visual = _asp_topo_visual(topo_aberto)
+
+        if base_aberto <= topo_visual:
+            continue
+
+        x_left = -diam_furo / 2
+        x_right = diam_furo / 2
+
+        ax.plot(
+            [x_left, x_left],
+            [topo_aberto, base_aberto],
+            color="black",
+            linewidth=1.0,
+            zorder=11
+        )
+
+        ax.plot(
+            [x_right, x_right],
+            [topo_aberto, base_aberto],
+            color="black",
+            linewidth=1.0,
+            zorder=11
+        )
+
+        ax.plot(
+            [x_left, x_right],
+            [base_aberto, base_aberto],
+            color="black",
+            linewidth=1.0,
+            zorder=11
+        )
+
+    # 6) Azul apenas dentro do último revestimento
+    if not df_revestido.empty:
+        ultimo_rev = df_revestido.sort_values("base_intervalo").iloc[-1]
+
+        diam_rev = float(ultimo_rev["diam_rev"])
+        sapata = float(ultimo_rev["base_intervalo"])
+
+        x_left = -diam_rev / 2
+        largura_interna = max(diam_rev - 2 * parede_padrao, 0.05)
+
+        altura_fluido = sapata - topo_operacional
+
+        if altura_fluido > 0:
+            ax.add_patch(
+                Rectangle(
+                    (x_left + parede_padrao, topo_operacional),
+                    largura_interna,
+                    altura_fluido,
+                    facecolor=cor_interna,
+                    edgecolor="none",
+                    zorder=4
+                )
+            )
+
+    # 7) Azul dentro do poço aberto
+    for _, row in df_aberto.iterrows():
+        topo_aberto = float(row["topo_intervalo"])
+        base_aberto = float(row["base_intervalo"])
+        diam_furo = float(row["diam_furo"])
+
+        diam_aberto_interno = diam_furo * 0.52
+
+        ax.add_patch(
+            Rectangle(
+                (-diam_aberto_interno / 2, topo_aberto),
+                diam_aberto_interno,
+                base_aberto - topo_aberto,
+                facecolor=cor_interna,
+                edgecolor="none",
+                zorder=5
+            )
+        )
+
+    md_inicio_horizontal = np.nan
+
+    if st.session_state.get("ash") == "Sim":
+        md_inicio_horizontal = _asp_md_inicio_horizontal()
+
+    tipo_caixas = df["tipo_trecho"].astype(str).str.lower().str.strip()
+    df_revestidos_caixas = df[tipo_caixas != "poço aberto"]
+
+    idx_ultima_sapata_caixa = None
+    if not df_revestidos_caixas.empty:
+        idx_ultima_sapata_caixa = df_revestidos_caixas["base_intervalo"].idxmax()
+
+    # 8) Caixas laterais
+    for i, (_, row) in enumerate(df.iterrows()):
+        if i == 0:
+            continue
+
+        tipo = row["tipo_trecho"].strip().lower()
+        topo = float(row["topo_intervalo"])
+        base = float(row["base_intervalo"])
+        diam_furo = float(row["diam_furo"])
+
+        if tipo == "poço aberto":
+            if st.session_state.get("t_prof") == "MD":
+                fundo_md = base
+                fundo_tvd = _asp_tvd_por_md(fundo_md)
+
+                txt = (
+                    f'{row["fase"]}\n'
+                    f"Poço aberto\n"
+                    f'Diâmetro da fase: {_asp_fmt_pol(diam_furo)}"\n'
+                    f"Fundo TVD: {fundo_tvd:.1f} m\n"
+                    f"Fundo MD: {fundo_md:.1f} m"
+                )
+            else:
+                txt = (
+                    f'{row["fase"]}\n'
+                    f"Poço aberto\n"
+                    f'Diâmetro da fase: {_asp_fmt_pol(diam_furo)}"\n'
+                    f"Fundo: {base:.1f} m (TVD)"
+                )
+
+        else:
+            sapata_tvd = base
+            sapata_md = _asp_md_por_tvd(sapata_tvd)
+
+            if (
+                    st.session_state.get("ash") == "Sim"
+                    and idx_ultima_sapata_caixa is not None
+                    and row.name == idx_ultima_sapata_caixa
+                    and pd.notna(md_inicio_horizontal)
+            ):
+                sapata_md = float(md_inicio_horizontal)
+
+            txt = (
+                f'{row["fase"]}\n'
+                f'Rev.: {_asp_fmt_pol(row["diam_rev"])}"\n'
+                f'Diâmetro da fase: {_asp_fmt_pol(diam_furo)}"\n'
+                f"Sapata TVD: {sapata_tvd:.1f} m\n"
+                f"Sapata MD: {sapata_md:.1f} m"
+            )
+
+        ax.text(
+            x_lim * 0.45,
+            (topo + base) / 2,
+            txt,
+            ha="left",
+            va="center",
+            fontsize=11,
+            bbox=dict(
+                facecolor="white",
+                edgecolor="black",
+                boxstyle="round,pad=0.2"
+            ),
+            zorder=40
+        )
+    if st.session_state.get("t_prof") == "MD":
+        inicio_horizontal = st.session_state.get("inicio_trecho_horizontal_jo")
+
+        if inicio_horizontal is None or pd.isna(inicio_horizontal):
+            df_ref = st.session_state.get("df_est", None)
+            if isinstance(df_ref, pd.DataFrame) and not df_ref.empty:
+                if "MD" in df_ref.columns and "Profundidade (m)" in df_ref.columns:
+                    base_ref = df_ref[["MD", "Profundidade (m)"]].copy()
+                    base_ref["MD"] = pd.to_numeric(base_ref["MD"], errors="coerce")
+                    base_ref["Profundidade (m)"] = pd.to_numeric(base_ref["Profundidade (m)"], errors="coerce")
+                    base_ref = (
+                        base_ref
+                        .dropna(subset=["MD", "Profundidade (m)"])
+                        .sort_values("MD")
+                        .drop_duplicates(subset=["MD"], keep="last")
+                    )
+
+                    if len(base_ref) >= 2:
+                        md_vals = base_ref["MD"].to_numpy(dtype=float)
+                        tvd_vals = base_ref["Profundidade (m)"].to_numpy(dtype=float)
+                        dmd = np.diff(md_vals)
+                        dtvd = np.diff(tvd_vals)
+                        idx_horizontal = np.where((dmd > 0) & (np.abs(dtvd) <= 1e-6))[0]
+
+                        if len(idx_horizontal) > 0:
+                            inicio_horizontal = float(md_vals[idx_horizontal[0]])
+
+        if inicio_horizontal is not None and pd.notna(inicio_horizontal):
+            inicio_horizontal = float(inicio_horizontal)
+            if 0 <= inicio_horizontal <= prof_final:
+                x_inicio_linha = 0.0
+
+                if not df_revestido.empty:
+                    ultimo_rev_linha = df_revestido.sort_values("base_intervalo").iloc[-1]
+                    x_inicio_linha = float(ultimo_rev_linha["diam_rev"]) / 2 + dx_sapata * 0.15
+                elif not df_aberto.empty:
+                    x_inicio_linha = float(df_aberto.iloc[-1]["diam_furo"]) / 2
+
+                ax.annotate(
+                    "Início do trecho horizontal",
+                    xy=(x_inicio_linha, inicio_horizontal),
+                    xytext=(x_lim * 0.45, inicio_horizontal),
+                    ha="left",
+                    va="center",
+                    fontsize=10,
+                    fontweight="bold",
+                    color="red",
+                    bbox=dict(
+                        facecolor="white",
+                        edgecolor="black",
+                        boxstyle="round,pad=0.2"
+                    ),
+                    arrowprops=dict(
+                        arrowstyle="-",
+                        linestyle=(0, (2, 2)),
+                        color="black",
+                        lw=2.
+                    ),
+                    zorder=45
+                )
+
+    # 9) linhas pretas nas laterais do hatch do poço aberto
+    for _, row in df_aberto.iterrows():
+        topo_aberto = float(row["topo_intervalo"])
+        base_aberto = float(row["base_intervalo"])
+        diam_furo = float(row["diam_furo"])
+
+        x_left = -diam_furo / 2
+        x_right = diam_furo / 2
+
+        # lateral esquerda do poço aberto
+        ax.plot(
+            [x_left, x_left],
+            [topo_aberto, base_aberto],
+            color="black",
+            linewidth=1.2,
+            zorder=50
+        )
+
+        # lateral direita do poço aberto
+        ax.plot(
+            [x_right, x_right],
+            [topo_aberto, base_aberto],
+            color="black",
+            linewidth=1.2,
+            zorder=50
+        )
+
+    ax.set_xlim(-x_lim * 1.38, x_lim * 1.22)
+    prof_fundo_visual = max(prof_final, y_leito if not is_onshore else prof_final)
+    margem_fundo = max(prof_fundo_visual * 0.04, h_top * 0.18)
+
+    ax.set_ylim(prof_fundo_visual + margem_fundo, -h_top * 0.35)
+
+    ax.set_xticks([])
+    ax.set_yticks([])
+    ax.set_title("Esquemático do poço", fontsize=14, fontweight="bold")
+
+    for spine in ax.spines.values():
+        spine.set_linewidth(1.0)
+        spine.set_color("black")
+
+    ax.grid(False)
+    plt.tight_layout()
+
+    return fig, df
+
+
+def _chaves_ultima_fase_sapatas(metodo_kt):
+    if metodo_kt == "Baixo para Cima":
+        return (
+            "condicao_ultima_fase_b2c",
+            "_w_condicao_ultima_fase_b2c",
+            "suf",
+            "_w_suf",
+            "Sapata definida",
+        )
+
+    return (
+        "condicao_ultima_fase_c2b",
+        "_w_condicao_ultima_fase_c2b",
+        "suf_c2b",
+        "_w_suf_c2b",
+        "Poço aberto",
+    )
+
+
+def _config_ultima_sapata_poco(poco):
+    configs = st.session_state.setdefault("config_ultima_sapata_por_poco", {})
+    return configs.setdefault(str(poco), {})
+
+
+def _salvar_ultima_sapata_persistente(poco, metodo_kt):
+    (
+        chave_condicao,
+        widget_condicao,
+        chave_profundidade,
+        widget_profundidade,
+        condicao_padrao,
+    ) = _chaves_ultima_fase_sapatas(metodo_kt)
+
+    condicao = st.session_state.get(
+        widget_condicao,
+        st.session_state.get(chave_condicao, condicao_padrao),
+    )
+    profundidade = st.session_state.get(
+        widget_profundidade,
+        st.session_state.get(chave_profundidade),
+    )
+
+    st.session_state[chave_condicao] = condicao
+    if profundidade is not None:
+        st.session_state[chave_profundidade] = float(profundidade)
+
+    config_metodo = _config_ultima_sapata_poco(poco).setdefault(metodo_kt, {})
+    config_metodo["condicao"] = condicao
+    if profundidade is not None:
+        config_metodo["profundidade"] = float(profundidade)
+
+
+def _restaurar_ultima_sapata_persistente(poco, metodo_kt, fundo_poco):
+    (
+        chave_condicao,
+        widget_condicao,
+        chave_profundidade,
+        widget_profundidade,
+        condicao_padrao,
+    ) = _chaves_ultima_fase_sapatas(metodo_kt)
+
+    config_metodo = _config_ultima_sapata_poco(poco).setdefault(metodo_kt, {})
+    condicao = config_metodo.get(
+        "condicao",
+        st.session_state.get(chave_condicao, condicao_padrao),
+    )
+
+    profundidade = config_metodo.get(
+        "profundidade",
+        st.session_state.get(chave_profundidade, fundo_poco),
+    )
+    try:
+        profundidade = float(profundidade)
+    except (TypeError, ValueError):
+        profundidade = float(fundo_poco)
+
+    if profundidade <= 0:
+        profundidade = float(fundo_poco)
+
+    st.session_state[chave_condicao] = condicao
+    st.session_state[widget_condicao] = condicao
+    st.session_state[chave_profundidade] = profundidade
+    st.session_state[widget_profundidade] = profundidade
+    config_metodo["condicao"] = condicao
+    config_metodo["profundidade"] = profundidade
+
+
+def _validar_parametros_sapatas(fundo_poco):
+    erros = []
+    prof_condutor = float(st.session_state.get("prc", 0.0))
+    prof_superficie = float(st.session_state.get("prs", 0.0))
+    metodo_kt = st.session_state.get("metodo_kt", "Cima para Baixo")
+
+    if prof_condutor >= prof_superficie:
+        erros.append(
+            "A sapata do revestimento condutor deve ser mais rasa que a sapata de superfície."
+        )
+    if prof_superficie >= float(fundo_poco):
+        erros.append(
+            "A sapata do revestimento de superfície deve estar acima do fundo do poço."
+        )
+    if float(st.session_state.get("vk", 0.0)) <= 0:
+        erros.append("O volume do kick deve ser maior que zero.")
+    if float(st.session_state.get("hk", 0.0)) <= 0:
+        erros.append("O comprimento máximo de poço aberto deve ser maior que zero.")
+    if metodo_kt == "Baixo para Cima" and float(st.session_state.get("cmf", 0.0)) <= 0:
+        erros.append("O comprimento mínimo da fase deve ser maior que zero.")
+
+    (
+        chave_condicao,
+        _,
+        chave_profundidade,
+        _,
+        _,
+    ) = _chaves_ultima_fase_sapatas(metodo_kt)
+    if st.session_state.get(chave_condicao) == "Sapata definida":
+        profundidade_ultima = float(
+            st.session_state.get(chave_profundidade, fundo_poco)
+        )
+        if not prof_superficie < profundidade_ultima <= float(fundo_poco):
+            erros.append(
+                "A profundidade da última sapata deve estar abaixo da sapata de "
+                "superfície e não pode ultrapassar o fundo do poço."
+            )
+
+    return erros
+
+
+def _plotar_marcadores_sapatas(
+        ax,
+        sapatas_plot,
+        y_min,
+        y_max,
+        metodo_kt,
+        prof_superficie,
+):
+    x_min, x_max = ax.get_xlim()
+    x_right = x_max - 0.01 * (x_max - x_min)
+    intervalo_y = y_max - y_min
+    margem_rotulo = min(max(1.0, 0.015 * intervalo_y), 0.25 * intervalo_y)
+    sapatas_visiveis = []
+
+    for sapata in sapatas_plot:
+        try:
+            profundidade = float(sapata["prof"])
+        except (KeyError, TypeError, ValueError):
+            continue
+
+        if not np.isfinite(profundidade) or not y_min <= profundidade <= y_max:
+            continue
+
+        sapatas_visiveis.append((profundidade, sapata))
+
+    sapatas_visiveis.sort(key=lambda item: item[0])
+    espacamento_rotulos = max(1.0, 0.035 * intervalo_y)
+    if len(sapatas_visiveis) > 1:
+        espacamento_disponivel = max(
+            0.0,
+            (intervalo_y - 2 * margem_rotulo) / (len(sapatas_visiveis) - 1),
+        )
+        espacamento_rotulos = min(
+            espacamento_rotulos,
+            espacamento_disponivel,
+        )
+
+    posicoes_rotulos = []
+    for profundidade, _ in sapatas_visiveis:
+        y_rotulo = np.clip(
+            profundidade - margem_rotulo,
+            y_min + margem_rotulo,
+            y_max - margem_rotulo,
+        )
+        if posicoes_rotulos:
+            y_rotulo = max(
+                y_rotulo,
+                posicoes_rotulos[-1] + espacamento_rotulos,
+            )
+        posicoes_rotulos.append(float(y_rotulo))
+
+    limite_inferior_rotulos = y_max - margem_rotulo
+    if posicoes_rotulos and posicoes_rotulos[-1] > limite_inferior_rotulos:
+        deslocamento = posicoes_rotulos[-1] - limite_inferior_rotulos
+        posicoes_rotulos = [posicao - deslocamento for posicao in posicoes_rotulos]
+
+    limite_superior_rotulos = y_min + margem_rotulo
+    if posicoes_rotulos and posicoes_rotulos[0] < limite_superior_rotulos:
+        deslocamento = limite_superior_rotulos - posicoes_rotulos[0]
+        posicoes_rotulos = [posicao + deslocamento for posicao in posicoes_rotulos]
+
+    for (profundidade, sapata), y_rotulo in zip(
+            sapatas_visiveis,
+            posicoes_rotulos,
+    ):
+        nome = sapata.get("nome", "Sapata")
+        cor = sapata.get("cor", "black")
+        tipo = sapata.get("tipo", "calculada")
+        cor_box = cor
+        if (
+                metodo_kt == "Baixo para Cima"
+                and prof_superficie is not None
+                and np.isclose(profundidade, float(prof_superficie), atol=1e-6)
+                and tipo != "superficie"
+        ):
+            cor_box = "red"
+
+        ax.axhline(
+            y=profundidade,
+            color=cor,
+            linestyle="--",
+            linewidth=2,
+            zorder=6,
+            label="_nolegend_",
+            clip_on=True,
+        )
+
+        ax.text(
+            x=x_right,
+            y=y_rotulo,
+            s=f"{nome}: {profundidade:.2f} m",
+            color=cor_box,
+            fontsize=9,
+            va="center",
+            ha="right",
+            bbox={
+                "boxstyle": "round,pad=0.2",
+                "facecolor": "white",
+                "edgecolor": cor_box,
+                "alpha": 0.9,
+            },
+            zorder=7,
+            clip_on=True,
+        )
+
+
+# ABA ASSENTAMENTO DE SAPATAS
 def pagina_sapatas():
     st.header("Assentamento de Sapatas")
 
-    tab_dados, tab_tabela = st.tabs(["Dados", "Tabela de dados calculados"])
+    if st.session_state.get("option") != "Previsão de Geopressões":
+        st.error('Função não disponível para "Retroanálise"', icon="🚨")
+        return
 
-    with tab_dados:
-        st.subheader("Dados")
-        c1, c2, c3 = st.columns((1, 1, 1))
-        with c1:
-            with st.container(border=True):
-                pass
-        with c2:
-            with st.container(border=True):
-                pass
-        with c3:
-            with st.container(border=True):
-                pass
+    df_tvp = st.session_state.get("df_est", pd.DataFrame()).copy()
+    df_pp = st.session_state.get("df_pp", pd.DataFrame()).copy()
 
-    with tab_tabela:
-        st.subheader("Tabela de dados calculados")
-        pass
+    if not isinstance(df_tvp, pd.DataFrame) or df_tvp.empty:
+        st.error(
+            'Gere a Janela Operacional na aba "Estabilidade de Poço"',
+            icon="🚨"
+        )
+        return
+
+    if not isinstance(df_pp, pd.DataFrame) or df_pp.empty:
+        st.error(
+            'Calcule o Gradiente de Pressão de Poros antes de definir as sapatas.',
+            icon="🚨"
+        )
+        return
+
+    df = st.session_state.get("df1", pd.DataFrame()).copy()
+    if not isinstance(df, pd.DataFrame) or df.empty or "Profundidade" not in df.columns:
+        df = pd.DataFrame({
+            "Profundidade": pd.to_numeric(
+                df_tvp["Profundidade (m)"],
+                errors="coerce"
+            )
+        })
+
+    selected = st.session_state.get(
+        "well_selected",
+        st.session_state.get("poco", "Poço")
+    )
+    _garantir_litologia_importada(selected)
+    poco = st.session_state.get("pocos", {}).get(selected, {})
+    profundidades = poco.get("profundidade", [])
+    litologias = poco.get("litologia", [])
+
+    defaults_sapatas = {
+        "metodo_gradiente_fratura": "Mohr Coulomb",
+        "metodo_kt": "Cima para Baixo",
+        "prc": 50.0,
+        "prs": 500.0,
+        "ms": 0.0,
+        "vk": 10.0,
+        "mskt": 0.5,
+        "ef": 10.0,
+        "ash": "Sim",
+        "odrc": '30"',
+        "odrs": '20"',
+        "msf": 0.0,
+        "dk": 2.0,
+        "hk": round((float(df["Profundidade"].iloc[-1]) / 3.0) / 50.0) * 50.0,
+        "cmf": 200.0,
+        "condicao_ultima_fase_b2c": "Sapata definida",
+        "condicao_ultima_fase_c2b": "Poço aberto",
+        "suf": float(df["Profundidade"].iloc[-1]),
+        "suf_c2b": float(df["Profundidade"].iloc[-1]),
+        "bha_escolhido": '17 1/2"',
+        "leg_sa": "Não",
+        "x_min_sa": 7,
+        "x_max_sa": 21,
+        "x_step_sa": 2,
+        "y_min_sa": 0,
+        "y_max_sa": int(df_pp["Profundidade (m)"].max()) + 100,
+        "y_step_sa": 200,
+    }
+    for chave_sapata, valor_sapata in defaults_sapatas.items():
+        if chave_sapata not in st.session_state:
+            st.session_state[chave_sapata] = valor_sapata
+
+    fundo_poco_sapatas = float(df["Profundidade"].iloc[-1])
+    if not st.session_state.get("_valores_sapatas_zero_corrigidos_v2", False):
+        for chave_profundidade in ("suf", "suf_c2b"):
+            try:
+                profundidade_salva = float(st.session_state.get(chave_profundidade, 0.0))
+                profundidade_widget = float(
+                    st.session_state.get(f"_w_{chave_profundidade}", profundidade_salva)
+                )
+            except (TypeError, ValueError):
+                profundidade_salva = 0.0
+                profundidade_widget = 0.0
+            if profundidade_salva <= 0.0 or profundidade_widget <= 0.0:
+                st.session_state[chave_profundidade] = fundo_poco_sapatas
+                st.session_state[f"_w_{chave_profundidade}"] = fundo_poco_sapatas
+
+        try:
+            comprimento_minimo_salvo = float(st.session_state.get("cmf", 0.0))
+            comprimento_minimo_widget = float(
+                st.session_state.get("_w_cmf", comprimento_minimo_salvo)
+            )
+        except (TypeError, ValueError):
+            comprimento_minimo_salvo = 0.0
+            comprimento_minimo_widget = 0.0
+        if comprimento_minimo_salvo <= 0.0 or comprimento_minimo_widget <= 0.0:
+            st.session_state.cmf = 200.0
+            st.session_state["_w_cmf"] = 200.0
+        st.session_state["_valores_sapatas_zero_corrigidos_v2"] = True
+
+    legenda_sapatas_salva = st.session_state.get("leg_sa", "Não")
+    if isinstance(legenda_sapatas_salva, bool):
+        legenda_sapatas_salva = "Sim" if legenda_sapatas_salva else "Não"
+    if legenda_sapatas_salva not in ("Sim", "Não"):
+        legenda_sapatas_salva = "Não"
+    st.session_state.leg_sa = legenda_sapatas_salva
+    st.session_state["_w_leg_sa"] = legenda_sapatas_salva
+
+    if not st.session_state.get("_padrao_eixos_sapatas_v2_aplicado", False):
+        if (
+                float(st.session_state.get("x_max_sa", 21)) == 21.0
+                and float(st.session_state.get("x_step_sa", 1)) == 1.0
+        ):
+            st.session_state.x_max_sa = 21
+            st.session_state.x_step_sa = 2
+            st.session_state["_w_x_max_sa"] = 21
+            st.session_state["_w_x_step_sa"] = 2
+        st.session_state["_padrao_eixos_sapatas_v2_aplicado"] = True
+
+    for metodo_sapatas in ("Cima para Baixo", "Baixo para Cima"):
+        _restaurar_ultima_sapata_persistente(
+            selected,
+            metodo_sapatas,
+            fundo_poco_sapatas,
+        )
+
+    pares_form_sapatas = [
+        ("prc", "_w_prc"),
+        ("prs", "_w_prs"),
+        ("ms", "_w_ms"),
+        ("vk", "_w_vk"),
+        ("mskt", "_w_mskt"),
+        ("ef", "_w_ef"),
+        ("ash", "_w_ash"),
+        ("odrc", "_w_odrc"),
+        ("odrs", "_w_odrs"),
+        ("msf", "_w_msf"),
+        ("dk", "_w_dk"),
+        ("hk", "_w_hk"),
+        ("cmf", "_w_cmf"),
+        ("bha_escolhido", "_w_bha_escolhido"),
+    ]
+    for chave_estado, chave_widget in pares_form_sapatas:
+        preparar_widget_persistente(chave_estado, chave_widget)
+
+    tab = st.tabs(['Kick Tolerance', 'Dados Calculados'])
+
+    if "recalcular_sapatas" not in st.session_state:
+        st.session_state.recalcular_sapatas = False
+
+    with tab[0]:
+        if isinstance(df_tvp, pd.DataFrame) and not df_tvp.empty:
+            col1, col2 = st.columns((0.7, 1))
+
+            with col1:
+                with st.container(border=True):
+                    coluna1, coluna2 = st.columns(2)
+
+                    with coluna1:
+                        preparar_widget_persistente(
+                            "metodo_gradiente_fratura",
+                            "_w_metodo_gradiente_fratura"
+                        )
+                        st.segmented_control(
+                            "***Método do Gradiente de Fratura a ser utilizado***",
+                            ["Mohr Coulomb", "Método das Tensões Mínimas"],
+                            selection_mode="single",
+                            key="_w_metodo_gradiente_fratura",
+                            width="stretch",
+                            on_change=salvar_widget_persistente,
+                            args=("metodo_gradiente_fratura", "_w_metodo_gradiente_fratura")
+                        )
+
+                    with coluna2:
+                        preparar_widget_persistente("metodo_kt", "_w_metodo_kt")
+                        def _trocar_metodo_kt_sapatas():
+                            metodo_anterior = st.session_state.get(
+                                "metodo_kt",
+                                "Cima para Baixo",
+                            )
+                            _salvar_ultima_sapata_persistente(
+                                selected,
+                                metodo_anterior,
+                            )
+                            novo_metodo = st.session_state.get(
+                                "_w_metodo_kt",
+                                metodo_anterior,
+                            )
+                            st.session_state.metodo_kt = novo_metodo
+                            _restaurar_ultima_sapata_persistente(
+                                selected,
+                                novo_metodo,
+                                fundo_poco_sapatas,
+                            )
+                        st.segmented_control(
+                            "***Método de Cálculo do Kick Tolerance a ser utilizado***",
+                            ["Cima para Baixo", "Baixo para Cima"],
+                            selection_mode="single",
+                            key="_w_metodo_kt",
+                            width="stretch",
+                            on_change=_trocar_metodo_kt_sapatas,
+                        )
+
+                    st.markdown("### Critério de Assentamento de Sapatas - Kick Tolerance")
+
+                    submitted_sapatas = False
+
+                    if st.session_state.metodo_kt == "Baixo para Cima":
+                        condicao_ultima_fase = "condicao_ultima_fase_b2c"
+                        widget_condicao_ultima_fase = "_w_condicao_ultima_fase_b2c"
+                        profundidade_ultima_fase = "suf"
+                        widget_profundidade_ultima_fase = "_w_suf"
+                        condicao_padrao_ultima_fase = "Sapata definida"
+                    else:
+                        condicao_ultima_fase = "condicao_ultima_fase_c2b"
+                        widget_condicao_ultima_fase = "_w_condicao_ultima_fase_c2b"
+                        profundidade_ultima_fase = "suf_c2b"
+                        widget_profundidade_ultima_fase = "_w_suf_c2b"
+                        condicao_padrao_ultima_fase = "Poço aberto"
+
+                    if st.session_state.get(condicao_ultima_fase) not in (
+                            "Sapata definida",
+                            "Poço aberto",
+                    ):
+                        st.session_state[condicao_ultima_fase] = condicao_padrao_ultima_fase
+                    def _salvar_condicao_ultima_fase():
+                        condicao_anterior = st.session_state.get(condicao_ultima_fase)
+                        nova_condicao = st.session_state.get(widget_condicao_ultima_fase)
+                        st.session_state[condicao_ultima_fase] = nova_condicao
+
+                        if (
+                                nova_condicao == "Sapata definida"
+                                and condicao_anterior != "Sapata definida"
+                        ):
+                            config_metodo = _config_ultima_sapata_poco(
+                                selected
+                            ).get(st.session_state.metodo_kt, {})
+                            profundidade_salva = config_metodo.get(
+                                "profundidade",
+                                fundo_poco_sapatas,
+                            )
+                            st.session_state[profundidade_ultima_fase] = float(
+                                profundidade_salva
+                            )
+                            st.session_state[widget_profundidade_ultima_fase] = float(
+                                profundidade_salva
+                            )
+
+                        _salvar_ultima_sapata_persistente(
+                            selected,
+                            st.session_state.metodo_kt,
+                        )
+                    preparar_widget_persistente(
+                        condicao_ultima_fase,
+                        widget_condicao_ultima_fase
+                    )
+                    st.segmented_control(
+                        "Condição da última fase",
+                        ["Sapata definida", "Poço aberto"],
+                        selection_mode="single",
+                        key=widget_condicao_ultima_fase,
+                        width="stretch",
+                        on_change=_salvar_condicao_ultima_fase
+                    )
+
+                    if st.session_state.get(condicao_ultima_fase) == "Sapata definida":
+                        preparar_widget_persistente(
+                            profundidade_ultima_fase,
+                            widget_profundidade_ultima_fase
+                        )
+                        def _salvar_profundidade_ultima_fase():
+                            salvar_widget_persistente(
+                                profundidade_ultima_fase,
+                                widget_profundidade_ultima_fase,
+                            )
+                            _salvar_ultima_sapata_persistente(
+                                selected,
+                                st.session_state.metodo_kt,
+                            )
+                        st.number_input(
+                            "Profundidade da sapata da última fase",
+                            step=100.0,
+                            format="%.2f",
+                            min_value=0.0,
+                            key=widget_profundidade_ultima_fase,
+                            on_change=_salvar_profundidade_ultima_fase,
+                        )
+
+                    if st.session_state.metodo_kt == "Baixo para Cima":
+                        preparar_widget_persistente("cmf", "_w_cmf")
+                        st.number_input(
+                            "Comprimento mínimo da fase",
+                            step=100.0,
+                            format="%.2f",
+                            key="_w_cmf",
+                            min_value=0.0,
+                            on_change=salvar_widget_persistente,
+                            args=("cmf", "_w_cmf")
+                        )
+
+                    with st.form("spt_form", border=False):
+                        with st.expander("Dados", expanded=True):
+                            c1, c2 = st.columns(2)
+                            with c1:
+                                st.number_input(
+                                    'Sapata do revestimento condutor',
+                                    step=10.0,
+                                    format='%.2f',
+                                    key='_w_prc',
+                                    min_value=0.0,
+                                )
+                                st.number_input(
+                                    'Sapata do revestimento de superfície',
+                                    step=100.0,
+                                    format='%.2f',
+                                    key='_w_prs',
+                                    min_value=0.0,
+                                )
+                                st.number_input(
+                                    'Margem do Gradiente de Pressão de Poros',
+                                    step=.1,
+                                    format='%.2f',
+                                    key='_w_ms',
+                                    min_value=0.0,
+                                )
+                                st.number_input(
+                                    'Volume do kick',
+                                    step=10.,
+                                    format='%.2f',
+                                    key='_w_vk',
+                                    min_value=0.0,
+                                )
+                                st.number_input(
+                                    'Margem de segurança do Kick Tolerance',
+                                    step=.1,
+                                    format='%.2f',
+                                    key='_w_mskt',
+                                    min_value=0.0,
+                                )
+                                st.number_input(
+                                    'Espessura da camada não permeável',
+                                    step=1.,
+                                    format='%.2f',
+                                    key='_w_ef',
+                                    min_value=1.,
+                                )
+
+                            with c2:
+                                st.selectbox(
+                                    'OD do revestimento condutor',
+                                    ['30"', '20"', '13 3/8"', '9 5/8"'],
+                                    key='_w_odrc'
+                                )
+                                st.selectbox(
+                                    'OD do revestimento de superfície',
+                                    ['30"', '20"', '13 3/8"', '9 5/8"'],
+                                    key='_w_odrs',
+                                )
+                                st.number_input(
+                                    'Margem do Gradente de Fratura',
+                                    step=.1,
+                                    format='%.2f',
+                                    key='_w_msf',
+                                    min_value=0.0,
+                                )
+                                st.number_input(
+                                    'Densidade do kick',
+                                    step=.5,
+                                    format='%.2f',
+                                    key='_w_dk',
+                                    min_value=0.0,
+                                )
+                                st.number_input(
+                                    'Comprimento máximo de poço aberto',
+                                    step=100.0,
+                                    format='%.2f',
+                                    key='_w_hk',
+                                    min_value=0.0,
+                                )
+                                st.selectbox(
+                                    'Assentar sapata no início do trecho horizontal',
+                                    ['Sim', 'Não'],
+                                    key='_w_ash'
+                                )
+
+                            st.session_state.pf = df["Profundidade"].iloc[-1]
+
+                        with st.expander("BHA", expanded=True):
+                            bha_17_5 = pd.DataFrame({
+                                "Elemento do BHA": [
+                                    "Broca", "STB", "NMDC", "NMDC", "xBolt", "Gap Sub",
+                                    "Pulser Sub xBolt", "UBHO", "NMDC", "DC", "XO",
+                                    "DC", "HWDP", "Jar", "HWDP"
+                                ],
+                                "OD (pol)": [
+                                    17.5, 9.63, 8.25, 8.25, 8.25, 7.88, 8.0, 7.88,
+                                    8.31, 8.0, 8.0, 6.5, 5.0, 6.5, 5.0
+                                ],
+                                "Comprimento (m)": [
+                                    0.44, 10.45, 2.91, 2.84, 9.09, 1.12, 1.78, 0.79,
+                                    9.21, 18.72, 1.06, 36.86, 55.37, 9.79, 82.37
+                                ]
+                            })
+
+                            bha_12_25 = pd.DataFrame({
+                                "Elemento do BHA": [
+                                    "Broca", "MF", "NMDC", "Telescope", "NMDC", "UBHO",
+                                    "DC", "XO", "DC", "HWDP", "Jar", "HWDP"
+                                ],
+                                "OD (pol)": [
+                                    12.25, 9.625, 8.00, 8.375, 8.00, 7.875,
+                                    8.00, 8.00, 6.75, 5.00, 6.50, 5.00
+                                ],
+                                "Comprimento (m)": [
+                                    0.32, 10.55, 5.66, 8.55, 9.22, 0.62,
+                                    18.00, 1.10, 35.91, 54.83, 9.50, 81.98
+                                ]
+                            })
+
+                            bha_8_5 = pd.DataFrame({
+                                "Elemento do BHA": [
+                                    "Broca", "MF", "STB", "Monel Curto", "TeleScope",
+                                    "Monel", "UBHO", "DC", "HWDP", "Jar", "HWDP"
+                                ],
+                                "OD (pol)": [
+                                    8.50, 6.75, 6.75, 6.69, 6.75, 6.75,
+                                    6.75, 6.75, 5.00, 6.50, 5.00
+                                ],
+                                "Comprimento (m)": [
+                                    0.24, 8.2, 1.3, 5.86, 7.93, 9.02,
+                                    0.91, 53.97, 27.36, 9.4, 119.38
+                                ]
+                            })
+
+                            bha_6_125 = pd.DataFrame({
+                                "Elemento do BHA": [
+                                    "Broca", "MF", "STB", "Monel Curto", "TeleScope",
+                                    "Monel", "UBHO", "DC", "HWDP", "Jar", "HWDP"
+                                ],
+                                "OD (pol)": [
+                                    6.125, 4.75, 4.75, 4.75, 4.75, 4.75,
+                                    4.75, 4.75, 4.50, 4.75, 4.50
+                                ],
+                                "Comprimento (m)": [
+                                    0.24, 8.2, 1.3, 5.86, 7.93, 9.02,
+                                    0.91, 53.97, 27.36, 9.4, 119.38
+                                ]
+                            })
+
+                            bha_opcoes = {
+                                '17 1/2"': bha_17_5.copy(),
+                                '12 1/4"': bha_12_25.copy(),
+                                '8 1/2"': bha_8_5.copy(),
+                                '6 1/8"': bha_6_125.copy(),
+                            }
+
+                            preparar_widget_persistente(
+                                "bha_escolhido",
+                                "_w_bha_escolhido"
+                            )
+
+                            coluna1, coluna2 = st.columns(2)
+
+                            if st.session_state.metodo_kt == "Cima para Baixo":
+                                x = "BHA da fase após o revestimento de superfície"
+                            else:
+                                x = "BHA para a fase final"
+
+                            with coluna1:
+                                st.markdown(
+                                    f"""
+                                    <div style="margin-top: 32px;">
+                                        <h5 style="margin-bottom: 0;">
+                                            {x}
+                                        </h5>
+                                    </div>
+                                    """,
+                                    unsafe_allow_html=True
+                                )
+
+                            with coluna2:
+                                with st.container(border=True):
+                                    opcoes_bha = ['17 1/2"', '12 1/4"', '8 1/2"', '6 1/8"']
+                                    opcoes_bha_disponiveis = opcoes_bha.copy()
+                                    od_revest_superficie = str(st.session_state.get("odrs", "")).strip()
+
+                                    if st.session_state.metodo_kt == "Baixo para Cima":
+                                        titulo_bha = "Selecione o BHA da última fase"
+
+                                        if od_revest_superficie == '13 3/8"':
+                                            opcoes_bha_disponiveis = [
+                                                bha for bha in opcoes_bha_disponiveis if bha != '17 1/2"'
+                                            ]
+                                    else:
+                                        titulo_bha = "Selecione o BHA"
+
+                                    if not opcoes_bha_disponiveis:
+                                        st.error("Nenhum BHA disponível para a configuração atual.")
+                                        bha_selecionado = None
+                                    else:
+                                        bha_atual = st.session_state.get("_w_bha_escolhido", '12 1/4"')
+
+                                        if bha_atual not in opcoes_bha_disponiveis:
+                                            bha_atual = opcoes_bha_disponiveis[0]
+                                            st.session_state["_w_bha_escolhido"] = bha_atual
+
+                                        bha_selecionado = st.radio(
+                                            titulo_bha,
+                                            options=opcoes_bha_disponiveis,
+                                            index=opcoes_bha_disponiveis.index(bha_atual),
+                                            horizontal=True,
+                                            key="_w_bha_escolhido",
+                                            disabled=False
+                                        )
+
+                                    if bha_selecionado is not None:
+                                        st.session_state.bha_selecionado = bha_selecionado
+
+                            diametro_poco_por_bha = {
+                                '17 1/2"': 17.5,
+                                '12 1/4"': 12.25,
+                                '8 1/2"': 8.5,
+                                '6 1/8"': 6.125,
+                            }
+
+                            if bha_selecionado is None:
+                                st.stop()
+
+                            diametro_poco_pol = diametro_poco_por_bha[bha_selecionado]
+                            diametro_poco_m = diametro_poco_pol * 0.0254
+
+                            df_bha_padrao = bha_opcoes[bha_selecionado].copy()
+
+                            chave_edit = f"df_bha_edit_{bha_selecionado}"
+                            chave_final = f"df_bha_final_{bha_selecionado}"
+
+                            if chave_edit not in st.session_state:
+                                st.session_state[chave_edit] = df_bha_padrao.copy()
+
+                            df_bha_editado = st.data_editor(
+                                st.session_state[chave_edit],
+                                use_container_width=True,
+                                hide_index=True,
+                                num_rows="dynamic",
+                                key=f"bha_editor_{bha_selecionado}",
+                                column_config={
+                                    "Elemento do BHA": st.column_config.TextColumn("Elemento do BHA"),
+                                    "OD (pol)": st.column_config.NumberColumn("OD (pol)", format="%.2f"),
+                                    "Comprimento (m)": st.column_config.NumberColumn(
+                                        "Comprimento (m)", format="%.2f"
+                                    ),
+                                }
+                            )
+
+                        submitted_sapatas = st.form_submit_button(
+                            "Definir Sapatas",
+                            use_container_width=True,
+                            type="primary"
+                        )
+
+                        if submitted_sapatas:
+                            sincronizar_widgets_persistentes(pares_form_sapatas)
+                            _salvar_ultima_sapata_persistente(
+                                selected,
+                                st.session_state.metodo_kt,
+                            )
+                            erros_sapatas = _validar_parametros_sapatas(
+                                fundo_poco_sapatas
+                            )
+                            if erros_sapatas:
+                                st.session_state.recalcular_sapatas = False
+                                for erro_sapatas in erros_sapatas:
+                                    st.error(erro_sapatas)
+                            else:
+                                st.session_state.recalcular_sapatas = True
+
+                    df_sapata = st.session_state.get("df_sapata_kt", pd.DataFrame()).copy()
+                    sapatas_plot = st.session_state.get("sapatas_plot_kt", []).copy()
+
+                    if st.session_state.get("recalcular_sapatas", False):
+                        st.session_state[chave_edit] = pd.DataFrame(df_bha_editado).copy()
+                        st.session_state[chave_final] = calcular_bha(
+                            st.session_state[chave_edit],
+                            diametro_poco_m
+                        )
+
+                        st.session_state.df_bha_edit = st.session_state[chave_edit].copy()
+                        st.session_state.df_bha_final = st.session_state[chave_final].copy()
+
+                        df_kick = st.session_state.df_bha_final.copy()
+
+                        for col in [
+                            "Comprimento (m)",
+                            "Comprimento Acumulado (m)",
+                            "Início do Trecho (m)",
+                            "Fim do Trecho (m)",
+                            "Cap. Anular (m3/m)",
+                            "Vol. (m3)",
+                            "Vol. Acum. (m3)",
+                            "Vol. Acum. (bbl)"
+                        ]:
+                            if col in df_kick.columns:
+                                df_kick[col] = pd.to_numeric(df_kick[col], errors="coerce").fillna(0.0)
+
+                        vk_bbl = float(st.session_state.vk)
+                        vk_m3 = vk_bbl / 6.28981
+
+                        volume_restante = vk_m3
+                        altura_kick = 0.0
+                        elemento_topo_kick = "Não definido"
+                        intervalo_elemento_topo_kick = ""
+
+                        for _, row in df_kick.iterrows():
+                            cap = float(row["Cap. Anular (m3/m)"])
+                            comp = float(row["Comprimento (m)"])
+                            inicio = float(row["Início do Trecho (m)"])
+                            fim = float(row["Fim do Trecho (m)"])
+                            elem = str(row["Elemento do BHA"])
+
+                            if cap <= 0 or comp <= 0:
+                                continue
+
+                            vol_trecho = cap * comp
+
+                            if volume_restante <= vol_trecho:
+                                altura_no_trecho = volume_restante / cap
+                                altura_kick = inicio + altura_no_trecho
+                                elemento_topo_kick = elem
+                                intervalo_elemento_topo_kick = f"{inicio:.2f}–{fim:.2f} m"
+                                volume_restante = 0.0
+                                break
+                            else:
+                                volume_restante -= vol_trecho
+
+                        if volume_restante > 1e-9:
+                            altura_kick = float(df_kick["Comprimento Acumulado (m)"].max())
+                            elemento_topo_kick = "Acima do último elemento do BHA"
+                            intervalo_elemento_topo_kick = ""
+
+                        st.session_state.altura_kick_calculada = altura_kick
+                        st.session_state.volume_kick_bbl = vk_bbl
+                        st.session_state.volume_kick_m3 = vk_m3
+                        st.session_state.elemento_topo_kick = elemento_topo_kick
+                        st.session_state.intervalo_elemento_topo_kick = intervalo_elemento_topo_kick
+
+                        st.session_state.df_sapata_kt = pd.DataFrame()
+                        st.session_state.historico_fases_c2b = []
+                        st.session_state.historico_fases_b2c = []
+                        st.session_state.sapatas_kick_c2b = []
+                        st.session_state.sapatas_kick_b2c = []
+                        st.session_state.curvas_kt_plot = []
+                        st.session_state.curvas_kt_b2c = []
+                        st.session_state.sapatas_plot_kt = []
+                        st.session_state.intervalos_sem_sapata_b2c = []
+                        st.session_state.intervalos_fase_curta_b2c = []
+
+                        metodo_fratura = st.session_state.get(
+                            "metodo_gradiente_fratura",
+                            "Mohr Coulomb"
+                        )
+
+                        cols_df_f_sapata = [
+                            "Profundidade (m)",
+                            "Gradiente de Sobrecarga (lb/gal)",
+                            "Gradiente de Pressão de Poros (lb/gal)",
+                            "Gradiente de Fratura (lb/gal)",
+                        ]
+
+                        df_f_sapata = st.session_state.get("df_f", pd.DataFrame())
+
+                        usar_fratura_tensoes_minimas = (
+                                metodo_fratura == "Método das Tensões Mínimas"
+                                and isinstance(df_f_sapata, pd.DataFrame)
+                                and not df_f_sapata.empty
+                                and all(col in df_f_sapata.columns for col in cols_df_f_sapata)
+                        )
+
+                        if usar_fratura_tensoes_minimas:
+                            # Para o Método das Tensões Mínimas, a curva de fratura deve ser
+                            # exatamente a mesma já calculada em st.session_state.df_f.
+                            # Por isso, não suavizar, não recalcular e não interpolar essa coluna.
+                            df_base_sapata = df_f_sapata[cols_df_f_sapata].copy()
+
+                            profundidade_sapata = pd.to_numeric(
+                                df_base_sapata["Profundidade (m)"],
+                                errors="coerce"
+                            ).reset_index(drop=True)
+
+                            grad_sobrecarga_sapata = pd.to_numeric(
+                                df_base_sapata["Gradiente de Sobrecarga (lb/gal)"],
+                                errors="coerce"
+                            ).reset_index(drop=True)
+
+                            grad_pressao_poros_bruto = pd.to_numeric(
+                                df_base_sapata["Gradiente de Pressão de Poros (lb/gal)"],
+                                errors="coerce"
+                            ).reset_index(drop=True)
+
+                            grad_fratura_sapata = pd.to_numeric(
+                                df_base_sapata["Gradiente de Fratura (lb/gal)"],
+                                errors="coerce"
+                            ).reset_index(drop=True)
+
+                        else:
+                            if metodo_fratura == "Método das Tensões Mínimas":
+                                st.warning(
+                                    "O Gradiente de Fratura pelo Método das Tensões Mínimas ainda não foi calculado. "
+                                    "Foi utilizado o Gradiente de Fratura por Mohr Coulomb suavizado."
+                                )
+
+                            profundidade_sapata = pd.to_numeric(
+                                df_tvp["Profundidade (m)"],
+                                errors="coerce"
+                            ).reset_index(drop=True)
+
+                            grad_sobrecarga_sapata = pd.to_numeric(
+                                df_tvp["Gradiente de Sobrecarga (lb/gal)"],
+                                errors="coerce"
+                            ).reset_index(drop=True)
+
+                            grad_pressao_poros_bruto = pd.to_numeric(
+                                df_tvp["Gradiente de Pressão de Poros (lb/gal)"],
+                                errors="coerce"
+                            ).reset_index(drop=True)
+
+                            grad_fratura_mohr_bruto = pd.to_numeric(
+                                df_tvp[["Tração Superior (σθA)", "Tração Superior (σθB)"]].min(axis=1),
+                                errors="coerce"
+                            ).reset_index(drop=True)
+
+                            grad_fratura_sapata = pd.Series(
+                                suavizar(profundidade_sapata, grad_fratura_mohr_bruto),
+                                index=grad_fratura_mohr_bruto.index
+                            )
+
+                        grad_pressao_poros_suavizado = pd.Series(
+                            suavizar(profundidade_sapata, grad_pressao_poros_bruto),
+                            index=grad_pressao_poros_bruto.index
+                        )
+
+                        df_sapata = pd.DataFrame({
+                            "Profundidade (m)": profundidade_sapata,
+                            "Gradiente de Sobrecarga (lb/gal)": grad_sobrecarga_sapata,
+                            "Gradiente de Pressão de Poros (lb/gal)": grad_pressao_poros_suavizado,
+                            "Gradiente de Fratura (lb/gal)": grad_fratura_sapata
+                        }).copy()
+
+                        df_sapata["Gradiente de Pressão de Poros + Margem (lb/gal)"] = (
+                                df_sapata["Gradiente de Pressão de Poros (lb/gal)"]
+                                + float(st.session_state.ms)
+                        )
+
+                        df_sapata["Gradiente de Fratura - Margem (lb/gal)"] = (
+                                df_sapata["Gradiente de Fratura (lb/gal)"]
+                                - float(st.session_state.msf)
+                        )
+
+                        df_sapata = (
+                            df_sapata
+                            .dropna(subset=[
+                                "Profundidade (m)",
+                                "Gradiente de Pressão de Poros (lb/gal)",
+                                "Gradiente de Fratura (lb/gal)"
+                            ])
+                            .sort_values("Profundidade (m)")
+                            .reset_index(drop=True)
+                        )
+
+                        df_sapata = df_sapata[
+                            [
+                                "Profundidade (m)",
+                                "Gradiente de Sobrecarga (lb/gal)",
+                                "Gradiente de Pressão de Poros (lb/gal)",
+                                "Gradiente de Pressão de Poros + Margem (lb/gal)",
+                                "Gradiente de Fratura - Margem (lb/gal)",
+                                "Gradiente de Fratura (lb/gal)"
+                            ]
+                        ]
+
+                        df_sapata["Gradiente de Fratura (lb/gal)"] = pd.to_numeric(
+                            df_sapata["Gradiente de Fratura (lb/gal)"], errors="coerce"
+                        )
+
+                        df_sapata = df_sapata.dropna(
+                            subset=["Profundidade (m)", "Gradiente de Fratura (lb/gal)"]
+                        ).sort_values("Profundidade (m)").reset_index(drop=True)
+
+                        if "decisoes_ajuste_arenito" not in st.session_state:
+                            st.session_state.decisoes_ajuste_arenito = {}
+
+                        if "pendencia_ajuste_arenito" not in st.session_state:
+                            st.session_state.pendencia_ajuste_arenito = None
+
+                        if st.session_state.metodo_kt == "Cima para Baixo":
+                            prof_sapata_superficie = float(st.session_state.prs)
+
+                            idx_mais_proximo = (
+                                    df_sapata["Profundidade (m)"] - prof_sapata_superficie
+                            ).abs().idxmin()
+
+                            prof_ref_fratura = float(df_sapata.loc[idx_mais_proximo, "Profundidade (m)"])
+                            grad_fratura_ref = float(
+                                df_sapata.loc[idx_mais_proximo, "Gradiente de Fratura (lb/gal)"]
+                            )
+
+                            st.session_state.prof_ref_fratura_sapata = prof_ref_fratura
+                            st.session_state.grad_fratura_sapata_superficie = grad_fratura_ref
+
+                            prof_ref_fratura = float(st.session_state.prs)
+
+                            idx_ref_fratura = (df_sapata["Profundidade (m)"] - prof_ref_fratura).abs().idxmin()
+                            prof_ref_fratura = float(df_sapata.loc[idx_ref_fratura, "Profundidade (m)"])
+                            grad_fratura_ref = float(
+                                df_sapata.loc[idx_ref_fratura, "Gradiente de Fratura (lb/gal)"]
+                            )
+
+                            mask_calculo_kt = df_sapata["Profundidade (m)"] >= prof_ref_fratura
+
+                            rho_kt = pd.Series(index=df_sapata.index, dtype=float)
+
+                            rho_kt.loc[mask_calculo_kt] = (
+                                    ((prof_ref_fratura / df_sapata.loc[mask_calculo_kt, "Profundidade (m)"]) *
+                                     ((grad_fratura_ref - st.session_state.msf) -
+                                      df_sapata.loc[
+                                          mask_calculo_kt, "Gradiente de Pressão de Poros + Margem (lb/gal)"]))
+                                    -
+                                    ((altura_kick / df_sapata.loc[mask_calculo_kt, "Profundidade (m)"]) *
+                                     (df_sapata.loc[
+                                          mask_calculo_kt, "Gradiente de Pressão de Poros + Margem (lb/gal)"]
+                                      - st.session_state.dk))
+                                    +
+                                    df_sapata.loc[
+                                        mask_calculo_kt, "Gradiente de Pressão de Poros + Margem (lb/gal)"]
+                            )
+
+                            delta_rho_kt = pd.Series(index=df_sapata.index, dtype=float)
+
+                            delta_rho_kt.loc[mask_calculo_kt] = (
+                                    rho_kt.loc[mask_calculo_kt]
+                                    - df_sapata.loc[
+                                        mask_calculo_kt, "Gradiente de Pressão de Poros + Margem (lb/gal)"]
+                            )
+
+                            mask_kt_limite = (
+                                    delta_rho_kt.notna() &
+                                    (delta_rho_kt <= st.session_state.mskt)
+                            )
+
+                            idx_kt_limite = None
+                            prof_kt_limite = None
+                            if mask_kt_limite.any():
+                                idx_kt_limite = mask_kt_limite[mask_kt_limite].index[0]
+                                prof_kt_limite = float(df_sapata.loc[idx_kt_limite, "Profundidade (m)"])
+
+                            mapa_sapata_por_bha = {
+                                '17 1/2"': '13 3/8"',
+                                '12 1/4"': '9 5/8"',
+                                '8 1/2"': '7"',
+                                '6 1/8"': '5 1/2"'
+                            }
+
+                            ordem_bhas = ['17 1/2"', '12 1/4"', '8 1/2"', '6 1/8"']
+
+                            bha_inicial = st.session_state.get("bha_selecionado", '12 1/4"')
+                            if bha_inicial not in ordem_bhas:
+                                bha_inicial = '12 1/4"'
+
+                            idx_bha_inicial = ordem_bhas.index(bha_inicial)
+                            bhas_restantes = ordem_bhas[idx_bha_inicial:]
+
+                            prof_final_poco = float(df_sapata["Profundidade (m)"].max())
+
+                            condicao_ultima_fase_c2b = st.session_state.get(
+                                "condicao_ultima_fase_c2b",
+                                "Poço aberto"
+                            )
+
+                            prof_sapata_manual_c2b = None
+                            manual_c2b_ativa = False
+                            manual_c2b_assentada = False
+                            tol_sapata_manual_c2b = 0.5
+
+                            if condicao_ultima_fase_c2b == "Sapata definida":
+                                try:
+                                    prof_sapata_manual_c2b = float(
+                                        st.session_state.get("suf_c2b", prof_final_poco)
+                                    )
+                                except (TypeError, ValueError):
+                                    prof_sapata_manual_c2b = prof_final_poco
+
+                                # limita a sapata manual ao intervalo válido do poço
+                                prof_sapata_manual_c2b = max(
+                                    float(prof_sapata_superficie),
+                                    min(float(prof_sapata_manual_c2b), float(prof_final_poco))
+                                )
+
+                                manual_c2b_ativa = (
+                                        prof_sapata_manual_c2b > float(
+                                    prof_sapata_superficie) + tol_sapata_manual_c2b
+                                        and prof_sapata_manual_c2b <= float(
+                                    prof_final_poco) + tol_sapata_manual_c2b
+                                )
+
+                            sapatas_calculadas = []
+                            historico_fases = []
+                            curvas_kt_plot = []
+
+                            prof_sapata_atual = float(prof_sapata_superficie)
+
+                            rho_kt_acumulado = pd.Series(np.nan, index=df_sapata.index, dtype=float)
+                            delta_rho_kt_acumulado = pd.Series(np.nan, index=df_sapata.index, dtype=float)
+
+                            for fase_idx, bha_fase in enumerate(bhas_restantes, start=1):
+                                if prof_sapata_atual >= prof_final_poco:
+                                    break
+
+                                chave_final_fase = f"df_bha_final_{bha_fase}"
+
+                                if chave_final_fase in st.session_state and isinstance(
+                                        st.session_state[chave_final_fase], pd.DataFrame
+                                ):
+                                    df_bha_fase = st.session_state[chave_final_fase].copy()
+                                else:
+                                    diametro_poco_por_bha_fase = {
+                                        '17 1/2"': 17.5,
+                                        '12 1/4"': 12.25,
+                                        '8 1/2"': 8.5,
+                                        '6 1/8"': 6.125,
+                                    }
+                                    diametro_poco_m_fase = diametro_poco_por_bha_fase[bha_fase] * 0.0254
+                                    df_bha_fase = calcular_bha(
+                                        bha_opcoes[bha_fase].copy(),
+                                        diametro_poco_m_fase
+                                    )
+
+                                (
+                                    altura_kick_fase,
+                                    elemento_topo_kick_fase,
+                                    intervalo_topo_kick_fase
+                                ) = calcular_altura_kick_por_bha(
+                                    df_bha_fase,
+                                    st.session_state.vk
+                                )
+
+                                idx_ref_fratura = (
+                                        df_sapata["Profundidade (m)"] - prof_sapata_atual
+                                ).abs().idxmin()
+                                prof_ref_fratura_fase = float(
+                                    df_sapata.loc[idx_ref_fratura, "Profundidade (m)"]
+                                )
+                                grad_fratura_ref_fase = float(
+                                    df_sapata.loc[idx_ref_fratura, "Gradiente de Fratura (lb/gal)"]
+                                )
+
+                                mask_calculo_fase = df_sapata["Profundidade (m)"] >= prof_ref_fratura_fase
+
+                                gf_fase = pd.to_numeric(
+                                    df_sapata.loc[
+                                        mask_calculo_fase, "Gradiente de Fratura - Margem (lb/gal)"],
+                                    errors="coerce"
+                                )
+
+                                gf_min_fase = gf_fase.cummin()
+
+                                novo_minimo = gf_fase.lt(gf_min_fase.shift(fill_value=np.inf))
+
+                                idx_min_acumulado = (
+                                    pd.Series(gf_fase.index, index=gf_fase.index)
+                                    .where(novo_minimo)
+                                    .ffill()
+                                    .astype(int)
+                                )
+
+                                prof_gf_min_fase = pd.Series(
+                                    df_sapata.loc[
+                                        idx_min_acumulado.to_numpy(), "Profundidade (m)"].to_numpy(
+                                        dtype=float),
+                                    index=gf_fase.index
+                                )
+
+                                rho_kt = pd.Series(np.nan, index=df_sapata.index, dtype=float)
+                                delta_rho_kt = pd.Series(np.nan, index=df_sapata.index, dtype=float)
+
+                                rho_kt.loc[mask_calculo_fase] = (
+                                        ((prof_gf_min_fase / df_sapata.loc[
+                                            mask_calculo_fase, "Profundidade (m)"]) *
+                                         (gf_min_fase -
+                                          df_sapata.loc[
+                                              mask_calculo_fase,
+                                              "Gradiente de Pressão de Poros + Margem (lb/gal)"]))
+                                        -
+                                        ((altura_kick_fase / df_sapata.loc[
+                                            mask_calculo_fase, "Profundidade (m)"]) *
+                                         (df_sapata.loc[
+                                              mask_calculo_fase,
+                                              "Gradiente de Pressão de Poros + Margem (lb/gal)"]
+                                          - st.session_state.dk))
+                                        +
+                                        df_sapata.loc[
+                                            mask_calculo_fase, "Gradiente de Pressão de Poros + Margem (lb/gal)"]
+                                )
+
+                                delta_rho_kt.loc[mask_calculo_fase] = (
+                                        rho_kt.loc[mask_calculo_fase]
+                                        - df_sapata.loc[
+                                            mask_calculo_fase,
+                                            "Gradiente de Pressão de Poros + Margem (lb/gal)"]
+                                )
+
+                                if manual_c2b_assentada:
+                                    mask_preencher = rho_kt.notna()
+
+                                    rho_kt_acumulado.loc[mask_preencher] = rho_kt.loc[mask_preencher]
+                                    delta_rho_kt_acumulado.loc[mask_preencher] = delta_rho_kt.loc[
+                                        mask_preencher]
+
+                                    curvas_kt_plot.append({
+                                        "bha": bha_fase,
+                                        "prof": df_sapata.loc[
+                                            mask_preencher, "Profundidade (m)"
+                                        ].to_numpy(dtype=float),
+                                        "rho_kt": rho_kt.loc[mask_preencher].to_numpy(dtype=float)
+                                    })
+
+                                    historico_fases.append({
+                                        "bha": bha_fase,
+                                        "prof_sapata_informada": float(prof_sapata_atual),
+                                        "prof_ref_fratura": float(prof_ref_fratura_fase),
+                                        "grad_fratura_ref": float(grad_fratura_ref_fase),
+                                        "altura_kick": float(altura_kick_fase),
+                                        "elemento_topo_kick": elemento_topo_kick_fase,
+                                        "intervalo_topo_kick": intervalo_topo_kick_fase,
+                                        "prof_sapata_calc": None,
+                                        "criterio": "Trecho final em poço aberto após sapata definida pelo usuário."
+                                    })
+
+                                    break
+
+                                mask_kt_limite = (
+                                        delta_rho_kt.notna() &
+                                        (delta_rho_kt <= st.session_state.mskt)
+                                )
+
+                                idx_kt_limite = None
+                                prof_kt_limite = None
+                                if mask_kt_limite.any():
+                                    idx_kt_limite = mask_kt_limite[mask_kt_limite].index[0]
+                                    prof_kt_limite = float(df_sapata.loc[idx_kt_limite, "Profundidade (m)"])
+
+                                prof_alvo_hk = float(prof_sapata_atual) + float(st.session_state.hk)
+
+                                mask_hk = df_sapata["Profundidade (m)"] >= prof_alvo_hk
+
+                                idx_hk = None
+                                prof_hk = None
+                                if mask_hk.any():
+                                    idx_hk = mask_hk[mask_hk].index[0]
+                                    prof_hk = float(df_sapata.loc[idx_hk, "Profundidade (m)"])
+
+                                idx_sapata_manual_c2b = None
+                                prof_sapata_manual_calc_c2b = None
+
+                                if (
+                                        manual_c2b_ativa
+                                        and not manual_c2b_assentada
+                                        and prof_sapata_manual_c2b is not None
+                                        and float(prof_sapata_atual) < float(
+                                    prof_sapata_manual_c2b) <= float(
+                                    prof_final_poco) + tol_sapata_manual_c2b
+                                ):
+                                    if chegou_na_profundidade_final(
+                                            prof_sapata_manual_c2b,
+                                            base_final=prof_final_poco,
+                                            tol=tol_sapata_manual_c2b
+                                    ):
+                                        prof_sapata_manual_calc_c2b = float(prof_final_poco)
+                                        idx_sapata_manual_c2b = df_sapata["Profundidade (m)"].idxmax()
+                                    else:
+                                        prof_sapata_manual_calc_c2b = float(prof_sapata_manual_c2b)
+                                        idx_sapata_manual_c2b = (
+                                                df_sapata["Profundidade (m)"] - float(
+                                            prof_sapata_manual_calc_c2b)
+                                        ).abs().idxmin()
+
+                                candidatos = []
+
+                                if idx_kt_limite is not None:
+                                    candidatos.append(
+                                        (idx_kt_limite, prof_kt_limite, "Kick tolerance atingido.")
+                                    )
+
+                                if idx_hk is not None:
+                                    candidatos.append(
+                                        (idx_hk, prof_hk, "Comprimento máximo de poço aberto.")
+                                    )
+
+                                if idx_sapata_manual_c2b is not None:
+                                    candidatos.append(
+                                        (
+                                            idx_sapata_manual_c2b,
+                                            prof_sapata_manual_calc_c2b,
+                                            "Sapata definida pelo usuário para a última fase."
+                                        )
+                                    )
+
+                                if not candidatos:
+                                    mask_preencher = rho_kt.notna()
+                                    rho_kt_acumulado.loc[mask_preencher] = rho_kt.loc[mask_preencher]
+                                    delta_rho_kt_acumulado.loc[mask_preencher] = (
+                                        delta_rho_kt.loc[mask_preencher]
+                                    )
+
+                                    curvas_kt_plot.append({
+                                        "bha": bha_fase,
+                                        "prof": df_sapata.loc[
+                                            mask_preencher, "Profundidade (m)"
+                                        ].to_numpy(dtype=float),
+                                        "rho_kt": rho_kt.loc[mask_preencher].to_numpy(dtype=float)
+                                    })
+
+                                    historico_fases.append({
+                                        "bha": bha_fase,
+                                        "prof_sapata_informada": float(prof_sapata_atual),
+                                        "prof_ref_fratura": float(prof_ref_fratura_fase),
+                                        "grad_fratura_ref": float(grad_fratura_ref_fase),
+                                        "altura_kick": float(altura_kick_fase),
+                                        "elemento_topo_kick": elemento_topo_kick_fase,
+                                        "intervalo_topo_kick": intervalo_topo_kick_fase,
+                                        "prof_sapata_calc": None,
+                                        "criterio": "Não atingido até o fim dos dados de perfilagem."
+                                    })
+                                    break
+
+                                idx_stop, prof_sapata_nova, criterio_sapata = min(
+                                    candidatos,
+                                    key=lambda x: (
+                                        x[1],
+                                        0 if x[2].startswith("Sapata definida pelo usuário") else 1
+                                    )
+                                )
+
+                                eh_sapata_manual_c2b = criterio_sapata.startswith(
+                                    "Sapata definida pelo usuário"
+                                )
+
+                                if (
+                                        chegou_na_profundidade_final(
+                                            prof_sapata_nova,
+                                            base_final=prof_final_poco,
+                                            tol=0.5
+                                        )
+                                        and not eh_sapata_manual_c2b
+                                ):
+                                    mask_preencher = rho_kt.notna()
+
+                                    rho_kt_acumulado.loc[mask_preencher] = rho_kt.loc[mask_preencher]
+                                    delta_rho_kt_acumulado.loc[mask_preencher] = (
+                                        delta_rho_kt.loc[mask_preencher]
+                                    )
+
+                                    curvas_kt_plot.append({
+                                        "bha": bha_fase,
+                                        "prof": df_sapata.loc[
+                                            mask_preencher, "Profundidade (m)"
+                                        ].to_numpy(dtype=float),
+                                        "rho_kt": rho_kt.loc[mask_preencher].to_numpy(dtype=float)
+                                    })
+
+                                    historico_fases.append({
+                                        "bha": bha_fase,
+                                        "prof_sapata_informada": float(prof_sapata_atual),
+                                        "prof_ref_fratura": float(prof_ref_fratura_fase),
+                                        "grad_fratura_ref": float(grad_fratura_ref_fase),
+                                        "altura_kick": float(altura_kick_fase),
+                                        "elemento_topo_kick": elemento_topo_kick_fase,
+                                        "intervalo_topo_kick": intervalo_topo_kick_fase,
+                                        "prof_sapata_calc": None,
+                                        "criterio": "Não atingido até o fim dos dados de perfilagem."
+                                    })
+
+                                    break
+
+                                diametro_sapata = mapa_sapata_por_bha.get(bha_fase)
+                                nome_sapata = (
+                                    f'Sapata {diametro_sapata}'
+                                    if diametro_sapata is not None
+                                    else "Sapata"
+                                )
+
+                                prof_sapata_original = float(prof_sapata_nova)
+
+                                info_folhelho = None
+                                if not eh_sapata_manual_c2b:
+                                    info_folhelho = encontrar_folhelho_acima_do_arenito(
+                                        prof_sapata=prof_sapata_original,
+                                        profundidades=profundidades,
+                                        litologias=litologias,
+                                        base_final=float(df_sapata["Profundidade (m)"].max())
+                                    )
+
+                                if info_folhelho is not None:
+                                    decision_id = (
+                                        f"fase_{fase_idx}"
+                                        f"|bha_{bha_fase}"
+                                        f"|sapata_atual_{float(prof_sapata_atual):.2f}"
+                                        f"|sapata_calc_{float(prof_sapata_original):.2f}"
+                                    )
+
+                                    decisoes = st.session_state.get("decisoes_ajuste_arenito", {})
+
+                                    if decision_id not in decisoes:
+                                        st.session_state.pendencia_ajuste_arenito = {
+                                            "decision_id": decision_id,
+                                            "fase_idx": fase_idx,
+                                            "bha": bha_fase,
+                                            "nome_sapata": nome_sapata,
+                                            "prof_original": float(prof_sapata_original),
+                                            "prof_ajustada": (
+                                                float(info_folhelho["prof_ajustada"])
+                                                if info_folhelho.get("prof_ajustada") is not None
+                                                else None
+                                            ),
+                                            "motivo": info_folhelho.get("motivo"),
+                                            "ajuste_disponivel": info_folhelho.get("ajuste_disponivel",
+                                                                                   False),
+                                            "intervalo_atual": info_folhelho.get("intervalo_atual", {}),
+                                            "esp_min_nao_perm": info_folhelho.get(
+                                                "esp_min_nao_perm",
+                                                st.session_state.get("ef", 10.0)
+                                            ),
+                                        }
+
+                                        confirmar_ajuste_sapata_arenito()
+                                        st.stop()
+
+                                    if decisoes.get(decision_id, False) and info_folhelho.get(
+                                            "ajuste_disponivel", False):
+                                        prof_sapata_nova = float(info_folhelho["prof_ajustada"])
+
+                                        if prof_sapata_nova > float(prof_sapata_atual):
+                                            esp_min_nao_perm = float(
+                                                info_folhelho.get("esp_min_nao_perm",
+                                                                  st.session_state.get("ef", 10.0))
+                                            )
+
+                                            criterio_sapata = (
+                                                f"{criterio_sapata} Ajustada para Formação Não Permeável "
+                                                f"com espessura mínima de {esp_min_nao_perm:.2f} m acima."
+                                            )
+
+                                if float(prof_sapata_nova) <= float(prof_sapata_atual):
+                                    prof_sapata_nova = prof_sapata_original
+
+                                idx_stop = (
+                                        df_sapata["Profundidade (m)"] - float(prof_sapata_nova)
+                                ).abs().idxmin()
+
+                                mask_apos_sapata = (
+                                        df_sapata["Profundidade (m)"] > float(prof_sapata_nova)
+                                )
+
+                                rho_kt.loc[mask_apos_sapata] = np.nan
+                                delta_rho_kt.loc[mask_apos_sapata] = np.nan
+
+                                mask_preencher = rho_kt.notna()
+                                rho_kt_acumulado.loc[mask_preencher] = rho_kt.loc[mask_preencher]
+                                delta_rho_kt_acumulado.loc[mask_preencher] = delta_rho_kt.loc[mask_preencher]
+
+                                curvas_kt_plot.append({
+                                    "bha": bha_fase,
+                                    "prof": df_sapata.loc[
+                                        mask_preencher, "Profundidade (m)"
+                                    ].to_numpy(dtype=float),
+                                    "rho_kt": rho_kt.loc[mask_preencher].to_numpy(dtype=float)
+                                })
+
+                                sapatas_calculadas.append({
+                                    "prof": float(prof_sapata_nova),
+                                    "nome": nome_sapata,
+                                    "cor": "black",
+                                    "bha": bha_fase,
+                                    "criterio": criterio_sapata,
+                                    "prof_ref_fratura": float(prof_ref_fratura_fase),
+                                    "grad_fratura_ref": float(grad_fratura_ref_fase),
+                                    "prof_sapata_informada": float(prof_sapata_atual),
+                                    "altura_kick": float(altura_kick_fase),
+                                    "elemento_topo_kick": elemento_topo_kick_fase,
+                                    "intervalo_topo_kick": intervalo_topo_kick_fase
+                                })
+
+                                historico_fases.append({
+                                    "bha": bha_fase,
+                                    "prof_sapata_informada": float(prof_sapata_atual),
+                                    "prof_ref_fratura": float(prof_ref_fratura_fase),
+                                    "grad_fratura_ref": float(grad_fratura_ref_fase),
+                                    "altura_kick": float(altura_kick_fase),
+                                    "elemento_topo_kick": elemento_topo_kick_fase,
+                                    "intervalo_topo_kick": intervalo_topo_kick_fase,
+                                    "prof_sapata_calc": float(prof_sapata_nova),
+                                    "criterio": criterio_sapata
+                                })
+
+                                prof_sapata_atual = float(prof_sapata_nova)
+
+                                if eh_sapata_manual_c2b:
+                                    manual_c2b_assentada = True
+                                    continue
+
+                                if prof_sapata_atual >= prof_final_poco:
+                                    break
+
+                            for col_drop in ["ρkt", "Δρkt"]:
+                                if col_drop in df_sapata.columns:
+                                    df_sapata.drop(columns=[col_drop], inplace=True)
+
+                            df_sapata.insert(
+                                loc=df_sapata.columns.get_loc('Gradiente de Fratura (lb/gal)') + 1,
+                                column='ρkt',
+                                value=rho_kt_acumulado
+                            )
+
+                            df_sapata.insert(
+                                loc=df_sapata.columns.get_loc('ρkt') + 1,
+                                column='Δρkt',
+                                value=delta_rho_kt_acumulado
+                            )
+
+                            sapatas_plot = []
+
+                            if "prc" in st.session_state and pd.notna(st.session_state.prc):
+                                od_revest_condutor = st.session_state.get("odrc", '20"')
+                                sapatas_plot.append({
+                                    "prof": float(st.session_state.prc),
+                                    "nome": f"Sapata {od_revest_condutor}",
+                                    "cor": "black"
+                                })
+
+                            if prof_sapata_superficie is not None and pd.notna(prof_sapata_superficie):
+                                od_revest_superficie = st.session_state.get("odrs", '13 3/8"')
+                                sapatas_plot.append({
+                                    "prof": float(prof_sapata_superficie),
+                                    "nome": f"Sapata {od_revest_superficie}",
+                                    "cor": "black",
+                                    "tipo": "superficie"
+                                })
+
+                            for sap in sapatas_calculadas:
+                                if sap["prof"] is not None and pd.notna(sap["prof"]):
+                                    sapatas_plot.append({
+                                        "prof": float(sap["prof"]),
+                                        "nome": sap.get("nome", "Sapata"),
+                                        "cor": sap.get("cor", "black"),
+                                        "bha": sap.get("bha", None),
+                                        "criterio": sap.get("criterio", ""),
+                                        "tipo": "calculada"
+                                    })
+
+                            st.session_state.sapatas_kick_c2b = sapatas_calculadas
+                            st.session_state.historico_fases_c2b = historico_fases
+                            st.session_state.curvas_kt_plot = curvas_kt_plot
+                            st.session_state.df_sapata_kt = df_sapata.copy()
+                            st.session_state.sapatas_plot_kt = sapatas_plot
+                            st.session_state.fig_esquematico_asp = None
+                            st.session_state.df_esquematico_asp = None
+                            st.session_state.pendencia_ajuste_arenito = None
+                            st.session_state.recalcular_sapatas = False
+
+                        else:
+                            df_sapata = df_sapata.copy()
+                            df_sapata["gf_kt (lb/gal)"] = np.nan
+
+                            mapa_sapata_por_bha = {
+                                '17 1/2"': '13 3/8"',
+                                '12 1/4"': '9 5/8"',
+                                '8 1/2"': '7"',
+                                '6 1/8"': '5 1/2"'
+                            }
+
+                            diametro_poco_por_bha = {
+                                '17 1/2"': 17.5,
+                                '12 1/4"': 12.25,
+                                '8 1/2"': 8.5,
+                                '6 1/8"': 6.125,
+                            }
+
+                            ordem_bha_baixo_cima = ['6 1/8"', '8 1/2"', '12 1/4"', '17 1/2"']
+
+                            bha_inicial_b2c = st.session_state.bha_escolhido
+                            bhas_disponiveis = []
+
+                            if bha_inicial_b2c not in ordem_bha_baixo_cima:
+                                st.warning("BHA inicial inválido para o cálculo Baixo para Cima.")
+                                st.session_state.sapatas_kick_b2c = []
+                                st.session_state.curvas_kt_b2c = []
+                                st.session_state.historico_fases_b2c = []
+                                st.session_state.df_sapata_kt = df_sapata.copy()
+                            else:
+                                idx_inicio = ordem_bha_baixo_cima.index(bha_inicial_b2c)
+                                ordem_filtrada = ordem_bha_baixo_cima[idx_inicio:]
+                                bhas_disponiveis = [bha for bha in ordem_filtrada if bha in bha_opcoes]
+
+                            od_revest_condutor = str(st.session_state.get("odrc", "")).strip()
+                            od_revest_superficie = str(st.session_state.get("odrs", "")).strip()
+
+                            sapatas_existentes = {od_revest_condutor, od_revest_superficie}
+
+                            if not bhas_disponiveis:
+                                st.warning("Nenhum BHA válido encontrado para o cálculo Baixo para Cima.")
+                                st.session_state.sapatas_kick_b2c = []
+                                st.session_state.curvas_kt_b2c = []
+                                st.session_state.historico_fases_b2c = []
+                                st.session_state.df_sapata_kt = df_sapata.copy()
+
+                            else:
+                                sapatas_calculadas = []
+                                historico_fases = []
+                                curvas_kt_plot = []
+                                intervalos_sem_sapata = []
+                                intervalos_fase_curta = []
+
+                                prof_col = pd.to_numeric(df_sapata["Profundidade (m)"], errors="coerce")
+                                profundidade_minima_sapata = float(st.session_state.prs)
+
+                                profundidade_maxima_perfil = float(prof_col.max())
+
+                                ultima_fase_poco_aberto = (
+                                        st.session_state.get("condicao_ultima_fase_b2c", "Sapata definida")
+                                        == "Poço aberto"
+                                )
+
+                                if ultima_fase_poco_aberto:
+                                    profundidade_ultima_sapata = profundidade_maxima_perfil
+                                else:
+                                    profundidade_ultima_sapata = float(st.session_state.suf)
+
+                                profundidade_ultima_sapata = max(
+                                    profundidade_minima_sapata,
+                                    min(profundidade_ultima_sapata, profundidade_maxima_perfil)
+                                )
+
+                                sapata_usuario_abaixo_do_fundo = (
+                                        not ultima_fase_poco_aberto
+                                        and float(profundidade_ultima_sapata) < float(
+                                    profundidade_maxima_perfil)
+                                )
+
+                                if sapata_usuario_abaixo_do_fundo and bha_inicial_b2c in ordem_bha_baixo_cima:
+                                    idx_bha_definido = ordem_bha_baixo_cima.index(bha_inicial_b2c)
+
+                                    if idx_bha_definido > 0:
+                                        bha_menor_b2c = ordem_bha_baixo_cima[idx_bha_definido - 1]
+
+                                        if bha_menor_b2c in bha_opcoes and bha_menor_b2c not in bhas_disponiveis:
+                                            bhas_disponiveis = [bha_menor_b2c] + bhas_disponiveis
+
+                                idx_inicio_b2c = prof_col.sub(profundidade_maxima_perfil).abs().idxmin()
+                                prof_fundo = float(df_sapata.loc[idx_inicio_b2c, "Profundidade (m)"])
+
+                                profundidade_limite_superior = prof_fundo
+                                idx_sapata_anterior = idx_inicio_b2c
+
+                                for i_bha, bha_fase in enumerate(bhas_disponiveis):
+                                    if profundidade_limite_superior <= profundidade_minima_sapata:
+                                        break
+
+                                    chave_final_fase = f"df_bha_final_{bha_fase}"
+                                    if (
+                                            chave_final_fase in st.session_state
+                                            and isinstance(st.session_state[chave_final_fase], pd.DataFrame)
+                                    ):
+                                        df_bha_fase = st.session_state[chave_final_fase].copy()
+                                    else:
+                                        if bha_fase not in diametro_poco_por_bha:
+                                            st.warning(f"Diâmetro do poço não mapeado para o BHA {bha_fase}.")
+                                            continue
+
+                                        diametro_poco_m_fase = diametro_poco_por_bha[bha_fase] * 0.0254
+
+                                        df_bha_fase = calcular_bha(
+                                            bha_opcoes[bha_fase].copy(),
+                                            diametro_poco_m_fase
+                                        )
+
+                                    try:
+                                        (
+                                            altura_kick_fase,
+                                            elemento_topo_kick_fase,
+                                            intervalo_topo_kick_fase
+                                        ) = calcular_altura_kick_por_bha(
+                                            df_bha_fase,
+                                            st.session_state.vk
+                                        )
+                                    except Exception as e:
+                                        st.warning(
+                                            f"Não foi possível calcular a altura do kick para o BHA {bha_fase}: {e}"
+                                        )
+                                        continue
+
+                                    mask_intervalo = (
+                                            (prof_col >= profundidade_minima_sapata) &
+                                            (prof_col <= profundidade_limite_superior)
+                                    )
+
+                                    df_intervalo = df_sapata.loc[mask_intervalo].copy()
+
+                                    if df_intervalo.empty or len(df_intervalo) < 2:
+                                        break
+
+                                    df_intervalo = df_intervalo.sort_values("Profundidade (m)").copy()
+
+                                    prof_intervalo = pd.to_numeric(
+                                        df_intervalo["Profundidade (m)"], errors="coerce"
+                                    )
+
+                                    gf_limite = pd.to_numeric(
+                                        df_intervalo["Gradiente de Fratura - Margem (lb/gal)"],
+                                        errors="coerce"
+                                    )
+
+                                    idx_ref = idx_sapata_anterior
+
+                                    prof_ref = float(df_sapata.loc[idx_ref, "Profundidade (m)"])
+                                    gpp_ref = float(
+                                        df_sapata.loc[
+                                            idx_ref, "Gradiente de Pressão de Poros + Margem (lb/gal)"
+                                        ]
+                                    )
+
+                                    gf_kt = (
+                                            ((prof_ref / prof_intervalo) * (
+                                                    float(st.session_state.mskt) + float(st.session_state.ms)))
+                                            + ((float(altura_kick_fase) / prof_intervalo) * (
+                                            gpp_ref - float(st.session_state.dk)))
+                                            + gpp_ref
+                                    )
+
+                                    df_intervalo["gf_kt (lb/gal)"] = gf_kt
+                                    df_sapata.loc[df_intervalo.index, "gf_kt (lb/gal)"] = df_intervalo[
+                                        "gf_kt (lb/gal)"
+                                    ]
+
+                                    cond_critica = gf_kt >= gf_limite - st.session_state.mskt
+
+                                    profundidade_sapata_nova = None
+                                    idx_sapata = None
+
+                                    if cond_critica.any():
+                                        idx_critico = cond_critica[cond_critica].index[-1]
+                                        pos_critico = df_intervalo.index.get_loc(idx_critico)
+
+                                        if pos_critico < len(df_intervalo.index) - 1:
+                                            idx_sapata = df_intervalo.index[pos_critico + 1]
+                                        else:
+                                            idx_sapata = idx_critico
+
+                                        profundidade_sapata_nova = float(
+                                            df_sapata.loc[idx_sapata, "Profundidade (m)"]
+                                        )
+                                        criterio_sapata = "Kick tolerance atingido."
+                                    else:
+                                        profundidade_sapata_nova = profundidade_minima_sapata
+                                        idx_sapata = prof_col.sub(profundidade_sapata_nova).abs().idxmin()
+                                        criterio_sapata = "Não atingido até o revestimento de superfície."
+
+                                    prof_alvo_hk_b2c = (
+                                            profundidade_limite_superior - float(st.session_state.hk)
+                                    )
+
+                                    if (
+                                            prof_alvo_hk_b2c > profundidade_minima_sapata
+                                            and profundidade_sapata_nova < prof_alvo_hk_b2c
+                                    ):
+                                        profundidade_sapata_nova = prof_alvo_hk_b2c
+                                        idx_sapata = prof_col.sub(profundidade_sapata_nova).abs().idxmin()
+                                        criterio_sapata = "Comprimento máximo de poço aberto."
+
+                                    if profundidade_sapata_nova < profundidade_minima_sapata:
+                                        profundidade_sapata_nova = profundidade_minima_sapata
+                                        idx_sapata = prof_col.sub(profundidade_sapata_nova).abs().idxmin()
+
+                                    sapata_usuario_b2c = (
+                                            not ultima_fase_poco_aberto
+                                            and i_bha == 0
+                                            and float(profundidade_ultima_sapata) < float(profundidade_limite_superior)
+                                    )
+
+                                    if sapata_usuario_b2c:
+                                        profundidade_sapata_nova = float(profundidade_ultima_sapata)
+                                        idx_sapata = prof_col.sub(profundidade_sapata_nova).abs().idxmin()
+                                        criterio_sapata = "Profundidade definida para a última sapata."
+
+                                    # Validação litológica da sapata no método Baixo para Cima
+                                    deve_validar_litologia_b2c = False
+                                    bha_sapata_b2c = None
+                                    nome_sapata_b2c = None
+
+                                    if i_bha < len(bhas_disponiveis) - 1:
+                                        bha_sapata_b2c = bhas_disponiveis[i_bha + 1]
+
+                                        if not sapata_repetida(
+                                                bha_sapata_b2c,
+                                                mapa_sapata_por_bha,
+                                                sapatas_existentes
+                                        ):
+                                            deve_validar_litologia_b2c = True
+                                            diametro_sapata_b2c = mapa_sapata_por_bha.get(
+                                                bha_sapata_b2c,
+                                                "Revestimento"
+                                            )
+                                            nome_sapata_b2c = f"Sapata {diametro_sapata_b2c}"
+
+                                    if deve_validar_litologia_b2c and not sapata_usuario_b2c:
+                                        info_folhelho = encontrar_folhelho_acima_do_arenito(
+                                            prof_sapata=float(profundidade_sapata_nova),
+                                            profundidades=profundidades,
+                                            litologias=litologias,
+                                            base_final=float(df_sapata["Profundidade (m)"].max())
+                                        )
+
+                                        if info_folhelho is not None:
+                                            esp_min_id = float(
+                                                info_folhelho.get(
+                                                    "esp_min_nao_perm",
+                                                    st.session_state.get("ef", 10.0)
+                                                )
+                                            )
+
+                                            decision_id = (
+                                                f"b2c"
+                                                f"|i_bha_{i_bha}"
+                                                f"|bha_atual_{bha_fase}"
+                                                f"|bha_sapata_{bha_sapata_b2c}"
+                                                f"|sapata_calc_{float(profundidade_sapata_nova):.2f}"
+                                                f"|ef_{esp_min_id:.2f}"
+                                            )
+
+                                            decisoes = st.session_state.get("decisoes_ajuste_arenito", {})
+
+                                            if decision_id not in decisoes:
+                                                st.session_state.pendencia_ajuste_arenito = {
+                                                    "decision_id": decision_id,
+                                                    "fase_idx": i_bha,
+                                                    "bha": bha_sapata_b2c,
+                                                    "nome_sapata": nome_sapata_b2c,
+                                                    "prof_original": float(profundidade_sapata_nova),
+                                                    "prof_ajustada": (
+                                                        float(info_folhelho["prof_ajustada"])
+                                                        if info_folhelho.get("prof_ajustada") is not None
+                                                        else None
+                                                    ),
+                                                    "motivo": info_folhelho.get("motivo"),
+                                                    "ajuste_disponivel": info_folhelho.get(
+                                                        "ajuste_disponivel",
+                                                        False
+                                                    ),
+                                                    "intervalo_atual": info_folhelho.get("intervalo_atual",
+                                                                                         {}),
+                                                    "esp_min_nao_perm": esp_min_id,
+                                                }
+
+                                                confirmar_ajuste_sapata_arenito()
+                                                st.stop()
+
+                                            if (
+                                                    decisoes.get(decision_id, False)
+                                                    and info_folhelho.get("ajuste_disponivel", False)
+                                            ):
+                                                prof_sapata_ajustada = float(info_folhelho["prof_ajustada"])
+
+                                                if (
+                                                        prof_sapata_ajustada < float(
+                                                    profundidade_sapata_nova)
+                                                        and prof_sapata_ajustada >= float(
+                                                    profundidade_minima_sapata)
+                                                ):
+                                                    profundidade_sapata_nova = prof_sapata_ajustada
+                                                    idx_sapata = prof_col.sub(
+                                                        profundidade_sapata_nova
+                                                    ).abs().idxmin()
+
+                                                    criterio_sapata = (
+                                                        f"{criterio_sapata} Ajustada para Formação Não Permeável "
+                                                        f"com espessura mínima de {esp_min_id:.2f} m acima."
+                                                    )
+
+                                    mask_plot_fase = (
+                                            (prof_intervalo >= profundidade_sapata_nova) &
+                                            (prof_intervalo <= profundidade_limite_superior)
+                                    )
+
+                                    df_plot_fase = df_intervalo.loc[mask_plot_fase].copy()
+
+                                    comprimento_minimo_fase = st.session_state.cmf
+                                    comprimento_fase = float(
+                                        profundidade_limite_superior - profundidade_sapata_nova
+                                    )
+
+                                    if comprimento_fase < comprimento_minimo_fase:
+                                        y1 = min(profundidade_sapata_nova, profundidade_limite_superior)
+                                        y2 = max(profundidade_sapata_nova, profundidade_limite_superior)
+
+                                        intervalos_fase_curta.append({
+                                            "bha": bha_fase,
+                                            "topo": y1,
+                                            "base": y2,
+                                            "comprimento": comprimento_fase,
+                                            "comprimento_minimo_fase": comprimento_minimo_fase
+                                        })
+
+                                    curvas_kt_plot.append({
+                                        "bha": bha_fase,
+                                        "prof": df_plot_fase["Profundidade (m)"].tolist(),
+                                        "gf_kt": df_plot_fase["gf_kt (lb/gal)"].tolist(),
+                                    })
+
+                                    grad_fratura_ref = float(
+                                        df_sapata.loc[idx_sapata, "Gradiente de Fratura - Margem (lb/gal)"]
+                                    )
+
+                                    bha_sapata_manual_b2c = bha_inicial_b2c if sapata_usuario_b2c else bha_fase
+
+                                    if (
+                                            sapata_usuario_b2c
+                                            and not sapata_repetida(
+                                        bha_sapata_manual_b2c,
+                                        mapa_sapata_por_bha,
+                                        sapatas_existentes
+                                    )
+                                    ):
+                                        sapatas_calculadas.append({
+                                            "prof": float(profundidade_ultima_sapata),
+                                            "label": mapa_sapata_por_bha.get(bha_sapata_manual_b2c,
+                                                                             "Revestimento"),
+                                            "bha": bha_sapata_manual_b2c,
+                                            "criterio": "Profundidade definida para a última sapata."
+                                        })
+
+                                    encerrar_por_intervalo_sem_sapata = False
+
+                                    if i_bha < len(bhas_disponiveis) - 1 and not sapata_usuario_b2c:
+                                        bha_proximo = bhas_disponiveis[i_bha + 1]
+
+                                        if not sapata_repetida(
+                                                bha_proximo, mapa_sapata_por_bha, sapatas_existentes
+                                        ):
+                                            sapatas_calculadas.append({
+                                                "prof": profundidade_sapata_nova,
+                                                "label": mapa_sapata_por_bha.get(
+                                                    bha_proximo, "Revestimento"
+                                                ),
+                                                "bha": bha_proximo,
+                                                "criterio": criterio_sapata,
+                                            })
+                                        else:
+                                            sapata_repetida_label = mapa_sapata_por_bha.get(bha_proximo, "")
+
+                                            if sapata_repetida_label == str(
+                                                    st.session_state.get("odrs", "")
+                                            ).strip():
+                                                prof_revest_existente = float(st.session_state.prs)
+                                                motivo = "superfície"
+                                            elif sapata_repetida_label == str(
+                                                    st.session_state.get("odrc", "")
+                                            ).strip():
+                                                prof_revest_existente = float(st.session_state.prc)
+                                                motivo = "condutor"
+                                            else:
+                                                prof_revest_existente = None
+                                                motivo = "existente"
+
+                                            if prof_revest_existente is not None:
+                                                y1 = min(profundidade_sapata_nova, prof_revest_existente)
+                                                y2 = max(profundidade_sapata_nova, prof_revest_existente)
+
+                                                intervalos_sem_sapata.append({
+                                                    "bha": bha_proximo,
+                                                    "topo": y1,
+                                                    "base": y2,
+                                                    "motivo": motivo,
+                                                    "sapata": sapata_repetida_label
+                                                })
+
+                                                encerrar_por_intervalo_sem_sapata = True
+
+                                    historico_fases.append({
+                                        "bha": bha_fase,
+                                        "prof_sapata_calc": profundidade_sapata_nova,
+                                        "grad_fratura_ref": grad_fratura_ref,
+                                        "altura_kick": float(altura_kick_fase),
+                                        "elemento_topo_kick": elemento_topo_kick_fase,
+                                        "intervalo_topo_kick": intervalo_topo_kick_fase,
+                                        "criterio": criterio_sapata,
+                                        "prof_ref": prof_ref,
+                                        "gpp_ref": gpp_ref,
+                                        "ultima_fase_poco_aberto": bool(ultima_fase_poco_aberto),
+                                    })
+
+                                    if encerrar_por_intervalo_sem_sapata:
+                                        break
+
+                                    idx_sapata_anterior = idx_sapata
+
+                                    if profundidade_sapata_nova <= profundidade_minima_sapata:
+                                        break
+
+                                    profundidade_limite_superior = profundidade_sapata_nova
+
+                                st.session_state.sapatas_kick_b2c = sapatas_calculadas
+                                st.session_state.curvas_kt_b2c = curvas_kt_plot
+                                st.session_state.historico_fases_b2c = historico_fases
+                                st.session_state.intervalos_sem_sapata_b2c = intervalos_sem_sapata
+                                st.session_state.intervalos_fase_curta_b2c = intervalos_fase_curta
+                                st.session_state.df_sapata_kt = df_sapata.copy()
+
+                                sapatas_plot = []
+
+                                if "prc" in st.session_state and pd.notna(st.session_state.prc):
+                                    od_revest_condutor = st.session_state.get("odrc", '20"')
+                                    sapatas_plot.append({
+                                        "prof": float(st.session_state.prc),
+                                        "nome": f"Sapata {od_revest_condutor}",
+                                        "cor": "black"
+                                    })
+
+                                if "prs" in st.session_state and pd.notna(st.session_state.prs):
+                                    od_revest_superficie = st.session_state.get("odrs", '13 3/8"')
+                                    sapatas_plot.append({
+                                        "prof": float(st.session_state.prs),
+                                        "nome": f"Sapata {od_revest_superficie}",
+                                        "cor": "black",
+                                        "tipo": "superficie"
+                                    })
+
+                                sapatas_calc_b2c = st.session_state.get("sapatas_kick_b2c", [])
+
+                                for i, s_calc in enumerate(sapatas_calc_b2c):
+                                    prof = s_calc.get("prof", None)
+                                    label_sapata = s_calc.get("label", f"Fase {i + 1}")
+
+                                    if prof is None or pd.isna(prof):
+                                        continue
+
+                                    sapatas_plot.append({
+                                        "prof": float(prof),
+                                        "nome": f"Sapata {label_sapata}",
+                                        "cor": "black",
+                                        "bha": s_calc.get("bha", None),
+                                        "criterio": s_calc.get("criterio", ""),
+                                        "tipo": "calculada"
+                                    })
+
+                                st.session_state.sapatas_plot_kt = sapatas_plot
+                                st.session_state.pendencia_ajuste_arenito = None
+                                st.session_state.recalcular_sapatas = False
+
+                    if "df_bha_final" in st.session_state and not st.session_state.df_bha_final.empty:
+                        ultrapassou_bha = (
+                                st.session_state.elemento_topo_kick == "Acima do último elemento do BHA"
+                        )
+
+                        if ultrapassou_bha:
+                            texto_topo_kick = "Ultrapassou o comprimento acumulado do BHA"
+                        else:
+                            texto_topo_kick = (
+                                f'{st.session_state.elemento_topo_kick} '
+                                f'({st.session_state.intervalo_elemento_topo_kick})'
+                            )
+
+                        c1, c2, c3 = st.columns([1, 1, 1.35])
+
+                        with c1:
+                            st.metric(
+                                label="Volume do kick",
+                                value=f'{st.session_state.volume_kick_bbl:.2f} bbl',
+                                border=True
+                            )
+
+                        with c2:
+                            st.metric(
+                                label="Altura do kick",
+                                value=f'{st.session_state.altura_kick_calculada:.2f} m',
+                                border=True
+                            )
+
+                        cor_texto_topo_kick = "red" if ultrapassou_bha else "black"
+
+                        with c3:
+                            st.markdown(
+                                f"""
+                                <div style="
+                                    border: 1px solid rgba(49, 51, 63, 0.2);
+                                    border-radius: 0.5rem;
+                                    padding: 0.6rem 1rem 0.75rem 1rem;
+                                    min-height: 108px;
+                                    display: flex;
+                                    flex-direction: column;
+                                    justify-content: flex-start;
+                                    background: transparent;
+                                ">
+                                    <div style="
+                                        font-size: 0.875rem;
+                                        color: black;
+                                        margin-top: 0.35rem;
+                                        margin-bottom: 0.15rem;
+                                        font-weight: 400;
+                                    ">
+                                        Topo do kick
+                                    </div>
+                                    <div style="
+                                        font-size: 1.1rem;
+                                        font-weight: 600;
+                                        color: {cor_texto_topo_kick};
+                                        line-height: 1.25;
+                                        word-break: break-word;
+                                        overflow-wrap: break-word;
+                                        margin-top: 0.35rem;
+                                    ">
+                                        {texto_topo_kick}
+                                    </div>
+                                </div>
+                                """,
+                                unsafe_allow_html=True
+                            )
+
+                        if st.session_state.get("metodo_kt") == "Cima para Baixo":
+                            historico_fases = st.session_state.get("historico_fases_c2b", [])
+
+                            if historico_fases:
+                                st.markdown("#### Resumo das fases")
+
+                                for fase in historico_fases:
+                                    prof_calc_txt = (
+                                        f'{fase["prof_sapata_calc"]:.2f} m'
+                                        if fase["prof_sapata_calc"] is not None and pd.notna(
+                                            fase["prof_sapata_calc"]
+                                        )
+                                        else "Não atingido até o fim dos dados de perfilagem."
+                                    )
+
+                                    intervalo_topo_txt = (
+                                        f' · {fase["intervalo_topo_kick"]}'
+                                        if fase["intervalo_topo_kick"]
+                                        else ""
+                                    )
+
+                                    with st.expander(f'Fase {fase["bha"]}', expanded=True):
+                                        cc1, cc2 = st.columns(2)
+
+                                        with cc1:
+                                            st.caption("Profundidade da sapata")
+                                            st.write(prof_calc_txt)
+
+                                            st.caption("Gradiente de fratura na sapata")
+                                            st.write(f'{fase["grad_fratura_ref"]:.2f} lb/gal')
+
+                                        with cc2:
+                                            st.caption("Altura do kick")
+                                            st.write(f'{fase["altura_kick"]:.2f} m')
+
+                                            st.caption("Topo do kick")
+                                            st.write(
+                                                f'{fase["elemento_topo_kick"]}{intervalo_topo_txt}'
+                                            )
+
+                                        st.markdown(
+                                            f"""
+                                            <span>
+                                                <b>Critério:</b>
+                                                <span style="color: red;">{fase["criterio"]}</span>
+                                            </span>
+                                            """,
+                                            unsafe_allow_html=True
+                                        )
+                        else:
+                            historico_fases = st.session_state.get("historico_fases_b2c", [])
+
+                            if historico_fases:
+                                st.markdown("#### Resumo das fases")
+
+                                for fase in historico_fases:
+                                    prof_calc_txt = (
+                                        f'{fase["prof_sapata_calc"]:.2f} m'
+                                        if fase["prof_sapata_calc"] is not None and pd.notna(
+                                            fase["prof_sapata_calc"]
+                                        )
+                                        else "Não calculado"
+                                    )
+
+                                    intervalo_topo_txt = (
+                                        f' · {fase["intervalo_topo_kick"]}'
+                                        if fase["intervalo_topo_kick"]
+                                        else ""
+                                    )
+
+                                    with st.expander(f'Fase {fase["bha"]}', expanded=True):
+                                        cc1, cc2 = st.columns(2)
+
+                                        with cc1:
+                                            st.caption("Profundidade da sapata")
+                                            st.write(prof_calc_txt)
+
+                                            st.caption("Gradiente de fratura")
+                                            st.write(f'{fase["grad_fratura_ref"]:.2f} lb/gal')
+
+                                            st.caption("Profundidade de referência")
+                                            st.write(f'{fase["prof_ref"]:.2f} m')
+
+                                        with cc2:
+                                            st.caption("Altura do kick")
+                                            st.write(f'{fase["altura_kick"]:.2f} m')
+
+                                            st.caption("Gradiente de Pressão de Poros")
+                                            st.write(f'{fase["gpp_ref"]:.2f} lb/gal')
+
+                                            st.caption("Topo do kick")
+                                            st.write(
+                                                f'{fase["elemento_topo_kick"]}{intervalo_topo_txt}'
+                                            )
+
+                                        st.markdown(
+                                            f"""
+                                            <span>
+                                                <b>Critério:</b>
+                                                <span style="color: red;">{fase["criterio"]}</span>
+                                            </span>
+                                            """,
+                                            unsafe_allow_html=True
+                                        )
+
+            with col2:
+                df_sapata_valido = (
+                        isinstance(df_sapata, pd.DataFrame)
+                        and not df_sapata.empty
+                        and "Profundidade (m)" in df_sapata.columns
+                )
+                if not df_sapata_valido:
+                    with st.container(border=True):
+                        st.info("Clique em Definir Sapatas para gerar os resultados e os gráficos.")
+                else:
+                    with st.container(border=True):
+                        if "x_max_sa" not in st.session_state:
+                            st.session_state.x_max_sa = 21
+                        if "x_min_sa" not in st.session_state:
+                            st.session_state.x_min_sa = 7
+                        def reset_config():
+                            st.session_state.x_min_sa = 7
+                            st.session_state.x_max_sa = 21
+                            st.session_state.x_step_sa = 2
+                            st.session_state.y_min_sa = 0
+                            st.session_state.y_max_sa = int(df_pp['Profundidade (m)'].max()) + 100
+                            st.session_state.y_step_sa = 50
+                            for chave_reset_sa in (
+                                    "x_min_sa", "x_max_sa", "x_step_sa",
+                                    "y_min_sa", "y_max_sa", "y_step_sa",
+                            ):
+                                st.session_state[f"_w_{chave_reset_sa}"] = (
+                                    st.session_state[chave_reset_sa]
+                                )
+                        for chave_grafico in (
+                                "leg_sa",
+                                "x_min_sa",
+                                "x_max_sa",
+                                "x_step_sa",
+                                "y_min_sa",
+                                "y_max_sa",
+                                "y_step_sa",
+                        ):
+                            preparar_widget_persistente(
+                                chave_grafico,
+                                f"_w_{chave_grafico}"
+                            )
+
+                        st.session_state.x_step_sa = max(
+                            1,
+                            int(st.session_state.get("x_step_sa", 1))
+                        )
+                        st.session_state.y_step_sa = max(
+                            1,
+                            int(st.session_state.get("y_step_sa", 200))
+                        )
+                        st.session_state["_w_x_step_sa"] = max(
+                            1,
+                            int(st.session_state.get("_w_x_step_sa", st.session_state.x_step_sa))
+                        )
+                        st.session_state["_w_y_step_sa"] = max(
+                            1,
+                            int(st.session_state.get("_w_y_step_sa", st.session_state.y_step_sa))
+                        )
+
+                        with st.expander("****Configurações do Gráfico****", expanded=False):
+                            with st.expander("***Curvas e textos***", expanded=False):
+                                st.selectbox(
+                                    "Exibir Legendas",
+                                    ["Sim", "Não"],
+                                    key="_w_leg_sa",
+                                    on_change=salvar_widget_persistente,
+                                    args=("leg_sa", "_w_leg_sa")
+                                )
+
+                            with st.expander("***Eixos***", expanded=False):
+                                st.number_input(
+                                    "Eixo X - mínimo",
+                                    step=1,
+                                    key="_w_x_min_sa",
+                                    on_change=salvar_widget_persistente,
+                                    args=("x_min_sa", "_w_x_min_sa")
+                                )
+                                st.number_input(
+                                    "Eixo X - máximo",
+                                    step=1,
+                                    key="_w_x_max_sa",
+                                    on_change=salvar_widget_persistente,
+                                    args=("x_max_sa", "_w_x_max_sa")
+                                )
+                                st.number_input(
+                                    "Passo do eixo X",
+                                    min_value=1,
+                                    step=1,
+                                    key="_w_x_step_sa",
+                                    on_change=salvar_widget_persistente,
+                                    args=("x_step_sa", "_w_x_step_sa")
+                                )
+                                st.number_input(
+                                    "Eixo Y - mínimo",
+                                    step=100,
+                                    key="_w_y_min_sa",
+                                    on_change=salvar_widget_persistente,
+                                    args=("y_min_sa", "_w_y_min_sa")
+                                )
+                                st.number_input(
+                                    "Eixo Y - máximo",
+                                    step=100,
+                                    key="_w_y_max_sa",
+                                    on_change=salvar_widget_persistente,
+                                    args=("y_max_sa", "_w_y_max_sa")
+                                )
+                                st.number_input(
+                                    "Passo do eixo Y",
+                                    min_value=1,
+                                    step=50,
+                                    key="_w_y_step_sa",
+                                    on_change=salvar_widget_persistente,
+                                    args=("y_step_sa", "_w_y_step_sa")
+                                )
+
+                                st.button(
+                                    "Resetar Eixos - Kick Tolerance",
+                                    on_click=reset_config,
+                                    type="primary",
+                                    use_container_width=True,
+                                    key="btn_resetar_eixos_sapatas"
+                                )
+
+                        x_min_sa = float(st.session_state.get("x_min_sa", 7))
+                        x_max_sa = float(st.session_state.get("x_max_sa", 21))
+                        x_step_sa = max(
+                            1.0,
+                            float(st.session_state.get("x_step_sa", 2))
+                        )
+                        y_min_sa = float(st.session_state.get("y_min_sa", 0))
+                        y_max_sa = float(st.session_state.get("y_max_sa", 1000))
+                        y_step_sa = max(
+                            1.0,
+                            float(st.session_state.get("y_step_sa", 200))
+                        )
+
+                        if x_max_sa <= x_min_sa:
+                            x_max_sa = x_min_sa + x_step_sa
+                        if y_max_sa <= y_min_sa:
+                            y_max_sa = y_min_sa + y_step_sa
+
+                        y_ticks_sa = np.arange(
+                            y_min_sa,
+                            y_max_sa + y_step_sa * 0.5,
+                            y_step_sa
+                        )
+
+                        c1, c2 = st.columns(2)
+                        with c1:
+                            with st.container(border=True):
+                                st.markdown("### Sapatas")
+                                st.session_state.fig_asp = plt.figure(figsize=(8, 10))
+                                if st.session_state.idg == 'Sim':
+                                    # === COM coluna de idade ===
+                                    gs = gridspec.GridSpec(
+                                        1, 4,
+                                        width_ratios=[0.1, 0.2, 0.21, 1],
+                                        wspace=0
+                                    )
+
+                                    ax_idade = st.session_state.fig_asp.add_subplot(gs[0])
+                                    ax1 = st.session_state.fig_asp.add_subplot(gs[1], sharey=ax_idade)
+
+                                    ax_gap = st.session_state.fig_asp.add_subplot(gs[2])
+                                    ax_gap.axis('off')
+
+                                    ax = st.session_state.fig_asp.add_subplot(gs[3], sharey=ax_idade)
+
+                                    idade_formacao(
+                                        ax_idade,
+                                        st.session_state.df_idade,
+                                        y_max_sa,
+                                        y_min_sa
+                                    )
+
+                                    # remove ticks e labels da coluna de idade
+                                    ax_idade.tick_params(
+                                        axis='y',
+                                        which='both',
+                                        left=False,
+                                        right=False,
+                                        labelleft=False,
+                                        labelright=False
+                                    )
+
+                                    ax_idade.set_ylabel("")
+
+                                    # evita duplicar rótulos de profundidade
+                                    plt.setp(ax1.get_yticklabels(), visible=False)
+                                    plt.setp(ax.get_yticklabels(), visible=False)
+
+                                else:
+                                    # === SEM coluna de idade ===
+                                    gs = gridspec.GridSpec(
+                                        1, 3,
+                                        width_ratios=[0.2, 0.21, 1],
+                                        wspace=0
+                                    )
+
+                                    ax1 = st.session_state.fig_asp.add_subplot(gs[0])
+                                    ax_gap = st.session_state.fig_asp.add_subplot(gs[1])
+                                    ax_gap.axis('off')
+
+                                    ax = st.session_state.fig_asp.add_subplot(gs[2], sharey=ax1)
+
+                                    plt.setp(ax.get_yticklabels(), visible=False)
+
+                                lito(
+                                    ax1,
+                                    df_pp,
+                                    profundidades,
+                                    litologias,
+                                    y_max_sa,
+                                    y_min=y_min_sa,
+                                    y_max=y_max_sa
+                                )
+
+                                try:
+                                    ax.plot(
+                                        df_sapata["Gradiente de Sobrecarga (lb/gal)"],
+                                        df_sapata["Profundidade (m)"],
+                                        linestyle="-",
+                                        color="black",
+                                        linewidth=2,
+                                        label="Gradiente de Sobrecarga (lb/gal)",
+                                        zorder=5
+                                    )
+
+                                    if st.session_state.ms != 0.:
+                                        ax.plot(
+                                            df_sapata["Gradiente de Pressão de Poros (lb/gal)"],
+                                            df_sapata["Profundidade (m)"],
+                                            linestyle="-",
+                                            color="red",
+                                            linewidth=2,
+                                            label="Gradiente de Pressão de Poros (lb/gal)",
+                                            zorder=5
+                                        )
+
+                                    ax.plot(
+                                        df_sapata["Gradiente de Pressão de Poros + Margem (lb/gal)"],
+                                        df_sapata["Profundidade (m)"],
+                                        linestyle="-",
+                                        color="orange",
+                                        linewidth=2,
+                                        label="Gradiente de Pressão de Poros + Margem (lb/gal)",
+                                        zorder=5
+                                    )
+
+                                    if st.session_state.msf != 0.:
+                                        ax.plot(
+                                            df_sapata["Gradiente de Fratura (lb/gal)"],
+                                            df_sapata["Profundidade (m)"],
+                                            linestyle="-",
+                                            color="blue",
+                                            linewidth=2,
+                                            label="Gradiente de Fratura (lb/gal)",
+                                            zorder=5
+                                        )
+
+                                    ax.plot(
+                                        df_sapata["Gradiente de Fratura - Margem (lb/gal)"],
+                                        df_sapata["Profundidade (m)"],
+                                        linestyle="-",
+                                        color="green",
+                                        linewidth=2,
+                                        label="Gradiente de Fratura (lb/gal) - Margem",
+                                        zorder=5
+                                    )
+
+                                    if st.session_state.metodo_kt == "Cima para Baixo":
+                                        curvas_kt_plot = st.session_state.get("curvas_kt_plot", [])
+                                        for i, curva in enumerate(curvas_kt_plot):
+                                            bha_curva = curva["bha"]
+                                            prof_plot = pd.to_numeric(pd.Series(curva["prof"]), errors="coerce")
+                                            rho_plot = pd.to_numeric(pd.Series(curva["rho_kt"]), errors="coerce")
+                                            mask_ok = prof_plot.notna() & rho_plot.notna()
+
+                                            if mask_ok.any():
+                                                ax.plot(
+                                                    rho_plot[mask_ok],
+                                                    prof_plot[mask_ok],
+                                                    linestyle="-",
+                                                    color="purple",
+                                                    linewidth=2,
+                                                    label="Kick Tolerance" if i == 0 else "_nolegend_",
+                                                    zorder=5
+                                                )
 
 
+                                    else:
+                                        curvas_kt_plot = st.session_state.get("curvas_kt_b2c", [])
+                                        for i, curva in enumerate(curvas_kt_plot):
+                                            bha_curva = curva.get("bha", f"Fase {i + 1}")
+                                            prof_plot = pd.to_numeric(pd.Series(curva.get("prof", [])), errors="coerce")
+                                            rho_plot = pd.to_numeric(pd.Series(curva.get("gf_kt", [])), errors="coerce")
+                                            mask_ok = prof_plot.notna() & rho_plot.notna()
+
+                                            if mask_ok.any():
+                                                ax.plot(
+                                                    rho_plot[mask_ok],
+                                                    prof_plot[mask_ok],
+                                                    linestyle="-",
+                                                    color="purple",
+                                                    linewidth=2,
+                                                    label="Kick Tolerance" if i == 0 else "_nolegend_",
+                                                    zorder=5
+                                                )
+
+
+                                except Exception as erro_curvas_sapatas:
+                                    st.warning(
+                                        "Não foi possível desenhar uma ou mais curvas do "
+                                        f"Kick Tolerance: {erro_curvas_sapatas}"
+                                    )
+
+                                # Configurações do gráfico
+                                ax.set_title('Kick Tolerance', fontsize=14, fontweight='bold')
+                                ax.set_xlabel('Gradiente (ppg)', fontsize=12)
+                                ax.set_ylabel('Profundidade TVD (m)', fontsize=12)
+                                ax.tick_params(axis='y', which='both', left=True, labelleft=True)
+
+                                ax.set_yticks(y_ticks_sa)
+                                ax.set_ylim(y_max_sa, y_min_sa)
+                                ax1.set_ylim(y_max_sa, y_min_sa)
+                                if st.session_state.idg == "Sim":
+                                    ax_idade.set_ylim(y_max_sa, y_min_sa)
+
+                                ax.set_autoscaley_on(False)
+                                ax1.set_autoscaley_on(False)
+                                if st.session_state.idg == "Sim":
+                                    ax_idade.set_autoscaley_on(False)
+
+                                ax1.tick_params(
+                                    axis="y",
+                                    which="both",
+                                    left=False,
+                                    right=False,
+                                    labelleft=False,
+                                    labelright=False
+                                )
+
+                                x_tick_ini_sa = math.ceil(x_min_sa)
+                                x_tick_fim_sa = math.floor(x_max_sa)
+                                if x_tick_fim_sa >= x_tick_ini_sa:
+                                    ax.set_xticks(
+                                        np.arange(
+                                            x_tick_ini_sa,
+                                            x_tick_fim_sa + x_step_sa * 0.5,
+                                            x_step_sa
+                                        )
+                                    )
+                                if np.isclose(x_step_sa, 1.0):
+                                    ax.set_xticks(
+                                        np.arange(x_min_sa, x_max_sa + 0.25, 0.5),
+                                        minor=True
+                                    )
+                                ax.xaxis.set_major_formatter(
+                                    FuncFormatter(lambda valor, pos: f"{valor:.0f}")
+                                )
+                                ax.set_xlim(x_min_sa, x_max_sa)
+                                ax.grid(True, which="major", linestyle="--", alpha=0.5)
+                                if np.isclose(x_step_sa, 1.0):
+                                    ax.grid(
+                                        True,
+                                        which="minor",
+                                        axis="x",
+                                        linestyle="--",
+                                        alpha=0.5
+                                    )
+
+                                if st.session_state.metodo_kt == "Cima para Baixo":
+                                    curvas_kt_plot = st.session_state.get("curvas_kt_plot", [])
+
+                                    if curvas_kt_plot:
+                                        prof_final_perfil = pd.to_numeric(
+                                            df_sapata["Profundidade (m)"], errors="coerce"
+                                        ).dropna().max()
+
+                                        ultima_curva = curvas_kt_plot[-1]
+                                        prof_ultima_curva = pd.to_numeric(
+                                            pd.Series(ultima_curva.get("prof", [])), errors="coerce"
+                                        ).dropna()
+
+                                        if not prof_ultima_curva.empty:
+                                            prof_ultimo_trecho = prof_ultima_curva.max()
+
+                                            if pd.notna(prof_final_perfil) and not np.isclose(prof_ultimo_trecho,
+                                                                                              prof_final_perfil):
+                                                topo = float(prof_ultimo_trecho)
+                                                base = float(prof_final_perfil)
+
+                                                if base > topo:
+                                                    x_left, x_right_fill = ax.get_xlim()
+                                                    x_texto = (x_left + x_right_fill) / 2
+                                                    y_texto = (topo + base) / 2
+                                                    altura_intervalo = abs(base - topo)
+
+                                                    ax.fill_betweenx(
+                                                        y=[topo, base],
+                                                        x1=x_left,
+                                                        x2=x_right_fill,
+                                                        color="red",
+                                                        alpha=0.12,
+                                                        zorder=1
+                                                    )
+
+                                                    if altura_intervalo >= 40:
+                                                        ax.text(
+                                                            x_texto,
+                                                            y_texto,
+                                                            # "Trecho sem sapata!\nAumente o OD do BHA,\no comp. máx. OH\nou aprofunde o rev. de superfície.",
+                                                            "Trecho sem sapata!",
+                                                            color="black",
+                                                            fontsize=9,
+                                                            ha="center",
+                                                            va="center",
+                                                            bbox=dict(
+                                                                boxstyle="round,pad=0.25",
+                                                                facecolor="white",
+                                                                edgecolor="red",
+                                                                alpha=0.85
+                                                            ),
+                                                            zorder=2
+                                                        )
+
+                                if st.session_state.metodo_kt == "Baixo para Cima":
+                                    intervalos_sem_sapata = st.session_state.get("intervalos_sem_sapata_b2c", [])
+                                    intervalos_fase_curta = st.session_state.get("intervalos_fase_curta_b2c", [])
+
+                                    x_left, x_right_fill = ax.get_xlim()
+                                    x_texto = (x_left + x_right_fill) / 2
+
+                                    for item in intervalos_sem_sapata:
+                                        topo = item.get("topo", None)
+                                        base = item.get("base", None)
+
+                                        if topo is None or base is None:
+                                            continue
+
+                                        ax.fill_betweenx(
+                                            y=[topo, base],
+                                            x1=x_left,
+                                            x2=x_right_fill,
+                                            color="red",
+                                            alpha=0.12,
+                                            zorder=1
+                                        )
+
+                                        y_texto = (topo + base) / 2
+                                        altura_intervalo = abs(base - topo)
+
+                                        if altura_intervalo >= 40:
+                                            ax.text(
+                                                x_texto,
+                                                y_texto,
+                                                "Trecho sem sapata!\nReduza o OD do BHA final,\no comp. máx. OH\nou aprofunde o rev. de superfície.",
+                                                color="black",
+                                                fontsize=9,
+                                                ha="center",
+                                                va="center",
+                                                bbox=dict(
+                                                    boxstyle="round,pad=0.25",
+                                                    facecolor="white",
+                                                    edgecolor="red",
+                                                    alpha=0.85
+                                                ),
+                                                zorder=2
+                                            )
+                                    for item in intervalos_fase_curta:
+                                        topo = item.get("topo", None)
+                                        base = item.get("base", None)
+                                        comprimento_minimo_fase = item.get("comprimento_minimo_fase", 200.0)
+
+                                        if topo is None or base is None:
+                                            continue
+
+                                        ax.fill_betweenx(
+                                            y=[topo, base],
+                                            x1=x_left,
+                                            x2=x_right_fill,
+                                            color="yellow",
+                                            alpha=0.18,
+                                            zorder=1
+                                        )
+
+                                        x_texto = (x_left + x_right_fill) / 2
+                                        y_texto = (topo + base) / 2
+                                        altura_intervalo = abs(base - topo)
+
+                                        if altura_intervalo >= 40:
+                                            ax.text(
+                                                x_texto,
+                                                y_texto,
+                                                f'Fase com comprimento inferior a {comprimento_minimo_fase:.0f} metros',
+                                                color="black",
+                                                fontsize=9,
+                                                ha="center",
+                                                va="center",
+                                                bbox=dict(
+                                                    boxstyle="round,pad=0.25",
+                                                    facecolor="white",
+                                                    edgecolor="goldenrod",
+                                                    alpha=0.9
+                                                ),
+                                                zorder=2
+                                            )
+
+                                _plotar_marcadores_sapatas(
+                                    ax,
+                                    sapatas_plot,
+                                    y_min_sa,
+                                    y_max_sa,
+                                    st.session_state.metodo_kt,
+                                    st.session_state.get("prs"),
+                                )
+
+                                ax.set_ylim(y_max_sa, y_min_sa)
+                                ax1.set_ylim(y_max_sa, y_min_sa)
+                                if st.session_state.idg == "Sim":
+                                    ax_idade.set_ylim(y_max_sa, y_min_sa)
+
+                                if st.session_state.get("leg_sa", "Não") == "Sim":
+                                    ax.legend(
+                                        loc='upper right',
+                                        fontsize=8,
+                                        frameon=True,
+                                        shadow=True,
+                                        fancybox=True,
+                                        framealpha=1,
+                                        facecolor='white',
+                                        edgecolor='gray'
+                                    )
+
+                                add_watermark(
+                                    ax,
+                                    logo_path="logo_syga.png",
+                                    xy=(0.50, 0.5),
+                                    zoom=0.2,
+                                    alpha=0.3,
+                                    zorder=0
+                                )
+
+                                st.pyplot(st.session_state.fig_asp, use_container_width=True)
+
+                        with c2:
+                            with st.container(border=True):
+                                st.markdown("### Esquemático do Poço")
+
+                                try:
+                                    df_esquematico_asp = _asp_montar_df_esquematico_kt()
+
+                                    if not isinstance(df_esquematico_asp, pd.DataFrame) or df_esquematico_asp.empty:
+                                        st.info("Calcule as sapatas para gerar o esquemático do poço.")
+                                    else:
+                                        fig_asp, df_esquematico_limpo = _asp_plotar_esquematico(df_esquematico_asp)
+
+                                        if fig_asp is None:
+                                            st.info("Não foi possível gerar o esquemático com os dados atuais.")
+                                        else:
+                                            st.session_state.fig_esquematico_asp = fig_asp
+                                            st.session_state.df_esquematico_asp = df_esquematico_limpo
+                                            st.pyplot(st.session_state.fig_esquematico_asp, use_container_width=True)
+
+                                except Exception as e:
+                                    st.warning(f"Não foi possível gerar o esquemático do poço: {e}")
+
+        else:
+            st.error('Gere a Janela Operacional na aba "Estabilidade de Poço"', icon="🚨")
+
+    with tab[1]:
+        with st.container(border=True):
+            if "df_sapata_kt" in st.session_state and not st.session_state.df_sapata_kt.empty:
+                st.markdown("### Dados calculados do Kick Tolerance")
+                st.dataframe(
+                    st.session_state.df_sapata_kt,
+                    use_container_width=True,
+                    hide_index=True
+                )
+            else:
+                st.warning("Nenhum dado de Kick Tolerance foi calculado.")
+
+        with st.container(border=True):
+            try:
+                st.markdown("### Volumes BHA")
+                st.dataframe(
+                    st.session_state.df_bha_final,
+                    use_container_width=True,
+                    hide_index=True,
+                    column_config={
+                        "Elemento do BHA": st.column_config.TextColumn("Elemento do BHA"),
+                        "OD (pol)": st.column_config.NumberColumn("OD (pol)", format="%.2f"),
+                        "OD (m)": st.column_config.NumberColumn("OD (m)", format="%.2f"),
+                        "Comprimento (m)": st.column_config.NumberColumn(
+                            "Comprimento (m)", format="%.2f"
+                        ),
+                        "Comprimento Acumulado (m)": st.column_config.NumberColumn(
+                            "Comprimento Acumulado (m)", format="%.2f"
+                        ),
+                        "Início do Trecho (m)": st.column_config.NumberColumn(
+                            "Início do Trecho (m)", format="%.2f"
+                        ),
+                        "Fim do Trecho (m)": st.column_config.NumberColumn(
+                            "Fim do Trecho (m)", format="%.2f"
+                        ),
+                        "Cap. Anular (m3/m)": st.column_config.NumberColumn(
+                            "Cap. Anular (m3/m)", format="%.2f"
+                        ),
+                        "Vol. (m3)": st.column_config.NumberColumn(
+                            "Vol. (m3)", format="%.2f"
+                        ),
+                        "Vol. Acum. (m3)": st.column_config.NumberColumn(
+                            "Vol. Acum. (m3)", format="%.2f"
+                        ),
+                        "Vol. Acum. (bbl)": st.column_config.NumberColumn(
+                            "Vol. Acum. (bbl)", format="%.2f"
+                        ),
+                    }
+                )
+            except Exception:
+                st.warning("Nenhum volume do BHA foi calculado.")
+
+
+def _arredondar_peso_fluido_para_cima(valor, passo):
+    valor = float(valor)
+    passo = float(passo)
+    if not np.isfinite(valor) or not np.isfinite(passo) or passo <= 0:
+        return np.nan
+
+    peso = np.ceil(valor / passo) * passo
+    if np.isclose(peso, valor, atol=1e-9):
+        peso += passo
+    return round(float(peso), 2)
+
+
+def _calcular_peso_fluido_por_fase(df_est, df_sapata_kt, sapatas_plot, passo):
+    colunas_est = ["Profundidade (m)", "Max Inf"]
+    if (
+            not isinstance(df_est, pd.DataFrame)
+            or df_est.empty
+            or any(coluna not in df_est.columns for coluna in colunas_est)
+    ):
+        raise ValueError(
+            "A Janela Operacional deve conter Profundidade (m) e Max Inf."
+        )
+
+    if not isinstance(df_sapata_kt, pd.DataFrame) or df_sapata_kt.empty:
+        raise ValueError("Calcule o assentamento das sapatas antes do peso de fluido.")
+
+    df_fluido = df_est[colunas_est].copy()
+    df_fluido["Profundidade (m)"] = pd.to_numeric(
+        df_fluido["Profundidade (m)"],
+        errors="coerce",
+    )
+    df_fluido["Max Inferior"] = pd.to_numeric(
+        df_fluido["Max Inf"],
+        errors="coerce",
+    )
+    df_fluido = (
+        df_fluido
+        .drop(columns=["Max Inf"])
+        .dropna(subset=["Profundidade (m)"])
+        .sort_values("Profundidade (m)")
+        .reset_index(drop=True)
+    )
+
+    fs_estabilidade = float(st.session_state.get("fs_estabilidade", 0.5))
+    margem_base = df_fluido["Max Inferior"] + fs_estabilidade
+    margem_acumulada = np.maximum.accumulate(
+        np.nan_to_num(margem_base.to_numpy(dtype=float), nan=-np.inf)
+    )
+    margem_acumulada[np.isneginf(margem_acumulada)] = np.nan
+    df_fluido["Margem"] = margem_acumulada
+
+    df_sapata_merge = df_sapata_kt.copy()
+    col_prof_sapata = next(
+        (
+            coluna
+            for coluna in (
+            "Profundidade da sapata (m)",
+            "Profundidade (m)",
+            "Profundidade",
+            "Prof. Sapata (m)",
+        )
+            if coluna in df_sapata_merge.columns
+        ),
+        None,
+    )
+    if col_prof_sapata is None:
+        raise ValueError("Não foi encontrada uma coluna de profundidade nas sapatas.")
+
+    df_sapata_merge[col_prof_sapata] = pd.to_numeric(
+        df_sapata_merge[col_prof_sapata],
+        errors="coerce",
+    )
+    df_sapata_merge = (
+        df_sapata_merge
+        .dropna(subset=[col_prof_sapata])
+        .sort_values(col_prof_sapata)
+        .reset_index(drop=True)
+    )
+    df_fluido = pd.merge_asof(
+        df_fluido,
+        df_sapata_merge,
+        left_on="Profundidade (m)",
+        right_on=col_prof_sapata,
+        direction="backward",
+    )
+
+    col_fratura_margem = "Gradiente de Fratura - Margem (lb/gal)"
+    if col_fratura_margem not in df_fluido.columns:
+        raise ValueError(
+            "O resultado das sapatas não contém o Gradiente de Fratura - Margem."
+        )
+
+    df_fluido[col_fratura_margem] = pd.to_numeric(
+        df_fluido[col_fratura_margem],
+        errors="coerce",
+    )
+    df_fluido["Linha média (lb/gal)"] = (
+                                                df_fluido["Margem"] + df_fluido[col_fratura_margem]
+                                        ) / 2
+    df_fluido["Peso do Fluido (lb/gal)"] = np.nan
+
+    sapatas_validas = []
+    for sapata in sapatas_plot:
+        try:
+            profundidade = float(sapata["prof"])
+        except (KeyError, TypeError, ValueError):
+            continue
+        if np.isfinite(profundidade):
+            sapatas_validas.append(profundidade)
+
+    profundidades_sapatas = []
+    for profundidade in sorted(sapatas_validas):
+        if (
+                not profundidades_sapatas
+                or not np.isclose(profundidade, profundidades_sapatas[-1], atol=1e-6)
+        ):
+            profundidades_sapatas.append(profundidade)
+
+    if not profundidades_sapatas:
+        raise ValueError("Nenhuma profundidade de sapata válida foi encontrada.")
+
+    intervalos = []
+    def adicionar_intervalo(topo, base, mask_intervalo):
+        if not mask_intervalo.any():
+            return
+
+        margem = pd.to_numeric(
+            df_fluido.loc[mask_intervalo, "Margem"],
+            errors="coerce",
+        ).max()
+        linha_media = pd.to_numeric(
+            df_fluido.loc[mask_intervalo, "Linha média (lb/gal)"],
+            errors="coerce",
+        ).min()
+        if pd.isna(margem) or pd.isna(linha_media):
+            return
+
+        peso = _arredondar_peso_fluido_para_cima(margem, passo)
+        df_fluido.loc[mask_intervalo, "Peso do Fluido (lb/gal)"] = peso
+        intervalos.append({
+            "Topo do Intervalo (m)": float(topo),
+            "Base do Intervalo (m)": float(base),
+            "Margem do Intervalo (lb/gal)": round(float(margem), 2),
+            "Peso do Fluido (lb/gal)": round(float(peso), 2),
+            "Linha média do Intervalo (lb/gal)": round(float(linha_media), 2),
+        })
+    for topo, base in zip(profundidades_sapatas[:-1], profundidades_sapatas[1:]):
+        mask = (
+                (df_fluido["Profundidade (m)"] > topo)
+                & (df_fluido["Profundidade (m)"] <= base)
+        )
+        adicionar_intervalo(topo, base, mask)
+
+    topo_final = profundidades_sapatas[-1]
+    base_final = float(df_fluido["Profundidade (m)"].max())
+    if base_final > topo_final:
+        mask_final = df_fluido["Profundidade (m)"] > topo_final
+        adicionar_intervalo(topo_final, base_final, mask_final)
+
+    return df_fluido, pd.DataFrame(intervalos)
+
+
+def padronizar_figura_coluna(fig, largura=8, altura=10):
+    """
+    Padroniza o tamanho externo e as margens internas das figuras
+    exibidas nas colunas do Streamlit.
+
+    Isso evita que gráficos com legendas, labels, coluna litológica,
+    coluna de idade ou tight_layout fiquem visualmente com tamanhos diferentes.
+    """
+    if fig is None:
+        return None
+
+    fig.set_size_inches(largura, altura, forward=True)
+
+    # Margens padronizadas da área da figura
+    fig.subplots_adjust(
+        left=0.08,
+        right=0.97,
+        top=0.94,
+        bottom=0.08
+    )
+
+    return fig
+
+
+# ABA FLUIDO DE PERFURAÇÃO
 def pagina_fluido():
     st.header("Fluido de Perfuração")
 
-    tab_dados, tab_tabela = st.tabs(["Dados", "Tabela de dados calculados"])
+    if st.session_state.get("option") != "Previsão de Geopressões":
+        st.error('Função não disponível para "Retroanálise"', icon="🚨")
+        return
+
+    df_est = st.session_state.get("df_est", pd.DataFrame()).copy()
+    df_sapata_kt = st.session_state.get("df_sapata_kt", pd.DataFrame()).copy()
+    sapatas_plot = st.session_state.get("sapatas_plot_kt", [])
+
+    if not isinstance(df_est, pd.DataFrame) or df_est.empty:
+        st.error(
+            'Gere a Janela Operacional na página "Estabilidade de Poço".',
+            icon="🚨",
+        )
+        return
+
+    if not isinstance(df_sapata_kt, pd.DataFrame) or df_sapata_kt.empty:
+        st.error(
+            'Defina as sapatas na página "Assentamento de Sapatas".',
+            icon="🚨",
+        )
+        return
+
+    curvas_disponiveis_fp = [
+        "Faixa vermelha",
+        "Max Inferior",
+        "Margem",
+        "Gradiente de Pressão de Poros (lb/gal)",
+        "Gradiente de Pressão de Poros + Margem (lb/gal)",
+        "Gradiente de Fratura (lb/gal)",
+        "Gradiente de Fratura - Margem (lb/gal)",
+        "Linha média (lb/gal)",
+        "Peso do Fluido (lb/gal)",
+        "Kick Tolerance",
+        "Sapatas",
+    ]
+    curvas_default_fp = [
+        "Faixa vermelha",
+        "Max Inferior",
+        "Margem",
+        "Gradiente de Fratura - Margem (lb/gal)",
+        "Peso do Fluido (lb/gal)",
+        "Linha média (lb/gal)",
+        "Sapatas",
+    ]
+
+    prof_max_fp = float(
+        pd.to_numeric(df_est["Profundidade (m)"], errors="coerce").max()
+    )
+    defaults_fp = {
+        "mpf": 0.1,
+        "leg_fp": "Não",
+        "curvas_fp_visiveis": curvas_default_fp,
+        "x_min_fp": 7.0,
+        "x_max_fp": 21.0,
+        "x_step_fp": 2.0,
+        "y_min_fp": 0.0,
+        "y_max_fp": float(int(prof_max_fp) + 100),
+        "y_step_fp": 200.0,
+    }
+    for chave, valor in defaults_fp.items():
+        if chave not in st.session_state:
+            st.session_state[chave] = valor
+
+    if isinstance(st.session_state.get("leg_fp"), bool):
+        st.session_state.leg_fp = "Sim" if st.session_state.leg_fp else "Não"
+
+    if isinstance(st.session_state.get("_w_leg_fp"), bool):
+        st.session_state["_w_leg_fp"] = "Sim" if st.session_state["_w_leg_fp"] else "Não"
+
+    tab_dados, tab_tabela = st.tabs(
+        ["Fluido de Perfuração", "Dados Calculados"]
+    )
 
     with tab_dados:
-        st.subheader("Dados")
-        c1, c2, c3 = st.columns((1, 1, 1))
+        with st.expander("Configurações do Gráfico", expanded=False):
+            preparar_widget_persistente(
+                "curvas_fp_visiveis",
+                "_w_curvas_fp_visiveis",
+            )
+            st.multiselect(
+                "Selecione as curvas para plotar",
+                options=curvas_disponiveis_fp,
+                key="_w_curvas_fp_visiveis",
+                on_change=salvar_widget_persistente,
+                args=("curvas_fp_visiveis", "_w_curvas_fp_visiveis"),
+            )
+
+            preparar_widget_persistente("leg_fp", "_w_leg_fp")
+
+            if st.session_state.get("_w_leg_fp") not in ["Sim", "Não"]:
+                st.session_state["_w_leg_fp"] = "Sim" if bool(st.session_state.get("_w_leg_fp")) else "Não"
+
+            st.selectbox(
+                "Exibir Legendas",
+                options=["Sim", "Não"],
+                key="_w_leg_fp",
+                on_change=salvar_widget_persistente,
+                args=("leg_fp", "_w_leg_fp"),
+            )
+
+            preparar_widget_persistente("mpf", "_w_mpf")
+            st.number_input(
+                "Passo de arredondamento do peso do fluido",
+                min_value=0.01,
+                step=0.1,
+                format="%.2f",
+                key="_w_mpf",
+                on_change=salvar_widget_persistente,
+                args=("mpf", "_w_mpf"),
+                help=(
+                    "Define o múltiplo usado para arredondar o peso do "
+                    "fluido sempre para cima."
+                ),
+            )
+
+            for chave, label, step, min_value in (
+                    ("x_min_fp", "Eixo X - mínimo", 1.0, None),
+                    ("x_max_fp", "Eixo X - máximo", 1.0, None),
+                    ("x_step_fp", "Passo do eixo X", 1.0, 0.01),
+                    ("y_min_fp", "Eixo Y - mínimo", 100.0, None),
+                    ("y_max_fp", "Eixo Y - máximo", 100.0, None),
+                    ("y_step_fp", "Passo do eixo Y", 50.0, 0.01),
+            ):
+                preparar_widget_persistente(chave, f"_w_{chave}")
+                kwargs = {
+                    "label": label,
+                    "step": step,
+                    "format": "%.2f",
+                    "key": f"_w_{chave}",
+                    "on_change": salvar_widget_persistente,
+                    "args": (chave, f"_w_{chave}"),
+                }
+                if min_value is not None:
+                    kwargs["min_value"] = min_value
+                st.number_input(**kwargs)
+            def reset_config_fp():
+                for chave in (
+                        "x_min_fp",
+                        "x_max_fp",
+                        "x_step_fp",
+                        "y_min_fp",
+                        "y_max_fp",
+                        "y_step_fp",
+                ):
+                    st.session_state[chave] = defaults_fp[chave]
+                    st.session_state[f"_w_{chave}"] = defaults_fp[chave]
+            st.button(
+                "Resetar Eixos - Fluido de Perfuração",
+                on_click=reset_config_fp,
+                type="primary",
+                use_container_width=True,
+                key="btn_resetar_eixos_fp",
+            )
+
+        c1, c2, c3 = st.columns([1, 1, 1], gap="small")
         with c1:
             with st.container(border=True):
-                pass
+                st.markdown("### Janela Operacional")
+                fig_jo = st.session_state.get("fig_jo")
+                if fig_jo is not None:
+                    fig_jo = padronizar_figura_coluna(fig_jo, largura=8, altura=10)
+                    st.pyplot(fig_jo, use_container_width=True)
+                else:
+                    st.info("Abra a Janela Operacional para gerar este gráfico.")
+
         with c2:
             with st.container(border=True):
-                pass
+                st.markdown("### Sapatas")
+
+                fig_asp = st.session_state.get("fig_asp")
+                if fig_asp is not None:
+                    fig_asp = padronizar_figura_coluna(fig_asp, largura=8, altura=10)
+                    st.pyplot(fig_asp, use_container_width=True)
+                else:
+                    st.info("Abra a página de sapatas para gerar este gráfico.")
+
         with c3:
+            sincronizar_widgets_persistentes([
+                ("leg_fp", "_w_leg_fp"),
+                ("curvas_fp_visiveis", "_w_curvas_fp_visiveis"),
+                ("mpf", "_w_mpf"),
+                ("x_min_fp", "_w_x_min_fp"),
+                ("x_max_fp", "_w_x_max_fp"),
+                ("x_step_fp", "_w_x_step_fp"),
+                ("y_min_fp", "_w_y_min_fp"),
+                ("y_max_fp", "_w_y_max_fp"),
+                ("y_step_fp", "_w_y_step_fp"),
+            ])
+
+            try:
+                df_fluido, df_intervalos_fluido = _calcular_peso_fluido_por_fase(
+                    df_est,
+                    df_sapata_kt,
+                    sapatas_plot,
+                    float(st.session_state.get("mpf", 0.1)),
+                )
+            except Exception as erro_fluido:
+                st.error(f"Não foi possível calcular o peso do fluido: {erro_fluido}")
+                return
+
+            st.session_state.df_fluido = df_fluido.copy()
+            st.session_state.df_intervalos_fluido = df_intervalos_fluido.copy()
+
+            x_min_fp = float(st.session_state.get("x_min_fp", 7.0))
+            x_max_fp = float(st.session_state.get("x_max_fp", 23.0))
+            x_step_fp = max(0.01, float(st.session_state.get("x_step_fp", 2.0)))
+            y_min_fp = float(st.session_state.get("y_min_fp", 0.0))
+            y_max_fp = float(st.session_state.get("y_max_fp", prof_max_fp + 100))
+            y_step_fp = max(0.01, float(st.session_state.get("y_step_fp", 200.0)))
+            if x_max_fp <= x_min_fp:
+                x_max_fp = x_min_fp + x_step_fp
+            if y_max_fp <= y_min_fp:
+                y_max_fp = y_min_fp + y_step_fp
+
+            selected = st.session_state.get(
+                "well_selected",
+                st.session_state.get("poco", "Poço"),
+            )
+            _garantir_litologia_importada(selected)
+            poco = st.session_state.get("pocos", {}).get(selected, {})
+            profundidades = poco.get("profundidade", [])
+            litologias = poco.get("litologia", [])
+            df_lito_fp = st.session_state.get("df_pp_lito", pd.DataFrame())
+            if not isinstance(df_lito_fp, pd.DataFrame) or df_lito_fp.empty:
+                df_lito_fp = st.session_state.get("df_pp", pd.DataFrame()).copy()
+
             with st.container(border=True):
-                pass
+                st.markdown("### Fluido de Perfuração")
+
+                fig_fp = plt.figure(figsize=(8, 10))
+                usar_idade = (
+                        st.session_state.get("idg") == "Sim"
+                        and isinstance(st.session_state.get("df_idade"), pd.DataFrame)
+                        and not st.session_state.df_idade.empty
+                )
+                if usar_idade:
+                    gs = gridspec.GridSpec(
+                        1,
+                        4,
+                        width_ratios=[0.10, 0.18, 0.21, 1],
+                        wspace=0,
+                    )
+                    ax_idade = fig_fp.add_subplot(gs[0])
+                    ax_lito = fig_fp.add_subplot(gs[1], sharey=ax_idade)
+                    ax_gap = fig_fp.add_subplot(gs[2])
+                    ax_gap.axis("off")
+                    ax = fig_fp.add_subplot(gs[3], sharey=ax_idade)
+                    idade_formacao(
+                        ax_idade,
+                        st.session_state.df_idade,
+                        y_max_fp,
+                        y_min_fp,
+                    )
+                    ax_idade.tick_params(
+                        axis="y",
+                        which="both",
+                        left=False,
+                        right=False,
+                        labelleft=False,
+                        labelright=False,
+                    )
+                else:
+                    gs = gridspec.GridSpec(
+                        1,
+                        3,
+                        width_ratios=[0.18, 0.21, 1],
+                        wspace=0,
+                    )
+                    ax_lito = fig_fp.add_subplot(gs[0])
+                    ax_gap = fig_fp.add_subplot(gs[1])
+                    ax_gap.axis("off")
+                    ax = fig_fp.add_subplot(gs[2], sharey=ax_lito)
+
+                lito(
+                    ax_lito,
+                    df_lito_fp,
+                    profundidades,
+                    litologias,
+                    y_max_fp,
+                    y_min=y_min_fp,
+                    y_max=y_max_fp,
+                )
+
+                curvas_visiveis = st.session_state.get(
+                    "curvas_fp_visiveis",
+                    curvas_default_fp,
+                )
+                mask_faixa = (
+                        df_fluido["Max Inferior"].notna()
+                        & df_fluido["Margem"].notna()
+                )
+                if "Faixa vermelha" in curvas_visiveis:
+                    ax.fill_betweenx(
+                        df_fluido.loc[mask_faixa, "Profundidade (m)"],
+                        df_fluido.loc[mask_faixa, "Max Inferior"],
+                        df_fluido.loc[mask_faixa, "Margem"],
+                        color="red",
+                        alpha=0.18,
+                        zorder=1,
+                        label="_nolegend_",
+                    )
+
+                curvas_df = (
+                    ("Max Inferior", "red", "-", "Max Inferior"),
+                    ("Margem", "blue", "-", "Margem"),
+                    (
+                        "Gradiente de Pressão de Poros (lb/gal)",
+                        "tomato",
+                        "-",
+                        "Gradiente de Pressão de Poros (lb/gal)",
+                    ),
+                    (
+                        "Gradiente de Pressão de Poros + Margem (lb/gal)",
+                        "orange",
+                        "-",
+                        "Gradiente de Pressão de Poros + Margem (lb/gal)",
+                    ),
+                    (
+                        "Gradiente de Fratura (lb/gal)",
+                        "blue",
+                        "-",
+                        "Gradiente de Fratura (lb/gal)",
+                    ),
+                    (
+                        "Gradiente de Fratura - Margem (lb/gal)",
+                        "green",
+                        "-",
+                        "Gradiente de Fratura - Margem (lb/gal)",
+                    ),
+                    (
+                        "Linha média (lb/gal)",
+                        "black",
+                        "--",
+                        "Linha média (lb/gal)",
+                    ),
+                    (
+                        "Peso do Fluido (lb/gal)",
+                        "mediumvioletred",
+                        "-",
+                        "Peso do Fluido (lb/gal)",
+                    ),
+                )
+                for coluna, cor, estilo, label in curvas_df:
+                    if coluna in curvas_visiveis and coluna in df_fluido.columns:
+                        ax.plot(
+                            pd.to_numeric(df_fluido[coluna], errors="coerce"),
+                            df_fluido["Profundidade (m)"],
+                            color=cor,
+                            linestyle=estilo,
+                            linewidth=2,
+                            label=label,
+                            zorder=5,
+                        )
+
+                if "Kick Tolerance" in curvas_visiveis:
+                    if st.session_state.get("metodo_kt") == "Cima para Baixo":
+                        curvas_kt = st.session_state.get("curvas_kt_plot", [])
+                        chave_x = "rho_kt"
+                    else:
+                        curvas_kt = st.session_state.get("curvas_kt_b2c", [])
+                        chave_x = "gf_kt"
+                    for indice, curva in enumerate(curvas_kt):
+                        prof = pd.to_numeric(
+                            pd.Series(curva.get("prof", [])),
+                            errors="coerce",
+                        )
+                        valor = pd.to_numeric(
+                            pd.Series(curva.get(chave_x, [])),
+                            errors="coerce",
+                        )
+                        mask = prof.notna() & valor.notna()
+                        if mask.any():
+                            ax.plot(
+                                valor[mask],
+                                prof[mask],
+                                color="purple",
+                                linewidth=2,
+                                label="Kick Tolerance" if indice == 0 else "_nolegend_",
+                                zorder=5,
+                            )
+
+                ax.set_title("Fluido de Perfuração", fontsize=14, fontweight="bold")
+                ax.set_xlabel("Gradiente (ppg)", fontsize=12)
+                ax.set_ylabel("Profundidade TVD (m)", fontsize=12)
+                y_ticks = np.arange(
+                    y_min_fp,
+                    y_max_fp + y_step_fp * 0.5,
+                    y_step_fp,
+                )
+                ax.set_yticks(y_ticks)
+                ax.set_ylim(y_max_fp, y_min_fp)
+                ax_lito.set_ylim(y_max_fp, y_min_fp)
+                if usar_idade:
+                    ax_idade.set_ylim(y_max_fp, y_min_fp)
+                ax.tick_params(axis="y", which="both", left=True, labelleft=True)
+                ax_lito.tick_params(
+                    axis="y",
+                    which="both",
+                    left=False,
+                    right=False,
+                    labelleft=False,
+                    labelright=False,
+                )
+
+                x_tick_ini = math.ceil(x_min_fp)
+                x_tick_fim = math.floor(x_max_fp)
+                if x_tick_fim >= x_tick_ini:
+                    ax.set_xticks(
+                        np.arange(
+                            x_tick_ini,
+                            x_tick_fim + x_step_fp * 0.5,
+                            x_step_fp,
+                        )
+                    )
+                if np.isclose(x_step_fp, 1.0):
+                    ax.set_xticks(
+                        np.arange(x_min_fp, x_max_fp + 0.25, 0.5),
+                        minor=True,
+                    )
+                ax.xaxis.set_major_formatter(
+                    FuncFormatter(lambda valor, pos: f"{valor:.0f}")
+                )
+                ax.set_xlim(x_min_fp, x_max_fp)
+                ax.grid(True, which="major", linestyle="--", alpha=0.5)
+                if np.isclose(x_step_fp, 1.0):
+                    ax.grid(
+                        True,
+                        which="minor",
+                        axis="x",
+                        linestyle="--",
+                        alpha=0.5,
+                    )
+
+                if "Sapatas" in curvas_visiveis:
+                    _plotar_marcadores_sapatas(
+                        ax,
+                        sapatas_plot,
+                        y_min_fp,
+                        y_max_fp,
+                        st.session_state.get("metodo_kt", "Cima para Baixo"),
+                        st.session_state.get("prs"),
+                    )
+
+                if (
+                        "Peso do Fluido (lb/gal)" in curvas_visiveis
+                        and not df_intervalos_fluido.empty
+                ):
+                    x_right = x_max_fp - 0.02 * (x_max_fp - x_min_fp)
+                    for _, row in df_intervalos_fluido.iterrows():
+                        y_meio = (
+                                         float(row["Topo do Intervalo (m)"])
+                                         + float(row["Base do Intervalo (m)"])
+                                 ) / 2
+                        if not y_min_fp <= y_meio <= y_max_fp:
+                            continue
+
+                        box = VPacker(
+                            children=[
+                                TextArea(
+                                    f'Mínimo: {row["Margem do Intervalo (lb/gal)"]:.2f}',
+                                    textprops={"color": "red", "fontsize": 9},
+                                ),
+                                TextArea(
+                                    f'Ideal: {row["Peso do Fluido (lb/gal)"]:.2f}',
+                                    textprops={"color": "green", "fontsize": 9},
+                                ),
+                                TextArea(
+                                    f'Máximo: {row["Linha média do Intervalo (lb/gal)"]:.2f}',
+                                    textprops={"color": "goldenrod", "fontsize": 9},
+                                ),
+                            ],
+                            align="right",
+                            pad=0,
+                            sep=1,
+                        )
+                        anotacao = AnnotationBbox(
+                            box,
+                            (x_right, y_meio),
+                            xycoords="data",
+                            box_alignment=(1, 0.5),
+                            frameon=True,
+                            bboxprops={
+                                "boxstyle": "round,pad=0.25",
+                                "facecolor": "white",
+                                "edgecolor": "black",
+                                "alpha": 0.9,
+                            },
+                            annotation_clip=True,
+                            zorder=8,
+                        )
+                        ax.add_artist(anotacao)
+
+                ax.set_ylim(y_max_fp, y_min_fp)
+                ax_lito.set_ylim(y_max_fp, y_min_fp)
+                if usar_idade:
+                    ax_idade.set_ylim(y_max_fp, y_min_fp)
+
+                if (
+                        st.session_state.get("leg_fp", "Não") == "Sim"
+                        and ax.get_legend_handles_labels()[0]
+                ):
+                    ax.legend(
+                        loc="upper right",
+                        fontsize=8,
+                        frameon=True,
+                        shadow=True,
+                        fancybox=True,
+                        framealpha=1,
+                        facecolor="white",
+                        edgecolor="gray",
+                    )
+
+                add_watermark(
+                    ax,
+                    logo_path="logo_syga.png",
+                    xy=(0.50, 0.5),
+                    zoom=0.2,
+                    alpha=0.3,
+                    zorder=0,
+                )
+                fig_fp = padronizar_figura_coluna(fig_fp, largura=8, altura=10)
+                st.session_state.fig_fp = fig_fp
+                st.pyplot(fig_fp, use_container_width=True)
+                plt.close(fig_fp)
 
     with tab_tabela:
-        st.subheader("Tabela de dados calculados")
+        with st.container(border=True):
+            st.markdown("### Peso de fluido por fase")
+            df_intervalos = st.session_state.get(
+                "df_intervalos_fluido",
+                pd.DataFrame(),
+            )
+            if isinstance(df_intervalos, pd.DataFrame) and not df_intervalos.empty:
+                st.dataframe(
+                    df_intervalos,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.info("Nenhum intervalo de fluido foi calculado.")
+
+        with st.container(border=True):
+            st.markdown("### Dados calculados ao longo da profundidade")
+            df_fluido_estado = st.session_state.get("df_fluido", pd.DataFrame())
+            if (
+                    isinstance(df_fluido_estado, pd.DataFrame)
+                    and not df_fluido_estado.empty
+            ):
+                st.dataframe(
+                    df_fluido_estado,
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.info("Nenhum dado de fluido foi calculado.")
+
+
+def _rtp_poco_atual():
+    candidatos = [
+        st.session_state.get("poco"),
+        st.session_state.get("well_name"),
+        st.session_state.get("well_selected"),
+    ]
+
+    for valor in candidatos:
+        texto = str(valor).strip() if valor is not None else ""
+        if texto and texto.lower() not in {"poço", "poco", "none", "nan"}:
+            st.session_state.well_selected = texto
+            st.session_state.well_name = texto
+            return texto
+
+    return "Poço"
+
+
+def _rtp_store_poco():
+    poco = _rtp_poco_atual()
+
+    if "rtp_por_poco" not in st.session_state:
+        st.session_state.rtp_por_poco = {}
+
+    if (
+            poco != "Poço"
+            and poco not in st.session_state.rtp_por_poco
+            and "Poço" in st.session_state.rtp_por_poco
+    ):
+        st.session_state.rtp_por_poco[poco] = st.session_state.rtp_por_poco.pop("Poço")
+
+    if poco not in st.session_state.rtp_por_poco:
+        st.session_state.rtp_por_poco[poco] = {}
+
+    return st.session_state.rtp_por_poco[poco]
+
+
+def _rtp_widget_key(nome):
+    """
+    Mantém o estado visual dos widgets isolado por poço.
+    """
+    poco_hash = hashlib.sha1(
+        _rtp_poco_atual().encode("utf-8")
+    ).hexdigest()[:10]
+    return f"rtp_w_{nome}_{poco_hash}"
+
+
+def _rtp_limpar_widget(nome):
+    st.session_state.pop(_rtp_widget_key(nome), None)
+
+
+def _rtp_pdf_state_key(nome):
+    return _rtp_widget_key(f"pdf_{nome}")
+
+
+def _rtp_fmt(valor, casas=2, sufixo=""):
+    if valor in (None, "", "Não informado"):
+        return "Não informado"
+
+    try:
+        if pd.isna(valor):
+            return "Não informado"
+    except Exception:
         pass
 
+    try:
+        return f"{float(valor):.{casas}f}{sufixo}"
+    except Exception:
+        return str(valor)
 
+
+def _rtp_polegada(valor):
+    if valor in (None, "", "—"):
+        return "—"
+
+    try:
+        valor_float = float(valor)
+
+        if not np.isfinite(valor_float) or valor_float <= 0:
+            return "—"
+
+        inteiro = int(valor_float)
+        frac = Fraction(valor_float - inteiro).limit_denominator(16)
+
+        if frac.numerator == 0:
+            return f'{inteiro}"'
+
+        if inteiro == 0:
+            return f'{frac.numerator}/{frac.denominator}"'
+
+        return f'{inteiro} {frac.numerator}/{frac.denominator}"'
+
+    except Exception:
+        texto = str(valor).strip()
+        return texto if texto.endswith('"') else f'{texto}"'
+
+
+def _rtp_primeiro_df_valido(chaves):
+    for chave in chaves:
+        df = st.session_state.get(chave, pd.DataFrame())
+
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            return df.copy(), chave
+
+    return pd.DataFrame(), None
+
+
+def _rtp_obter_trajetoria_base():
+    df_traj, origem = _rtp_primeiro_df_valido([
+        "df_out_traj",
+        "df2",
+        "df_interp",
+    ])
+
+    if not isinstance(df_traj, pd.DataFrame) or df_traj.empty:
+        return pd.DataFrame(), origem
+
+    df_traj = df_traj.copy()
+    df_traj.columns = [str(c).strip() for c in df_traj.columns]
+
+    renomear = {}
+
+    if "Profundidade" in df_traj.columns and "TVD" not in df_traj.columns:
+        renomear["Profundidade"] = "TVD"
+
+    if "Profundidade (m)" in df_traj.columns and "TVD" not in df_traj.columns:
+        renomear["Profundidade (m)"] = "TVD"
+
+    if "Inclinação (°)" in df_traj.columns and "Inc" not in df_traj.columns:
+        renomear["Inclinação (°)"] = "Inc"
+
+    if "Azimute (°)" in df_traj.columns and "Azi" not in df_traj.columns:
+        renomear["Azimute (°)"] = "Azi"
+
+    if renomear:
+        df_traj = df_traj.rename(columns=renomear)
+
+    for col in ["MD", "TVD"]:
+        if col in df_traj.columns:
+            df_traj[col] = pd.to_numeric(df_traj[col], errors="coerce")
+
+    if "MD" in df_traj.columns:
+        df_traj = df_traj.dropna(subset=["MD"]).sort_values("MD").reset_index(drop=True)
+    elif "TVD" in df_traj.columns:
+        df_traj = df_traj.dropna(subset=["TVD"]).sort_values("TVD").reset_index(drop=True)
+
+    return df_traj, origem
+
+
+def _rtp_coletar_dados_automaticos():
+    df_traj, origem_traj = _rtp_obter_trajetoria_base()
+
+    tvd_final = None
+    md_final = None
+
+    if isinstance(df_traj, pd.DataFrame) and not df_traj.empty:
+        if "TVD" in df_traj.columns:
+            tvd_final = pd.to_numeric(df_traj["TVD"], errors="coerce").max()
+
+        if "MD" in df_traj.columns:
+            md_final = pd.to_numeric(df_traj["MD"], errors="coerce").max()
+
+    if tvd_final is None or pd.isna(tvd_final):
+        tvd_final = st.session_state.get("profundidade_maxima", None)
+
+    if md_final is None or pd.isna(md_final):
+        md_final = tvd_final
+
+    return {
+        "poco": _rtp_poco_atual(),
+        "campo": st.session_state.get("field_name", st.session_state.get("campo", "Não informado")),
+        "tipo_estudo": st.session_state.get("option", "Não informado"),
+        "tvd_final": tvd_final,
+        "md_final": md_final,
+        "easting": st.session_state.get("easting", None),
+        "northing": st.session_state.get("northing", None),
+        "zona": st.session_state.get("zona", None),
+        "hem": st.session_state.get("hem", None),
+        "tipo_poco": st.session_state.get("tipo_poco", "Onshore"),
+        "datum": st.session_state.get("datum", "Não informado"),
+        "elevacao_datum": st.session_state.get("es", None),
+        "lamina_dagua": st.session_state.get("lda", None),
+        "nivel_freatico": st.session_state.get("nf", None),
+        "mr": st.session_state.get("rtkb", None),
+        "objetivo": st.session_state.get("comments", ""),
+        "origem_trajetoria": origem_traj,
+    }
+
+
+def _rtp_montar_tabela_fases_padrao():
+    df_intervalos = st.session_state.get("df_intervalos_fluido", pd.DataFrame())
+    df_mud = st.session_state.get("df_mud", pd.DataFrame())
+    df_sapatas = st.session_state.get("sapatas_df", pd.DataFrame())
+    df_fases = st.session_state.get("fases_df", pd.DataFrame())
+
+    n_linhas = 3
+
+    if isinstance(df_fases, pd.DataFrame) and not df_fases.empty:
+        n_linhas = max(n_linhas, len(df_fases))
+
+    if isinstance(df_sapatas, pd.DataFrame) and not df_sapatas.empty:
+        n_linhas = max(n_linhas, len(df_sapatas))
+
+    if isinstance(df_intervalos, pd.DataFrame) and not df_intervalos.empty:
+        n_linhas = max(n_linhas, len(df_intervalos))
+
+    linhas = []
+
+    for i in range(n_linhas):
+        prof_md = ""
+        peso = ""
+        broca = ""
+        revestimento = ""
+        colar = ""
+        topo = "Superfície"
+        perfilagem_oh = ""
+        perfilagem_ch = ""
+
+        if isinstance(df_intervalos, pd.DataFrame) and not df_intervalos.empty and i < len(df_intervalos):
+            row_int = df_intervalos.iloc[i]
+
+            for col in ["Base do Intervalo (m)", "Base (m)", "Profundidade (m)"]:
+                if col in df_intervalos.columns:
+                    prof_md = _rtp_fmt(row_int.get(col), 2)
+                    break
+
+            for col in ["Peso do Fluido (lb/gal)", "Peso do Fluido Planejado (lb/gal)", "Peso (ppg)"]:
+                if col in df_intervalos.columns:
+                    peso = _rtp_fmt(row_int.get(col), 2)
+                    break
+
+        elif isinstance(df_mud, pd.DataFrame) and not df_mud.empty:
+            col_peso = None
+
+            for col in df_mud.columns:
+                if "executado" in str(col).lower():
+                    col_peso = col
+                    break
+
+            if col_peso is None:
+                for col in df_mud.columns:
+                    if "planejado" in str(col).lower():
+                        col_peso = col
+                        break
+
+            if col_peso is not None:
+                serie = pd.to_numeric(df_mud[col_peso], errors="coerce").dropna()
+
+                if not serie.empty:
+                    peso = f"{serie.min():.1f} - {serie.max():.1f}"
+
+        if isinstance(df_fases, pd.DataFrame) and not df_fases.empty and i < len(df_fases):
+            if "Fase" in df_fases.columns:
+                broca = _rtp_polegada(df_fases.iloc[i].get("Fase"))
+
+        if isinstance(df_sapatas, pd.DataFrame) and not df_sapatas.empty and i < len(df_sapatas):
+            row_sap = df_sapatas.iloc[i]
+
+            if "Fase" in df_sapatas.columns:
+                revestimento = _rtp_polegada(row_sap.get("Fase"))
+
+            if not prof_md:
+                for col in ["Profundidade da sapata (m)", "Profundidade (m)", "Profundidade"]:
+                    if col in df_sapatas.columns:
+                        prof_md = _rtp_fmt(row_sap.get(col), 2)
+                        break
+
+        linhas.append({
+            "Fase": f"Fase {i + 1}",
+            "Prof. MD (m)": prof_md,
+            "Peso (ppg)": peso,
+            "VP (cp)": "",
+            "Broca (in)": broca,
+            "Revestimento (in)": revestimento,
+            "Colar (m)": colar,
+            "Topo": topo,
+            "Perfilagem OH": perfilagem_oh,
+            "OH realizada": False,
+            "Perfilagem CH": perfilagem_ch,
+            "CH realizada": False,
+        })
+
+    return pd.DataFrame(linhas)
+
+
+def _rtp_montar_tabela_litologia_padrao(modo_litologia="Litologia"):
+    if modo_litologia == "Permeável / Não permeável":
+        df_perm = st.session_state.get("df_perm_nao_perm", pd.DataFrame())
+
+        if isinstance(df_perm, pd.DataFrame) and not df_perm.empty:
+            df = df_perm.copy()
+            df.columns = [str(c).strip() for c in df.columns]
+
+            col_lito = "Classificação" if "Classificação" in df.columns else None
+
+            if col_lito is not None:
+                colunas = [c for c in ["Topo (m)", "Base (m)", col_lito] if c in df.columns]
+                df = df[colunas].copy()
+                df = df.rename(columns={col_lito: "Litologia"})
+                return df.reset_index(drop=True)
+
+    selected = _rtp_poco_atual()
+    poco = st.session_state.get("pocos", {}).get(selected, {})
+
+    profundidades = poco.get("profundidade", [])
+    litologias = poco.get("litologia", [])
+    formacoes = poco.get("formation", [])
+
+    if profundidades and litologias:
+        n = min(len(profundidades), len(litologias))
+        return pd.DataFrame({
+            "Formação": formacoes[:n] if formacoes else [""] * n,
+            "Topo (m)": profundidades[:n],
+            "Litologia": litologias[:n],
+        })
+
+    df_lito = st.session_state.get("df_lito_excel", pd.DataFrame())
+
+    if isinstance(df_lito, pd.DataFrame) and not df_lito.empty:
+        colunas = [c for c in ["Formação", "Topo", "Base", "Litologia"] if c in df_lito.columns]
+        df_lito = df_lito[colunas].copy()
+
+        if "Topo" in df_lito.columns:
+            df_lito = df_lito.rename(columns={"Topo": "Topo (m)"})
+
+        if "Base" in df_lito.columns:
+            df_lito = df_lito.rename(columns={"Base": "Base (m)"})
+
+        return df_lito.reset_index(drop=True)
+
+    return pd.DataFrame(columns=["Formação", "Topo (m)", "Litologia"])
+
+
+def _rtp_dataframe_padrao_cronograma():
+    return pd.DataFrame({
+        "Tempo (dias)": [0.0],
+        "Profundidade MD (m)": [0.0],
+    })
+
+
+def _rtp_dataframe_padrao_problemas():
+    return pd.DataFrame({
+        "Profundidade MD (m)": [""],
+        "Problema operacional": [""],
+        "Tempo (dias)": [""],
+        "Duração (dias)": [""],
+        "Mostrar": [True],
+    })
+
+
+def _rtp_estilos_problemas_operacionais():
+    return {
+        "Drag": {"cor": "orange", "marcador": "^"},
+        "Overpull": {"cor": "black", "marcador": "s"},
+        "Repasse": {"cor": "blue", "marcador": "o"},
+        "Coluna presa": {"cor": "red", "marcador": "x"},
+        "Ameaça de prisão": {"cor": "purple", "marcador": "P"},
+        "Coluna topou": {"cor": "gray", "marcador": "D"},
+        "Ferramenta de perfilagem topou": {
+            "cor": "black",
+            "marcador": "d",
+            "facecolor": "none",
+        },
+        "Perda parcial de circulação": {"cor": "orange", "marcador": "v"},
+        "Perda severa de circulação": {"cor": "red", "marcador": "v"},
+        "Pescaria": {"cor": "brown", "marcador": "X"},
+    }
+
+
+def _rtp_normalizar_dataframe(df, colunas):
+    """
+    Garante um schema estável para os editores e para o gerador do PDF.
+    """
+    if not isinstance(df, pd.DataFrame):
+        df = pd.DataFrame()
+    else:
+        df = df.copy()
+
+    df.columns = [str(col).strip() for col in df.columns]
+
+    for coluna in colunas:
+        if coluna not in df.columns:
+            df[coluna] = ""
+
+    return df[colunas].reset_index(drop=True)
+
+
+def _rtp_normalizar_dados_poco(dados_poco):
+    df_fases_original = dados_poco.get("df_fases_rtp")
+    if isinstance(df_fases_original, pd.DataFrame):
+        df_fases_original = df_fases_original.copy()
+
+        # Migra a coluna unica da versao anterior sem descartar o conteudo.
+        if (
+                "Perfilagem (MD)" in df_fases_original.columns
+                and "Perfilagem OH" not in df_fases_original.columns
+        ):
+            df_fases_original["Perfilagem OH"] = df_fases_original["Perfilagem (MD)"]
+        if (
+                "Perfilagem realizada" in df_fases_original.columns
+                and "OH realizada" not in df_fases_original.columns
+        ):
+            df_fases_original["OH realizada"] = df_fases_original["Perfilagem realizada"]
+
+    colunas_fases = [
+        "Fase",
+        "Prof. MD (m)",
+        "Peso (ppg)",
+        "VP (cp)",
+        "Broca (in)",
+        "Revestimento (in)",
+        "Colar (m)",
+        "Topo",
+        "Perfilagem OH",
+        "OH realizada",
+        "Perfilagem CH",
+        "CH realizada",
+    ]
+    colunas_cronograma = ["Tempo (dias)", "Profundidade MD (m)"]
+    colunas_problemas = [
+        "Profundidade MD (m)",
+        "Problema operacional",
+        "Tempo (dias)",
+        "Duração (dias)",
+        "Mostrar",
+    ]
+
+    dados_poco["df_fases_rtp"] = _rtp_normalizar_dataframe(
+        df_fases_original,
+        colunas_fases,
+    )
+    for coluna_realizada in ["OH realizada", "CH realizada"]:
+        dados_poco["df_fases_rtp"][coluna_realizada] = (
+            dados_poco["df_fases_rtp"][coluna_realizada]
+            .map(_rtp_valor_booleano)
+        )
+    dados_poco["df_perdas_circulacao_rtp"] = _rtp_normalizar_dataframe(
+        dados_poco.get("df_perdas_circulacao_rtp"),
+        ["Profundidade TVD (m)", "Peso do Fluido (lb/gal)"],
+    )
+    df_crono_antigo = dados_poco.get("df_cronograma_rtp")
+    if isinstance(df_crono_antigo, pd.DataFrame) and "Dia" in df_crono_antigo.columns:
+        tempo_antigo = pd.to_numeric(df_crono_antigo["Dia"], errors="coerce")
+        if "df_cronograma_planejado_rtp" not in dados_poco:
+            dados_poco["df_cronograma_planejado_rtp"] = pd.DataFrame({
+                "Tempo (dias)": tempo_antigo,
+                "Profundidade MD (m)": pd.to_numeric(
+                    df_crono_antigo.get("Prof. planejada (m MD)"),
+                    errors="coerce",
+                ),
+            })
+        if "df_cronograma_executado_rtp" not in dados_poco:
+            dados_poco["df_cronograma_executado_rtp"] = pd.DataFrame({
+                "Tempo (dias)": tempo_antigo,
+                "Profundidade MD (m)": pd.to_numeric(
+                    df_crono_antigo.get("Prof. executada (m MD)"),
+                    errors="coerce",
+                ),
+            })
+
+    df_crono_planejado = dados_poco.get("df_cronograma_planejado_rtp")
+    if isinstance(df_crono_planejado, pd.DataFrame):
+        df_crono_planejado = df_crono_planejado.copy()
+        if "Tempo (dias)" not in df_crono_planejado.columns and "Tempo (h)" in df_crono_planejado.columns:
+            df_crono_planejado["Tempo (dias)"] = (
+                    pd.to_numeric(df_crono_planejado["Tempo (h)"], errors="coerce")
+                    / 24.0
+            )
+
+    df_crono_executado = dados_poco.get("df_cronograma_executado_rtp")
+    if isinstance(df_crono_executado, pd.DataFrame):
+        df_crono_executado = df_crono_executado.copy()
+        if "Tempo (dias)" not in df_crono_executado.columns and "Tempo (h)" in df_crono_executado.columns:
+            df_crono_executado["Tempo (dias)"] = (
+                    pd.to_numeric(df_crono_executado["Tempo (h)"], errors="coerce")
+                    / 24.0
+            )
+
+    dados_poco["df_cronograma_planejado_rtp"] = _rtp_normalizar_dataframe(
+        df_crono_planejado,
+        colunas_cronograma,
+    )
+    dados_poco["df_cronograma_executado_rtp"] = _rtp_normalizar_dataframe(
+        df_crono_executado,
+        colunas_cronograma,
+    )
+
+    df_problemas = dados_poco.get("df_problemas_rtp")
+    if isinstance(df_problemas, pd.DataFrame):
+        df_problemas = df_problemas.copy()
+        if "Tempo (dias)" not in df_problemas.columns and "Tempo (h)" in df_problemas.columns:
+            df_problemas["Tempo (dias)"] = (
+                    pd.to_numeric(df_problemas["Tempo (h)"], errors="coerce")
+                    / 24.0
+            )
+        if "Duração (dias)" not in df_problemas.columns:
+            if "Duração (h)" in df_problemas.columns:
+                df_problemas["Duração (dias)"] = (
+                        pd.to_numeric(df_problemas["Duração (h)"], errors="coerce")
+                        / 24.0
+                )
+            elif "Duração" in df_problemas.columns:
+                df_problemas["Duração (dias)"] = pd.to_numeric(
+                    df_problemas["Duração"],
+                    errors="coerce",
+                )
+        if "Tempo (dias)" not in df_problemas.columns:
+            df_problemas["Tempo (dias)"] = np.nan
+        if "Duração (dias)" not in df_problemas.columns:
+            df_problemas["Duração (dias)"] = 0.0
+        if "Mostrar" not in df_problemas.columns:
+            df_problemas["Mostrar"] = True
+    dados_poco["df_problemas_rtp"] = _rtp_normalizar_dataframe(
+        df_problemas,
+        colunas_problemas,
+    )
+
+    df_lito = dados_poco.get("df_litologia_rtp")
+    if not isinstance(df_lito, pd.DataFrame):
+        df_lito = pd.DataFrame()
+    else:
+        df_lito = df_lito.copy()
+
+    df_lito.columns = [str(col).strip() for col in df_lito.columns]
+    renomear_lito = {}
+    if "Topo" in df_lito.columns and "Topo (m)" not in df_lito.columns:
+        renomear_lito["Topo"] = "Topo (m)"
+    if "Base" in df_lito.columns and "Base (m)" not in df_lito.columns:
+        renomear_lito["Base"] = "Base (m)"
+    if renomear_lito:
+        df_lito = df_lito.rename(columns=renomear_lito)
+
+    for coluna in ["Topo (m)", "Base (m)", "Litologia"]:
+        if coluna not in df_lito.columns:
+            df_lito[coluna] = ""
+
+    colunas_lito = [
+        coluna
+        for coluna in ["Formação", "Topo (m)", "Base (m)", "Litologia"]
+        if coluna in df_lito.columns
+    ]
+    dados_poco["df_litologia_rtp"] = df_lito[colunas_lito].reset_index(drop=True)
+
+    return dados_poco
+
+
+def _rtp_preparar_dados_poco():
+    """
+    Inicialização única usada pela aba RTP e pelo relatório final.
+    """
+    dados_poco = _rtp_store_poco()
+
+    if not isinstance(dados_poco.get("dados_gerais"), dict):
+        dados_poco["dados_gerais"] = {}
+    dados_gerais = dados_poco["dados_gerais"]
+    dados_gerais.setdefault("sonda", "")
+
+    if not isinstance(dados_poco.get("config_trajetoria"), dict):
+        dados_poco["config_trajetoria"] = {}
+    cfg_traj = dados_poco["config_trajetoria"]
+    defaults_traj = {
+        "mostrar_trajetoria": True,
+        "mostrar_sapatas": True,
+        "mostrar_topo_sal": False,
+        "mostrar_topo_cavidade": False,
+        "topo_sal_tvd": 0.0,
+        "topo_cavidade_tvd": 0.0,
+        "rop_medio": 0.0,
+    }
+    for chave, valor in defaults_traj.items():
+        cfg_traj.setdefault(chave, valor)
+
+    if not isinstance(dados_poco.get("config_geopressoes"), dict):
+        dados_poco["config_geopressoes"] = {}
+    cfg_geo = dados_poco["config_geopressoes"]
+    defaults_geo = {
+        "mostrar_sobrecarga": True,
+        "mostrar_poros": True,
+        "mostrar_fratura": True,
+        "mostrar_lama_planejada": True,
+        "mostrar_lama_utilizada": True,
+        "mostrar_rft": True,
+        "mostrar_colapso": True,
+        "mostrar_lot": True,
+        "mostrar_fit": True,
+        "itens_geopressoes": None,
+        "curvas_df_tvp": [],
+        "x_min": 7.0,
+        "x_max": 21.0,
+        "x_step": 2.0,
+        "y_min": 0.0,
+        "y_max": None,
+        "y_step": 200.0,
+    }
+    for chave, valor in defaults_geo.items():
+        cfg_geo.setdefault(chave, valor)
+
+    if not isinstance(dados_poco.get("config_litologia"), dict):
+        dados_poco["config_litologia"] = {}
+    cfg_lito = dados_poco["config_litologia"]
+    cfg_lito.setdefault("modo_litologia", "Litologia")
+    cfg_lito["mostrar_rotulos"] = False
+
+    if "df_fases_rtp" not in dados_poco:
+        dados_poco["df_fases_rtp"] = _rtp_montar_tabela_fases_padrao().head(5)
+    if "df_perdas_circulacao_rtp" not in dados_poco:
+        dados_poco["df_perdas_circulacao_rtp"] = pd.DataFrame(
+            columns=["Profundidade TVD (m)", "Peso do Fluido (lb/gal)"]
+        )
+    tem_cronograma_antigo = isinstance(
+        dados_poco.get("df_cronograma_rtp"),
+        pd.DataFrame,
+    )
+    if (
+            "df_cronograma_planejado_rtp" not in dados_poco
+            and not tem_cronograma_antigo
+    ):
+        dados_poco["df_cronograma_planejado_rtp"] = _rtp_dataframe_padrao_cronograma()
+    if (
+            "df_cronograma_executado_rtp" not in dados_poco
+            and not tem_cronograma_antigo
+    ):
+        dados_poco["df_cronograma_executado_rtp"] = _rtp_dataframe_padrao_cronograma()
+    if "df_problemas_rtp" not in dados_poco:
+        dados_poco["df_problemas_rtp"] = _rtp_dataframe_padrao_problemas()
+    if not isinstance(dados_poco.get("config_cronograma"), dict):
+        dados_poco["config_cronograma"] = {}
+    dados_poco["config_cronograma"].setdefault("mostrar_planejado", True)
+    dados_poco["config_cronograma"].setdefault("mostrar_executado", True)
+    if "df_litologia_rtp" not in dados_poco:
+        dados_poco["df_litologia_rtp"] = _rtp_montar_tabela_litologia_padrao(
+            cfg_lito["modo_litologia"]
+        )
+
+    return _rtp_normalizar_dados_poco(dados_poco)
+
+
+def _rtp_previa_html(dados_auto, dados_poco):
+    sonda = dados_poco.get("sonda", "Não informado")
+
+    st.markdown(
+        f"""
+        <div style="
+            border-top: 5px solid #d71920;
+            border-bottom: 1px solid #d9d9d9;
+            padding: 0.55rem 0;
+            margin-bottom: 0.8rem;
+            text-align: center;
+        ">
+            <h3 style="margin:0;">Acompanhamento / Relatório Técnico do Poço {dados_auto["poco"]}</h3>
+        </div>
+        """,
+        unsafe_allow_html=True
+    )
+
+    col1, col2, col3 = st.columns(3)
+
+    with col1:
+        st.markdown("**Dados gerais**")
+        st.caption(f"Poço: {dados_auto['poco']}")
+        st.caption(f"Campo: {dados_auto['campo']}")
+        st.caption(f"TVD Final: {_rtp_fmt(dados_auto['tvd_final'], 2, ' m')}")
+        st.caption(f"MD Final: {_rtp_fmt(dados_auto['md_final'], 2, ' m')}")
+
+    with col2:
+        st.markdown("**Coordenadas**")
+        st.caption(f"Easting: {_rtp_fmt(dados_auto['easting'], 3)}")
+        st.caption(f"Northing: {_rtp_fmt(dados_auto['northing'], 3)}")
+        st.caption(f"Zona UTM: {dados_auto['zona'] if dados_auto['zona'] is not None else 'Não informado'}")
+        st.caption(f"Hemisfério: {dados_auto['hem'] if dados_auto['hem'] is not None else 'Não informado'}")
+
+    with col3:
+        st.markdown("**Elevação / Operação**")
+        st.caption(f"Datum: {dados_auto['datum']}")
+        st.caption(f"Elevação do DATUM: {_rtp_fmt(dados_auto['elevacao_datum'], 2, ' m')}")
+        if str(dados_auto.get("tipo_poco", "Onshore")).lower() == "offshore":
+            st.caption(f"**Lâmina D'água:** {_rtp_fmt(dados_auto.get('lamina_dagua'), 2, ' m')}")
+            st.caption(f"**Airgap:** {_rtp_fmt(dados_auto.get('mr'), 2, ' m')}")
+        else:
+            st.caption(f"**Elevação do DATUM:** {_rtp_fmt(dados_auto.get('elevacao_datum'), 2, ' m')}")
+            st.caption(f"**N. Freático:** {_rtp_fmt(dados_auto.get('nivel_freatico'), 2, ' m')}")
+            st.caption(f"**MR:** {_rtp_fmt(dados_auto.get('mr'), 2, ' m')}")
+        st.caption(f"Sonda: {sonda}")
+
+    if dados_auto.get("objetivo"):
+        st.markdown("**Objetivo**")
+        st.write(dados_auto.get("objetivo"))
+
+
+def _rtp_texto_pdf(c, texto, x, y, max_width, font="Helvetica", size=7, leading=9):
+    """
+    Escreve texto com quebra automática simples no PDF.
+    Retorna o próximo y após escrever.
+    """
+    if texto in (None, ""):
+        texto = "Não informado"
+
+    texto = str(texto)
+
+    c.setFont(font, size)
+
+    palavras = texto.split()
+    linhas = []
+    linha_atual = ""
+
+    for palavra in palavras:
+        teste = f"{linha_atual} {palavra}".strip()
+
+        if c.stringWidth(teste, font, size) <= max_width:
+            linha_atual = teste
+        else:
+            if linha_atual:
+                linhas.append(linha_atual)
+            linha_atual = palavra
+
+    if linha_atual:
+        linhas.append(linha_atual)
+
+    for linha in linhas:
+        c.drawString(x, y, linha)
+        y -= leading
+
+    return y
+
+
+def _rtp_valor_celula(valor, padrao="-"):
+    """
+    Normaliza valor para exibição em células do PDF.
+    Células vazias, None e NaN viram '-'.
+    """
+    if valor is None:
+        return padrao
+
+    try:
+        if pd.isna(valor):
+            return padrao
+    except Exception:
+        pass
+
+    texto = str(valor).strip()
+
+    if texto == "":
+        return padrao
+
+    return texto
+
+
+def _rtp_valor_booleano(valor):
+    if isinstance(valor, (bool, np.bool_)):
+        return bool(valor)
+
+    if valor is None:
+        return False
+
+    try:
+        if pd.isna(valor):
+            return False
+    except Exception:
+        pass
+
+    return str(valor).strip().lower() in {"true", "1", "sim", "yes", "x"}
+
+
+def _rtp_valor_revestimento(valor):
+    """
+    Para a coluna de revestimento:
+    se não houver revestimento, mostrar 'Poço aberto'.
+    """
+    texto = _rtp_valor_celula(valor)
+
+    if texto in ["-", "—", "nan", "None", "none", "NaN"]:
+        return "Poço aberto"
+
+    return texto
+
+
+def _rtp_quebrar_linhas_pdf(c, texto, font_name, size, max_width):
+    texto = _rtp_valor_celula(texto)
+    palavras = texto.split()
+
+    if not palavras:
+        return ["-"]
+
+    linhas = []
+    linha_atual = ""
+
+    for palavra in palavras:
+        teste = f"{linha_atual} {palavra}".strip()
+
+        if c.stringWidth(teste, font_name, size) <= max_width:
+            linha_atual = teste
+        else:
+            if linha_atual:
+                linhas.append(linha_atual)
+            linha_atual = palavra
+
+    if linha_atual:
+        linhas.append(linha_atual)
+
+    return linhas
+
+
+def _rtp_cell(
+        c,
+        x,
+        y,
+        w,
+        h,
+        texto="",
+        font="Helvetica",
+        size=7,
+        bold=False,
+        align="center",
+        fill=None,
+        text_color=None,
+):
+    """
+    Desenha uma célula simples no PDF.
+    x, y representam o canto superior esquerdo.
+
+    Por padrão:
+    - texto centralizado;
+    - célula vazia vira '-'.
+    """
+    if fill:
+        c.setFillColor(fill)
+        c.rect(x, y - h, w, h, stroke=0, fill=1)
+        c.setFillColorRGB(0, 0, 0)
+
+    c.rect(x, y - h, w, h, stroke=1, fill=0)
+
+    font_name = "Helvetica-Bold" if bold else font
+    texto = _rtp_valor_celula(texto)
+    tamanho = float(size)
+    largura_disponivel = max(w - 4, 1)
+
+    while tamanho > 5 and c.stringWidth(texto, font_name, tamanho) > largura_disponivel:
+        tamanho -= 0.5
+
+    if c.stringWidth(texto, font_name, tamanho) > largura_disponivel:
+        sufixo = "..."
+        texto_base = texto
+        while texto_base and c.stringWidth(
+                texto_base + sufixo,
+                font_name,
+                tamanho,
+        ) > largura_disponivel:
+            texto_base = texto_base[:-1]
+        texto = texto_base.rstrip() + sufixo
+
+    c.setFont(font_name, tamanho)
+    if text_color is not None:
+        c.setFillColor(text_color)
+    else:
+        c.setFillColorRGB(0, 0, 0)
+
+    if align == "center":
+        tx = x + (w - c.stringWidth(texto, font_name, tamanho)) / 2
+    elif align == "right":
+        tx = x + w - c.stringWidth(texto, font_name, tamanho) - 2
+    else:
+        tx = x + 2
+
+    ty = y - h + (h - tamanho) / 2 + 1
+    c.drawString(tx, ty, texto)
+    c.setFillColorRGB(0, 0, 0)
+
+
+def _rtp_cell_multilinha(
+        c,
+        x,
+        y,
+        w,
+        h,
+        texto="",
+        font="Helvetica",
+        size=7,
+        bold=False,
+        align="center",
+        padding=4,
+):
+    """
+    Desenha célula com quebra de linha.
+
+    align:
+    - "center": texto centralizado
+    - "left": texto alinhado à esquerda
+    - "right": texto alinhado à direita
+    """
+    c.rect(x, y - h, w, h, stroke=1, fill=0)
+
+    font_name = "Helvetica-Bold" if bold else font
+    c.setFont(font_name, size)
+
+    linhas = _rtp_quebrar_linhas_pdf(
+        c=c,
+        texto=texto,
+        font_name=font_name,
+        size=size,
+        max_width=w - 2 * padding,
+    )
+
+    leading = size + 2
+    altura_texto = len(linhas) * leading
+    y_texto = y - (h - altura_texto) / 2 - size
+
+    for linha in linhas:
+        if align == "left":
+            tx = x + padding
+        elif align == "right":
+            tx = x + w - c.stringWidth(linha, font_name, size) - padding
+        else:
+            tx = x + (w - c.stringWidth(linha, font_name, size)) / 2
+
+        c.drawString(tx, y_texto, linha)
+        y_texto -= leading
+
+
+def _rtp_desenhar_quadro_pdf(c, titulo, x, y_bottom, largura, altura):
+    c.rect(x, y_bottom, largura, altura, stroke=1, fill=0)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawCentredString(
+        x + largura / 2,
+        y_bottom + altura - 13,
+        titulo,
+    )
+
+
+def _rtp_paleta_litologia_pdf():
+    return {
+        "Água": {"cor": "#d9f7ff", "padrao": "agua", "borda": "#1f8fcf"},
+        "Sem informações de litologia": {"cor": "#FF0000", "padrao": None, "borda": "#000000"},
+        "Argilito": {"cor": "#9ACD32", "padrao": "vertical", "borda": "#000000"},
+        "Arenito": {"cor": "#fff7a1", "padrao": "pontos", "borda": "#000000"},
+        "Fm. Permeável": {"cor": "#fff7a1", "padrao": "pontos", "borda": "#000000"},
+        "Folhelho": {"cor": "#2f4f4f", "padrao": None, "borda": "#000000"},
+        "Siltito": {"cor": "#8b4513", "padrao": None, "borda": "#000000"},
+        "Diamictito": {"cor": "#E97451", "padrao": "pontos", "borda": "#000000"},
+        "Conglomerado": {"cor": "#ffb347", "padrao": "circulos", "borda": "#000000"},
+        "Anidrita / Gipsita": {"cor": "#E6E6FA", "padrao": "diagonal", "borda": "#000000"},
+        "Halita": {"cor": "#ffffff", "padrao": None, "borda": "#000000"},
+        "Calcário": {"cor": "#a7c7e7", "padrao": "diagonal", "borda": "#003366"},
+        "Carbonato": {"cor": "#cfe8f3", "padrao": "cruzado", "borda": "#003366"},
+        "Calcilutito": {"cor": "#C9B7D8", "padrao": "horizontal", "borda": "#000000"},
+        "Margas": {"cor": "#C7D4B5", "padrao": "diagonal_inv", "borda": "#000000"},
+        "Marga": {"cor": "#C7D4B5", "padrao": "diagonal_inv", "borda": "#000000"},
+        "Calcissiltito": {"cor": "#D8BFD8", "padrao": "horizontal", "borda": "#000000"},
+        "Calcarenito": {"cor": "#F5DEB3", "padrao": "pontos", "borda": "#000000"},
+        "Calcirrudito": {"cor": "#4682B4", "padrao": "circulos", "borda": "#000000"},
+        "Coquina": {"cor": "#FFDEAD", "padrao": "circulos", "borda": "#000000"},
+        "Dolomito": {"cor": "#C2B280", "padrao": "cruzado", "borda": "#000000"},
+        "Basalto": {"cor": "#2b2b2b", "padrao": None, "borda": "#000000"},
+        "Diabásio": {"cor": "#556B2F", "padrao": "mais", "borda": "#000000"},
+    }
+
+
+def _rtp_intervalos_litologia_pdf(dados_auto, dados_poco):
+    df_lito = dados_poco.get("df_litologia_rtp", pd.DataFrame())
+    if not isinstance(df_lito, pd.DataFrame) or df_lito.empty:
+        return [], 0.0
+
+    df_lito = df_lito.copy()
+    df_lito["Topo (m)"] = pd.to_numeric(
+        df_lito.get("Topo (m)"),
+        errors="coerce",
+    )
+    df_lito["Base (m)"] = pd.to_numeric(
+        df_lito.get("Base (m)"),
+        errors="coerce",
+    )
+    serie_litologia = df_lito.get(
+        "Litologia",
+        pd.Series("", index=df_lito.index, dtype="string"),
+    )
+    df_lito["Litologia"] = (
+        serie_litologia
+        .astype("string")
+        .fillna("")
+        .str.strip()
+    )
+    df_lito = df_lito.dropna(subset=["Topo (m)"])
+    df_lito = df_lito[df_lito["Litologia"] != ""]
+    df_lito = df_lito.sort_values("Topo (m)").reset_index(drop=True)
+
+    if df_lito.empty:
+        return [], 0.0
+
+    profundidade_final = pd.to_numeric(
+        pd.Series([
+            dados_auto.get("tvd_final"),
+            df_lito["Base (m)"].max(),
+            df_lito["Topo (m)"].max(),
+        ]),
+        errors="coerce",
+    ).max()
+
+    if pd.isna(profundidade_final) or profundidade_final <= 0:
+        return [], 0.0
+
+    intervalos = []
+    for i, row in df_lito.iterrows():
+        topo = max(float(row["Topo (m)"]), 0.0)
+        base = row["Base (m)"]
+
+        if pd.isna(base) or float(base) <= topo:
+            if i < len(df_lito) - 1:
+                base = float(df_lito.iloc[i + 1]["Topo (m)"])
+            else:
+                base = float(profundidade_final)
+
+        base = min(float(base), float(profundidade_final))
+        if base > topo:
+            intervalos.append([topo, base, str(row["Litologia"])])
+
+    if str(dados_auto.get("tipo_poco", "Onshore")).lower() == "offshore":
+        rtkb = float(dados_auto.get("mr") or 0.0)
+        lda = float(dados_auto.get("lamina_dagua") or 0.0)
+        base_agua = min(rtkb + lda, float(profundidade_final))
+
+        if lda > 0 and base_agua > rtkb:
+            ajustados = []
+            for topo, base, litologia in intervalos:
+                if topo < rtkb:
+                    ajustados.append([topo, min(base, rtkb), litologia])
+                if base > base_agua:
+                    ajustados.append([max(topo, base_agua), base, litologia])
+
+            ajustados.append([rtkb, base_agua, "Água"])
+            intervalos = ajustados
+
+    intervalos = [
+        intervalo
+        for intervalo in intervalos
+        if intervalo[1] > intervalo[0]
+    ]
+    intervalos.sort(key=lambda item: item[0])
+
+    return intervalos, float(profundidade_final)
+
+
+def _rtp_completar_sem_info_litologia(intervalos, profundidade_final):
+    """
+    Adiciona uma faixa vermelha de 'Sem informações de litologia'
+    da base da última litologia até a profundidade final do gráfico.
+    """
+
+    if not intervalos:
+        return intervalos
+
+    profundidade_final = pd.to_numeric(profundidade_final, errors="coerce")
+
+    if pd.isna(profundidade_final) or float(profundidade_final) <= 0:
+        return intervalos
+
+    profundidade_final = float(profundidade_final)
+
+    intervalos_validos = []
+
+    for topo, base, litologia in intervalos:
+        topo_num = pd.to_numeric(topo, errors="coerce")
+        base_num = pd.to_numeric(base, errors="coerce")
+
+        if pd.isna(topo_num) or pd.isna(base_num):
+            continue
+
+        topo_num = float(topo_num)
+        base_num = float(base_num)
+
+        if base_num > topo_num:
+            intervalos_validos.append([topo_num, base_num, str(litologia)])
+
+    if not intervalos_validos:
+        return intervalos
+
+    # Usa a base mais profunda das litologias reais.
+    # Água não deve ser considerada como "última litologia".
+    intervalos_litologicos = [
+        intervalo
+        for intervalo in intervalos_validos
+        if str(intervalo[2]).strip().lower() != "água"
+    ]
+
+    referencia = intervalos_litologicos if intervalos_litologicos else intervalos_validos
+    base_ultima_litologia = max(float(base) for _, base, _ in referencia)
+
+    if profundidade_final > base_ultima_litologia:
+        intervalos_validos.append([
+            base_ultima_litologia,
+            profundidade_final,
+            "Sem informações de litologia"
+        ])
+
+    intervalos_validos.sort(key=lambda item: item[0])
+
+    return intervalos_validos
+
+
+def _rtp_desenhar_padrao_litologia_pdf(c, x, y, largura, altura, padrao):
+    if not padrao or largura <= 0 or altura <= 0:
+        return
+
+    c.saveState()
+    caminho = c.beginPath()
+    caminho.rect(x, y, largura, altura)
+    c.clipPath(caminho, stroke=0, fill=0)
+    c.setStrokeColor(HexColor("#303030"))
+    c.setLineWidth(0.55)
+
+    passo = 5
+
+    if padrao in {"vertical", "mais"}:
+        pos = x + passo / 2
+        while pos < x + largura:
+            c.line(pos, y, pos, y + altura)
+            pos += passo
+
+    if padrao in {"horizontal", "mais"}:
+        pos = y + passo / 2
+        while pos < y + altura:
+            c.line(x, pos, x + largura, pos)
+            pos += passo
+
+    if padrao in {"diagonal", "cruzado"}:
+        pos = -altura
+        while pos < largura:
+            c.line(x + pos, y, x + pos + altura, y + altura)
+            pos += passo
+
+    if padrao in {"diagonal_inv", "cruzado"}:
+        pos = 0
+        while pos < largura + altura:
+            c.line(x + pos, y, x + pos - altura, y + altura)
+            pos += passo
+
+    if padrao in {"pontos", "circulos"}:
+        raio = 0.55 if padrao == "pontos" else 1.25
+        py = y + passo / 2
+        linha = 0
+        while py < y + altura:
+            px = x + passo / 2 + (passo / 2 if linha % 2 else 0)
+            while px < x + largura:
+                c.circle(px, py, raio, stroke=1, fill=0)
+                px += passo
+            py += passo
+            linha += 1
+
+    if padrao == "agua":
+        c.setStrokeColor(HexColor("#168fbd"))
+        py = y + 3
+        fase = 0
+        while py < y + altura:
+            pontos = []
+            for indice in range(13):
+                px = x + largura * indice / 12
+                onda = 0.8 * math.sin(indice * 1.25 + fase)
+                pontos.append((px, py + onda))
+            for p1, p2 in zip(pontos, pontos[1:]):
+                c.line(p1[0], p1[1], p2[0], p2[1])
+            py += 6
+            fase += 0.8
+
+    c.restoreState()
+
+RTP_PLOT_BOTTOM_FRAC = 0.08
+RTP_PLOT_TOP_FRAC = 0.94
+RTP_EIXO_LABEL_FONTSIZE = 15.
+RTP_EIXO_TICK_FONTSIZE = 15.
+RTP_EIXO_TICK_WIDTH = 1.2
+RTP_EIXO_TICK_LENGTH = 5.0
+RTP_SPINE_WIDTH = 1.2
+
+RTP_PLANTA_TITLE_FONTSIZE = 10.8
+RTP_PLANTA_LABEL_FONTSIZE = 9.8
+RTP_PLANTA_TICK_FONTSIZE = 9.2
+
+RTP_LITO_TICK_FONTSIZE = 8
+RTP_GEO_MARKERSIZE = 15.
+
+RTP_CRONOGRAMA_MARKER_SIZE = 350
+RTP_CRONOGRAMA_TEXT_FONTSIZE = 12.5
+RTP_CRONOGRAMA_EVENTO_TEXT_FONTSIZE = 15.
+RTP_CRONOGRAMA_DIAS_OPERACAO_FONTSIZE = 18.
+
+RTP_SAPATA_MARKER_SIZE = 300
+RTP_SAPATA_TEXT_FONTSIZE = 15.0
+RTP_RIG_ZOOM_TRAJETORIA = 0.22
+RTP_RIG_ZOOM_PLANTA = 0.13
+
+RTP_TRAJETORIA_LINEWIDTH_PLANEJADA = 7.
+RTP_TRAJETORIA_LINEWIDTH_EXECUTADA = 7.
+RTP_TRAJETORIA_LINEWIDTH_PADRAO = 7.
+
+RTP_PLANTA_LINEWIDTH_PLANEJADA = 5.2
+RTP_PLANTA_LINEWIDTH_EXECUTADA = 5.2
+RTP_PLANTA_LINEWIDTH_PADRAO = 5.2
+
+RTP_CRONOGRAMA_LINEWIDTH_PLANEJADO = 6.
+RTP_CRONOGRAMA_LINEWIDTH_EXECUTADO = 6.
+RTP_GRID_LINEWIDTH = 1.5
+RTP_GRID_ALPHA = 0.65
+def _rtp_desenhar_litologia_pdf(c, dados_auto, dados_poco, x, y_bottom, largura, altura):
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica-Bold", 10)
+    c.drawCentredString(
+        x + largura / 2,
+        y_bottom + altura - 13,
+        "Litologia",
+    )
+
+    intervalos, profundidade_litologia = _rtp_intervalos_litologia_pdf(
+        dados_auto,
+        dados_poco,
+    )
+    profundidade_final = _rtp_profundidade_final_graficos(
+        dados_auto,
+        dados_poco,
+        profundidade_litologia=profundidade_litologia,
+    )
+    profundidade_final = _rtp_final_eixo_y(
+        dados_poco,
+        profundidade_final,
+    )
+    profundidade_inicial = _rtp_inicio_eixo_y(
+        dados_poco,
+        profundidade_final,
+    )
+    if not intervalos or profundidade_final <= 0:
+        c.setFont("Helvetica", 6)
+        c.drawCentredString(
+            x + largura / 2,
+            y_bottom + altura / 2,
+            "Sem dados",
+        )
+        return
+
+    intervalos = _rtp_completar_sem_info_litologia(
+        intervalos,
+        profundidade_final,
+    )
+
+    largura_escala = 21
+
+    largura_escala = 21
+    x_track = x + largura_escala
+    largura_track = largura - largura_escala - 3
+    margem_interna = 2
+    altura_titulo = 14
+    y_fig_ref = y_bottom + margem_interna
+    altura_fig_ref = altura - altura_titulo - margem_interna
+    y_track_bottom = y_fig_ref + altura_fig_ref * RTP_PLOT_BOTTOM_FRAC
+    y_track_top = y_fig_ref + altura_fig_ref * RTP_PLOT_TOP_FRAC
+    altura_track = y_track_top - y_track_bottom
+
+    paleta = _rtp_paleta_litologia_pdf()
+    def profundidade_para_y(profundidade):
+        fracao = (
+            (float(profundidade) - profundidade_inicial)
+            / (profundidade_final - profundidade_inicial)
+        )
+        return y_track_top - fracao * altura_track
+    c.setStrokeColor(HexColor("#707070"))
+    c.setLineWidth(0.7)
+    c.rect(
+        x_track,
+        y_track_bottom,
+        largura_track,
+        altura_track,
+        stroke=1,
+        fill=0,
+    )
+
+    marcas = _rtp_marcas_profundidade(
+        profundidade_final,
+        _rtp_passo_eixo_y(dados_poco),
+        profundidade_inicial,
+    )
+
+    c.setFont("Helvetica", 7)
+    c.setFillColorRGB(0, 0, 0)
+    for profundidade in marcas:
+        y_marca = profundidade_para_y(profundidade)
+        c.setStrokeColor(HexColor("#909090"))
+        c.line(x_track - 2, y_marca, x_track, y_marca)
+        c.drawRightString(
+            x_track - 3,
+            y_marca - 2.4,
+            f"{profundidade:.0f}",
+        )
+
+    for topo, base, litologia in intervalos:
+        topo = max(topo, profundidade_inicial)
+        base = min(base, profundidade_final)
+        if base <= topo:
+            continue
+
+        y_topo = profundidade_para_y(topo)
+        y_base = profundidade_para_y(base)
+        altura_intervalo = y_topo - y_base
+        estilo = paleta.get(
+            litologia,
+            {"cor": "#CCCCCC", "padrao": "pontos", "borda": "#000000"},
+        )
+
+        c.setFillColor(HexColor(estilo["cor"]))
+        c.setStrokeColor(HexColor(estilo["borda"]))
+        c.setLineWidth(0.8)
+        c.rect(
+            x_track,
+            y_base,
+            largura_track,
+            altura_intervalo,
+            stroke=1,
+            fill=1,
+        )
+        _rtp_desenhar_padrao_litologia_pdf(
+            c,
+            x_track,
+            y_base,
+            largura_track,
+            altura_intervalo,
+            estilo.get("padrao"),
+        )
+
+    c.setFillColorRGB(0, 0, 0)
+    c.setStrokeColorRGB(0, 0, 0)
+def _rtp_desenhar_legenda_litologia_pdf(
+        c,
+        dados_auto,
+        dados_poco,
+        x,
+        y_top,
+        largura,
+):
+    intervalos, profundidade_litologia = _rtp_intervalos_litologia_pdf(
+        dados_auto,
+        dados_poco,
+    )
+
+    profundidade_final = _rtp_profundidade_final_graficos(
+        dados_auto,
+        dados_poco,
+        profundidade_litologia=profundidade_litologia,
+    )
+
+    intervalos = _rtp_completar_sem_info_litologia(
+        intervalos,
+        profundidade_final,
+    )
+
+    litologias = list(dict.fromkeys(
+        litologia
+        for _, _, litologia in intervalos
+    ))
+
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(x, y_top, "Legenda de Litologia")
+
+    y_linha = y_top - 8
+    c.setStrokeColor(HexColor("#d71920"))
+    c.setLineWidth(2)
+    c.line(x, y_linha, x + largura, y_linha)
+
+    if not litologias:
+        c.setFont("Helvetica", 8)
+        c.drawString(x, y_linha - 20, "Nenhuma litologia disponível.")
+        return y_linha - 30
+
+    paleta = _rtp_paleta_litologia_pdf()
+    numero_colunas = 4
+    gap_colunas = 18
+    largura_coluna = (
+                             largura - gap_colunas * (numero_colunas - 1)
+                     ) / numero_colunas
+    largura_amostra = 34
+    altura_amostra = 18
+    altura_linha = 28
+    y_inicio = y_linha - 26
+
+    for indice, litologia in enumerate(litologias):
+        coluna = indice % numero_colunas
+        linha = indice // numero_colunas
+        x_item = x + coluna * (largura_coluna + gap_colunas)
+        y_item = y_inicio - linha * altura_linha
+        estilo = paleta.get(
+            litologia,
+            {"cor": "#CCCCCC", "padrao": "pontos", "borda": "#000000"},
+        )
+
+        c.setFillColor(HexColor(estilo["cor"]))
+        c.setStrokeColor(HexColor(estilo["borda"]))
+        c.setLineWidth(0.6)
+        c.rect(
+            x_item,
+            y_item - altura_amostra + 4,
+            largura_amostra,
+            altura_amostra,
+            stroke=1,
+            fill=1,
+        )
+        _rtp_desenhar_padrao_litologia_pdf(
+            c,
+            x_item,
+            y_item - altura_amostra + 4,
+            largura_amostra,
+            altura_amostra,
+            estilo.get("padrao"),
+        )
+
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("Helvetica", 8)
+        c.drawString(
+            x_item + largura_amostra + 6,
+            y_item - 6,
+            litologia,
+        )
+
+    numero_linhas = math.ceil(len(litologias) / numero_colunas)
+    return y_inicio - numero_linhas * altura_linha
+def _rtp_desenhar_segunda_pagina_pdf(
+        c,
+        dados_auto,
+        dados_poco,
+        page_width,
+        page_height,
+        margem,
+):
+    y_titulo = page_height - margem - 10
+
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica-Bold", 14)
+    c.drawCentredString(
+        page_width / 2,
+        y_titulo,
+        "Informações Complementares",
+    )
+
+    c.setStrokeColor(HexColor("#d71920"))
+    c.setLineWidth(3)
+    c.line(margem, y_titulo + 6, page_width * 0.34, y_titulo + 6)
+    c.line(page_width * 0.66, y_titulo + 6, page_width - margem, y_titulo + 6)
+
+    c.setStrokeColor(HexColor("#a6a6a6"))
+    c.setLineWidth(0.8)
+    c.line(margem, y_titulo + 1, page_width * 0.34, y_titulo + 1)
+    c.line(page_width * 0.66, y_titulo + 1, page_width - margem, y_titulo + 1)
+
+    y_proxima_secao = _rtp_desenhar_legenda_litologia_pdf(
+        c,
+        dados_auto,
+        dados_poco,
+        margem,
+        y_titulo - 28,
+        page_width - 2 * margem,
+    )
+    y_proxima_secao = _rtp_desenhar_legenda_trajetoria_pdf(
+        c,
+        margem,
+        y_proxima_secao - 10,
+        page_width - 2 * margem,
+    )
+    y_proxima_secao = _rtp_desenhar_legenda_geopressoes_pdf(
+        c,
+        dados_poco,
+        margem,
+        y_proxima_secao - 10,
+        page_width - 2 * margem,
+    )
+    _rtp_desenhar_legenda_cronograma_pdf(
+        c,
+        dados_poco,
+        margem,
+        y_proxima_secao - 10,
+        page_width - 2 * margem,
+    )
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica", 6)
+    c.drawRightString(
+        page_width - margem,
+        18,
+        f"Gerado pelo SYGA em {datetime.now().strftime('%d/%m/%Y %H:%M')}",
+    )
+def _rtp_normalizar_trajetoria_pdf(df_traj):
+    if not isinstance(df_traj, pd.DataFrame) or df_traj.empty:
+        return pd.DataFrame()
+
+    try:
+        df = _normalizar_df_trajetoria_3d(df_traj)
+    except Exception:
+        return pd.DataFrame()
+
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return pd.DataFrame()
+
+    colunas = ["Easting", "Northing", "TVD"]
+    for coluna in colunas:
+        if coluna not in df.columns:
+            return pd.DataFrame()
+        df[coluna] = pd.to_numeric(df[coluna], errors="coerce")
+
+    if "MD" in df.columns:
+        df["MD"] = pd.to_numeric(df["MD"], errors="coerce")
+
+    df = (
+        df
+        .dropna(subset=colunas)
+        .sort_values("MD" if "MD" in df.columns else "TVD")
+        .reset_index(drop=True)
+    )
+
+    if len(df) < 2:
+        return pd.DataFrame()
+
+    df["Afastamento Horizontal (m)"] = np.sqrt(
+        df["Easting"] ** 2 + df["Northing"] ** 2
+    )
+    return df
+def _rtp_obter_trajetorias_pdf():
+    trajetorias = []
+    wb = st.session_state.get("wb")
+
+    if wb is not None:
+        for nome in ["Planejada", "Executada"]:
+            try:
+                df = _ler_trajetoria_do_xlsm(wb, nome)
+                df = _rtp_normalizar_trajetoria_pdf(df)
+                if not df.empty:
+                    trajetorias.append((nome, df))
+            except Exception:
+                pass
+
+    if trajetorias:
+        return trajetorias
+
+    modo_atual = str(
+        st.session_state.get("traj_modo", "Trajetória")
+    ).strip()
+    fontes = [
+        st.session_state.get("df_out_traj", pd.DataFrame()),
+        st.session_state.get("df2", pd.DataFrame()),
+        st.session_state.get("df_interp", pd.DataFrame()),
+    ]
+
+    for fonte in fontes:
+        df = _rtp_normalizar_trajetoria_pdf(fonte)
+        if not df.empty:
+            nome = modo_atual if modo_atual in {"Planejada", "Executada"} else "Trajetória"
+            return [(nome, df)]
+
+    return []
+def _rtp_profundidade_final_graficos(
+        dados_auto,
+        dados_poco,
+        trajetorias=None,
+        profundidade_litologia=None,
+):
+    """
+    Define uma profundidade final única para os gráficos do RTP:
+    Litologia, Trajetória, Geopressões e Cronograma.
+
+    A ideia é evitar que cada gráfico calcule seu próprio final de eixo Y.
+    """
+    if trajetorias is None:
+        trajetorias = _rtp_obter_trajetorias_pdf()
+
+    valores = []
+
+    def _add_valor(valor):
+        valor_num = pd.to_numeric(valor, errors="coerce")
+        if pd.notna(valor_num) and float(valor_num) > 0:
+            valores.append(float(valor_num))
+
+    def _add_coluna(df, coluna):
+        if isinstance(df, pd.DataFrame) and not df.empty and coluna in df.columns:
+            serie = pd.to_numeric(df[coluna], errors="coerce").dropna()
+            if not serie.empty:
+                _add_valor(serie.max())
+
+    def _add_colunas_possiveis(df, colunas):
+        for coluna in colunas:
+            _add_coluna(df, coluna)
+
+    # Dados gerais do poço
+    for chave in [
+        "tvd_final",
+        "md_final",
+        "profundidade_final",
+        "profundidade_maxima",
+    ]:
+        _add_valor(dados_auto.get(chave))
+
+    # Profundidade final da litologia
+    _add_valor(profundidade_litologia)
+
+    if profundidade_litologia is None:
+        try:
+            _, profundidade_litologia_calc = _rtp_intervalos_litologia_pdf(
+                dados_auto,
+                dados_poco,
+            )
+            _add_valor(profundidade_litologia_calc)
+        except Exception:
+            pass
+
+    # Tabela de litologia do RTP
+    df_litologia = dados_poco.get("df_litologia_rtp", pd.DataFrame())
+    _add_colunas_possiveis(
+        df_litologia,
+        [
+            "Base (m)",
+            "Base",
+            "Topo (m)",
+            "Topo",
+            "Profundidade (m)",
+            "Profundidade",
+        ],
+    )
+
+    # Trajetórias
+    for _, df_traj in trajetorias:
+        _add_colunas_possiveis(
+            df_traj,
+            [
+                "TVD",
+                "MD",
+                "Profundidade",
+                "Profundidade (m)",
+            ],
+        )
+
+    # Geopressões / curvas principais
+    for df_geo in [
+        st.session_state.get("df_pp", pd.DataFrame()),
+        st.session_state.get("df_f", pd.DataFrame()),
+        st.session_state.get("df_est", pd.DataFrame()),
+        st.session_state.get("df_tvp", pd.DataFrame()),
+    ]:
+        _add_colunas_possiveis(
+            df_geo,
+            [
+                "Profundidade (m)",
+                "Profundidade",
+                "TVD",
+                "MD",
+            ],
+        )
+
+    # Perdas de circulação / testes extras do RTP
+    _add_colunas_possiveis(
+        dados_poco.get("df_perdas_circulacao_rtp", pd.DataFrame()),
+        [
+            "Profundidade TVD (m)",
+            "Profundidade MD (m)",
+            "Profundidade (m)",
+            "Profundidade",
+        ],
+    )
+
+    # Cronograma planejado, executado e problemas operacionais
+    for df_crono in [
+        dados_poco.get("df_cronograma_planejado_rtp", pd.DataFrame()),
+        dados_poco.get("df_cronograma_executado_rtp", pd.DataFrame()),
+        dados_poco.get("df_problemas_rtp", pd.DataFrame()),
+    ]:
+        _add_colunas_possiveis(
+            df_crono,
+            [
+                "Profundidade MD (m)",
+                "Profundidade TVD (m)",
+                "Profundidade (m)",
+                "Profundidade",
+            ],
+        )
+
+    # Sapatas
+    df_sapatas = st.session_state.get("sapatas_df", pd.DataFrame())
+    _add_colunas_possiveis(
+        df_sapatas,
+        [
+            "Profundidade da sapata (m)",
+            "Profundidade MD (m)",
+            "Profundidade TVD (m)",
+            "Profundidade",
+        ],
+    )
+
+    profundidade_final = pd.to_numeric(
+        pd.Series(valores),
+        errors="coerce",
+    ).max()
+
+    if pd.isna(profundidade_final) or profundidade_final <= 0:
+        return 1.0
+
+    return float(profundidade_final) + 100.0
+
+def _rtp_passo_eixo_y(dados_poco):
+    valor = pd.to_numeric(
+        dados_poco.get("config_geopressoes", {}).get("y_step", 200.0),
+        errors="coerce",
+    )
+    return float(valor) if pd.notna(valor) and valor > 0 else 200.0
+
+
+def _rtp_inicio_eixo_y(dados_poco, profundidade_final=None):
+    valor = pd.to_numeric(
+        dados_poco.get("config_geopressoes", {}).get("y_min", 0.0),
+        errors="coerce",
+    )
+    valor = max(float(valor), 0.0) if pd.notna(valor) else 0.0
+    profundidade_final = pd.to_numeric(profundidade_final, errors="coerce")
+    if pd.notna(profundidade_final) and valor >= float(profundidade_final):
+        return 0.0
+    return valor
+
+
+def _rtp_final_eixo_y(dados_poco, profundidade_final_automatica):
+    profundidade_final_automatica = pd.to_numeric(
+        profundidade_final_automatica,
+        errors="coerce",
+    )
+    if pd.isna(profundidade_final_automatica) or profundidade_final_automatica <= 0:
+        profundidade_final_automatica = 1.0
+
+    valor = pd.to_numeric(
+        dados_poco.get("config_geopressoes", {}).get("y_max"),
+        errors="coerce",
+    )
+    profundidade_inicial = _rtp_inicio_eixo_y(dados_poco)
+    if pd.notna(valor) and float(valor) > profundidade_inicial:
+        return float(valor)
+    return float(profundidade_final_automatica)
+
+
+def _rtp_marcas_profundidade(profundidade_final, passo=None, profundidade_inicial=0.0):
+    profundidade_final = pd.to_numeric(profundidade_final, errors="coerce")
+    profundidade_inicial = pd.to_numeric(profundidade_inicial, errors="coerce")
+    if pd.isna(profundidade_inicial) or profundidade_inicial < 0:
+        profundidade_inicial = 0.0
+    if (
+        pd.isna(profundidade_final)
+        or profundidade_final <= profundidade_inicial
+    ):
+        return np.array([float(profundidade_inicial)])
+
+    passo = pd.to_numeric(passo, errors="coerce")
+    if pd.notna(passo) and passo > 0:
+        marcas = np.arange(
+            float(profundidade_inicial),
+            float(profundidade_final) + float(passo) * 0.5,
+            float(passo),
+        )
+        marcas = marcas[marcas <= float(profundidade_final)]
+        if marcas.size == 0 or not np.isclose(marcas[-1], profundidade_final):
+            marcas = np.append(marcas, float(profundidade_final))
+        return np.unique(marcas)
+
+    localizador = MaxNLocator(
+        nbins=7,
+        steps=[1, 2, 2.5, 5, 10],
+        min_n_ticks=4,
+    )
+    marcas = localizador.tick_values(
+        float(profundidade_inicial),
+        float(profundidade_final),
+    )
+    tolerancia = max(float(profundidade_final) * 1e-9, 1e-9)
+    marcas = marcas[
+        (marcas >= float(profundidade_inicial) - tolerancia)
+        & (marcas <= float(profundidade_final) + tolerancia)
+        ]
+    return np.unique(
+        np.clip(
+            marcas,
+            float(profundidade_inicial),
+            float(profundidade_final),
+        )
+    )
+
+
+def _rtp_trajetoria_referencia(trajetorias):
+    for nome, df in trajetorias:
+        if nome == "Executada":
+            return df
+    return trajetorias[0][1] if trajetorias else pd.DataFrame()
+
+
+def _rtp_posicao_na_trajetoria(df_traj, profundidade, profundidade_em_md=False):
+    if not isinstance(df_traj, pd.DataFrame) or df_traj.empty:
+        return None
+
+    coluna_ref = "MD" if profundidade_em_md and "MD" in df_traj.columns else "TVD"
+    if coluna_ref not in df_traj.columns:
+        return None
+
+    df = df_traj.copy()
+    df[coluna_ref] = pd.to_numeric(df[coluna_ref], errors="coerce")
+    df["TVD"] = pd.to_numeric(df["TVD"], errors="coerce")
+    df["Afastamento Horizontal (m)"] = pd.to_numeric(
+        df["Afastamento Horizontal (m)"],
+        errors="coerce",
+    )
+    df = (
+        df
+        .dropna(subset=[coluna_ref, "TVD", "Afastamento Horizontal (m)"])
+        .sort_values(coluna_ref)
+        .drop_duplicates(subset=[coluna_ref], keep="last")
+    )
+    if df.empty:
+        return None
+
+    referencia = df[coluna_ref].to_numpy(dtype=float)
+    profundidade = float(profundidade)
+    if profundidade < referencia.min() or profundidade > referencia.max():
+        return None
+
+    tvd = float(np.interp(profundidade, referencia, df["TVD"]))
+    afastamento = float(np.interp(
+        profundidade,
+        referencia,
+        df["Afastamento Horizontal (m)"],
+    ))
+    return afastamento, tvd
+
+
+def _rtp_adicionar_marcadores_trajetoria(ax, trajetorias, dados_poco):
+    cfg = dados_poco.get("config_trajetoria", {})
+    df_ref = _rtp_trajetoria_referencia(trajetorias)
+    if df_ref.empty:
+        return
+
+    if cfg.get("mostrar_sapatas", True):
+        df_sapatas = st.session_state.get("sapatas_df", pd.DataFrame())
+        if isinstance(df_sapatas, pd.DataFrame) and not df_sapatas.empty:
+            for _, row in df_sapatas.iterrows():
+                profundidade = pd.to_numeric(
+                    row.get("Profundidade da sapata (m)"),
+                    errors="coerce",
+                )
+                if pd.isna(profundidade) or profundidade <= 0:
+                    continue
+
+                posicao = _rtp_posicao_na_trajetoria(
+                    df_ref,
+                    profundidade,
+                    profundidade_em_md=True,
+                )
+                if posicao is None:
+                    continue
+
+                afastamento, tvd = posicao
+                fase = _rtp_polegada(row.get("Fase"))
+                nome_sapata = "Sapata" if fase in {"—", "-"} else f"Sapata {fase}"
+                rotulo = (
+                    f"{nome_sapata}\n"
+                    f"MD: {profundidade:.0f} m\n"
+                    f"TVD: {tvd:.0f} m"
+                )
+                ax.scatter(
+                    [afastamento],
+                    [tvd],
+                    marker="<",
+                    s=RTP_SAPATA_MARKER_SIZE,
+                    color="black",
+                    edgecolor="white",
+                    linewidth=1.1,
+                    zorder=8,
+                )
+                ax.annotate(
+                    rotulo,
+                    (afastamento, tvd),
+                    xytext=(20, 0),
+                    textcoords="offset points",
+                    fontsize=RTP_SAPATA_TEXT_FONTSIZE,
+                    fontweight="bold",
+                    color="black",
+                    va="center",
+                    zorder=9,
+                )
+
+    marcadores = [
+        (
+            cfg.get("mostrar_topo_sal", False),
+            cfg.get("topo_sal_tvd", 0.0),
+            "Topo do sal",
+            "#EF6C00",
+        ),
+        (
+            cfg.get("mostrar_topo_cavidade", False),
+            cfg.get("topo_cavidade_tvd", 0.0),
+            "Topo da cavidade",
+            "#00838F",
+        ),
+    ]
+
+    for mostrar, profundidade, rotulo, cor in marcadores:
+        profundidade = pd.to_numeric(profundidade, errors="coerce")
+        if not mostrar or pd.isna(profundidade) or profundidade <= 0:
+            continue
+
+        acima_da_linha = rotulo == "Topo do sal"
+
+        ax.axhline(
+            profundidade,
+            color=cor,
+            linestyle="-",
+            linewidth=1.8,
+            alpha=0.95,
+            zorder=5,
+        )
+        ax.annotate(
+            f"{rotulo}: {profundidade:.0f} m TVD",
+            xy=(0.02, profundidade),
+            xycoords=("axes fraction", "data"),
+            xytext=(4, 4 if acima_da_linha else -4),
+            textcoords="offset points",
+            fontsize=7.5,
+            fontweight="bold",
+            color="black",
+            va="bottom" if acima_da_linha else "top",
+            zorder=9,
+        )
+
+
+def _rtp_estilos_trajetoria_pdf():
+    return {
+        "Planejada": {
+            "color": "#1565C0",
+            "linestyle": "-",
+            "linewidth": RTP_TRAJETORIA_LINEWIDTH_PLANEJADA,
+        },
+        "Executada": {
+            "color": "#D71920",
+            "linestyle": "--",
+            "linewidth": RTP_TRAJETORIA_LINEWIDTH_EXECUTADA,
+        },
+        "Trajetória": {
+            "color": "#D71920",
+            "linestyle": "-",
+            "linewidth": RTP_TRAJETORIA_LINEWIDTH_PADRAO,
+        },
+    }
+
+
+def _rtp_desenhar_legenda_trajetoria_pdf(c, x, y_top, largura):
+    trajetorias = _rtp_obter_trajetorias_pdf()
+    if not trajetorias:
+        return y_top
+
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(x, y_top, "Legenda de Trajetória")
+
+    y_linha = y_top - 8
+    c.setStrokeColor(HexColor("#d71920"))
+    c.setLineWidth(2)
+    c.line(x, y_linha, x + largura, y_linha)
+
+    estilos = _rtp_estilos_trajetoria_pdf()
+    x_item = x
+    y_item = y_linha - 22
+
+    for nome, _ in trajetorias:
+        estilo = estilos.get(nome, estilos["Trajetória"])
+        c.setStrokeColor(HexColor(estilo["color"]))
+        c.setLineWidth(estilo["linewidth"])
+
+        if estilo["linestyle"] == "--":
+            c.setDash(5, 3)
+        else:
+            c.setDash()
+
+        c.line(x_item, y_item, x_item + 42, y_item)
+        c.setDash()
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("Helvetica", 8)
+        c.drawString(x_item + 49, y_item - 3, nome)
+        x_item += 150
+
+    return y_item - 20
+
+
+def _rtp_adicionar_sonda_no_eixo(
+        ax,
+        x_dado=None,
+        y_dado=None,
+        zoom=0.12,
+        posicao_axes=None,
+        box_alignment=(0.5, 0.0),
+):
+    try:
+        caminho_img = "rig_t.png"
+
+        if not os.path.exists(caminho_img):
+            return
+
+        img = Image.open(caminho_img).convert("RGBA")
+        oi = OffsetImage(np.asarray(img), zoom=zoom)
+
+        if posicao_axes is not None:
+            xy = posicao_axes
+            xycoords = "axes fraction"
+        else:
+            xy = (x_dado, y_dado)
+            xycoords = "data"
+
+        ab = AnnotationBbox(
+            oi,
+            xy,
+            xycoords=xycoords,
+            frameon=False,
+            box_alignment=box_alignment,
+            zorder=8,
+            annotation_clip=False,
+        )
+        ab.set_clip_on(False)
+        ax.add_artist(ab)
+    except Exception:
+        pass
+
+def _rtp_adicionar_seta_norte(ax):
+    ax.annotate(
+        "",
+        xy=(0.90, 0.92),
+        xytext=(0.90, 0.72),
+        xycoords="axes fraction",
+        arrowprops=dict(arrowstyle="-|>", color="red", lw=1.6),
+        annotation_clip=False,
+        zorder=9
+    )
+
+    ax.text(
+        0.90,
+        0.92,
+        "N",
+        transform=ax.transAxes,
+        color="red",
+        fontsize=7,
+        fontweight="bold",
+        ha="center",
+        va="bottom",
+        zorder=9
+    )
+
+
+def _rtp_criar_figura_trajetoria(
+        dados_auto,
+        dados_poco,
+        largura_px=900,
+        altura_px=900,
+):
+    trajetorias = _rtp_obter_trajetorias_pdf()
+    if not trajetorias:
+        return None
+
+    cfg = dados_poco.get("config_trajetoria", {})
+    if not cfg.get("mostrar_trajetoria", True):
+        return None
+    def _rtp_df_principal(df):
+        # No gráfico principal, a trajetória deve começar do 0
+        return df.copy().reset_index(drop=True)
+    def _rtp_df_planta(df):
+        df_plot = df.copy().reset_index(drop=True)
+
+        # Na vista de planta, se offshore, começa do segundo ponto
+        if st.session_state.get("tipo_poco") == "Offshore" and len(df_plot) > 1:
+            df_plot = df_plot.iloc[1:].reset_index(drop=True)
+
+        return df_plot
+    dpi = 240
+    fig = plt.figure(
+        figsize=(max(largura_px / dpi, 2.0), max(altura_px / dpi, 2.0)),
+        dpi=dpi,
+    )
+    ax = fig.add_subplot(111)
+
+    estilos = _rtp_estilos_trajetoria_pdf()
+    cor_riser = "#7A7A7A"
+
+    # ------------------------------------------------------------
+    # Gráfico principal: afastamento horizontal x TVD
+    # ------------------------------------------------------------
+    for nome, df in trajetorias:
+        estilo = estilos.get(nome, estilos["Trajetória"])
+        df_plot = _rtp_df_principal(df)
+
+        if df_plot.empty:
+            continue
+
+        ax.plot(
+            df_plot["Afastamento Horizontal (m)"],
+            df_plot["TVD"],
+            label=nome,
+            zorder=3,
+            **estilo,
+        )
+
+        # Se for offshore, pinta o primeiro trecho com outra cor para imitar o riser
+        if st.session_state.get("tipo_poco") == "Offshore" and len(df_plot) > 1:
+            ax.plot(
+                df_plot["Afastamento Horizontal (m)"].iloc[:2],
+                df_plot["TVD"].iloc[:2],
+                color=cor_riser,
+                linestyle="-",
+                linewidth=max(float(estilo.get("linewidth", 2.0)), RTP_TRAJETORIA_LINEWIDTH_PADRAO),
+                zorder=4,
+            )
+
+    profundidade_final = _rtp_profundidade_final_graficos(
+        dados_auto,
+        dados_poco,
+        trajetorias=trajetorias,
+    )
+    profundidade_final = _rtp_final_eixo_y(
+        dados_poco,
+        profundidade_final,
+    )
+    profundidade_inicial = _rtp_inicio_eixo_y(
+        dados_poco,
+        profundidade_final,
+    )
+    ax.set_xlabel("Afastamento horizontal (m)", fontsize=RTP_EIXO_LABEL_FONTSIZE, fontweight="bold")
+    ax.set_ylabel("TVD (m)", fontsize=RTP_EIXO_LABEL_FONTSIZE, fontweight="bold")
+    ax.tick_params(
+        axis="both",
+        labelsize=RTP_EIXO_TICK_FONTSIZE,
+        width=RTP_EIXO_TICK_WIDTH,
+        length=RTP_EIXO_TICK_LENGTH,
+        pad=2,
+    )
+    ax.set_ylim(profundidade_final, profundidade_inicial)
+    ax.set_yticks(
+        _rtp_marcas_profundidade(
+            profundidade_final,
+            _rtp_passo_eixo_y(dados_poco),
+            profundidade_inicial,
+        )
+    )
+    ax.grid(True, linestyle="--", linewidth=0.8, alpha=0.65)
+    ax.set_axisbelow(True)
+    ax.margins(x=0.10, y=0.0)
+    for spine in ax.spines.values():
+        spine.set_linewidth(RTP_SPINE_WIDTH)
+
+    _rtp_adicionar_marcadores_trajetoria(
+        ax,
+        trajetorias,
+        dados_poco,
+    )
+
+    # Sonda com a base exatamente no primeiro ponto da trajetória.
+    df_inicio_principal = _rtp_trajetoria_referencia(trajetorias)
+    if not df_inicio_principal.empty:
+        _rtp_adicionar_sonda_no_eixo(
+            ax,
+            x_dado=float(
+                df_inicio_principal["Afastamento Horizontal (m)"].iloc[0]
+            ),
+            y_dado=float(df_inicio_principal["TVD"].iloc[0]),
+            zoom=RTP_RIG_ZOOM_TRAJETORIA,
+            posicao_axes=None,
+            box_alignment=(0.5, 0.0),
+        )
+
+    # ------------------------------------------------------------
+    # Vista de planta
+    # ------------------------------------------------------------
+    ax_planta = ax.inset_axes([0.54, 0.58, 0.43, 0.37])
+
+    rop_medio = pd.to_numeric(cfg.get("rop_medio", 0.0), errors="coerce")
+    if pd.notna(rop_medio) and rop_medio > 0:
+        ax.text(
+            0.755,
+            0.975,
+            f"ROP médio: {rop_medio:.2f} m/h",
+            transform=ax.transAxes,
+            fontsize=8.5,
+            fontweight="bold",
+            ha="center",
+            va="bottom",
+            bbox={
+                "boxstyle": "round,pad=0.28",
+                "facecolor": "white",
+                "edgecolor": "#333333",
+                "alpha": 0.95,
+            },
+            zorder=12,
+        )
+
+    df_inicio_planta = pd.DataFrame()
+
+    for i, (nome, df) in enumerate(trajetorias):
+        estilo = estilos.get(nome, estilos["Trajetória"])
+        df_plot = _rtp_df_planta(df)
+
+        if df_plot.empty:
+            continue
+
+        if i == 0:
+            df_inicio_planta = df_plot.copy()
+
+        if nome == "Planejada":
+            linewidth_planta = RTP_PLANTA_LINEWIDTH_PLANEJADA
+        elif nome == "Executada":
+            linewidth_planta = RTP_PLANTA_LINEWIDTH_EXECUTADA
+        else:
+            linewidth_planta = RTP_PLANTA_LINEWIDTH_PADRAO
+
+        ax_planta.plot(
+            df_plot["Easting"],
+            df_plot["Northing"],
+            color=estilo["color"],
+            linestyle=estilo["linestyle"],
+            linewidth=linewidth_planta,
+            label=nome,
+            zorder=3,
+        )
+
+    ax_planta.set_title("Vista de planta", fontsize=RTP_PLANTA_TITLE_FONTSIZE, fontweight="bold", pad=3)
+    ax_planta.set_xlabel("E (m)", fontsize=RTP_PLANTA_LABEL_FONTSIZE, fontweight="bold", labelpad=1)
+    ax_planta.set_ylabel("N (m)", fontsize=RTP_PLANTA_LABEL_FONTSIZE, fontweight="bold", labelpad=1)
+    ax_planta.tick_params(
+        axis="both",
+        labelsize=RTP_PLANTA_TICK_FONTSIZE,
+        width=RTP_EIXO_TICK_WIDTH,
+        length=3.5,
+        pad=1,
+    )
+    ax_planta.grid(True, linestyle=":", linewidth=0.65, alpha=0.7)
+    ax_planta.set_aspect("equal", adjustable="datalim")
+    for spine in ax_planta.spines.values():
+        spine.set_linewidth(RTP_SPINE_WIDTH)
+
+    # Sonda alinhada ao início da trajetória plotada na vista de planta
+    if not df_inicio_planta.empty:
+        x0_planta = float(df_inicio_planta["Easting"].iloc[0])
+        y0_planta = float(df_inicio_planta["Northing"].iloc[0])
+        _rtp_adicionar_sonda_no_eixo(
+            ax_planta,
+            x_dado=x0_planta,
+            y_dado=y0_planta,
+            zoom=RTP_RIG_ZOOM_PLANTA,
+            posicao_axes=None,
+            box_alignment=(0.5, 0.5),
+        )
+
+    # Seta do norte
+    _rtp_adicionar_seta_norte(ax_planta)
+
+    fig.subplots_adjust(
+        left=0.19,
+        right=0.97,
+        top=RTP_PLOT_TOP_FRAC,
+        bottom=RTP_PLOT_BOTTOM_FRAC,
+    )
+
+    return fig
+
+
+def _rtp_desenhar_trajetoria_pdf(c, dados_auto, dados_poco, x, y_bottom, largura, altura):
+    _rtp_desenhar_quadro_pdf(
+        c,
+        "Trajetória / V. Planta",
+        x,
+        y_bottom,
+        largura,
+        altura,
+    )
+
+    margem_interna = 2
+    altura_titulo = 14
+    x_fig = x + margem_interna
+    y_fig = y_bottom + margem_interna
+    largura_fig = largura - 2 * margem_interna
+    altura_fig = altura - altura_titulo - margem_interna
+
+    fig = _rtp_criar_figura_trajetoria(
+        dados_auto,
+        dados_poco,
+        largura_px=max(int(largura_fig * 8), 1200),
+        altura_px=max(int(altura_fig * 8), 1200),
+    )
+
+    if fig is None:
+        c.setFont("Helvetica", 7)
+        c.drawCentredString(
+            x + largura / 2,
+            y_bottom + altura / 2,
+            "Trajetória não disponível",
+        )
+        return
+
+    buffer_fig = BytesIO()
+    try:
+        fig.savefig(
+            buffer_fig,
+            format="png",
+            dpi=240,
+            transparent=True,
+        )
+        buffer_fig.seek(0)
+        c.drawImage(
+            ImageReader(buffer_fig),
+            x_fig,
+            y_fig,
+            width=largura_fig,
+            height=altura_fig,
+            preserveAspectRatio=True,
+            anchor="c",
+            mask="auto",
+        )
+    finally:
+        plt.close(fig)
+
+
+def _rtp_estilos_geopressoes_pdf():
+    return {
+        "Sobrecarga": {"color": "#111111", "linestyle": "-", "linewidth": 5.},
+        "Pressão de poros": {"color": "#F57C00", "linestyle": "-", "linewidth": 5.},
+        "Fratura": {"color": "#8D3C1E", "linestyle": "-", "linewidth": 5.},
+        "Lama planejada": {"color": "#1B8E3E", "linestyle": "-", "linewidth": 5.},
+        "Lama utilizada": {"color": "#C2185B", "linestyle": "-", "linewidth": 5.},
+        "Max Inf": {"color": "#1565C0", "linestyle": "-", "linewidth": 5.},
+        "Min Sup": {"color": "#D71920", "linestyle": "-", "linewidth": 5.},
+        "Max Inferior": {"color": "#1565C0", "linestyle": "-", "linewidth": 5.},
+        "Min Superior": {"color": "#D71920", "linestyle": "-", "linewidth": 5.},
+        "Teste RFT": {
+            "color": "#32CD32",
+            "marker": "o",
+            "markersize": RTP_GEO_MARKERSIZE,
+            "markeredgecolor": "#111111",
+            "markeredgewidth": 0.8,
+        },
+        "Gradiente de Colapso": {
+            "color": "#800080",
+            "marker": "s",
+            "markersize": RTP_GEO_MARKERSIZE,
+            "markeredgecolor": "#111111",
+            "markeredgewidth": 0.8,
+        },
+        "LOT": {
+            "color": "#FF0000",
+            "marker": "D",
+            "markersize": RTP_GEO_MARKERSIZE,
+            "markeredgecolor": "#111111",
+            "markeredgewidth": 0.8,
+        },
+        "FIT": {
+            "color": "#0000FF",
+            "marker": "^",
+            "markersize": RTP_GEO_MARKERSIZE,
+            "markeredgecolor": "#111111",
+            "markeredgewidth": 0.8,
+        },
+        "Perda de circulação": {
+            "color": "#5A2D0C",
+            "marker": "o",
+            "markersize": RTP_GEO_MARKERSIZE,
+            "markeredgecolor": "#000000",
+            "markeredgewidth": 1.0,
+        },
+    }
+
+
+def _rtp_colunas_df_tvp_disponiveis():
+    df_tvp = st.session_state.get("df_est", pd.DataFrame())
+    if not isinstance(df_tvp, pd.DataFrame) or df_tvp.empty:
+        return []
+
+    colunas = []
+
+    for coluna in df_tvp.columns:
+        nome = str(coluna)
+        if not (
+                nome in ["Max Inf", "Min Sup", "Max Inferior", "Min Superior"]
+                or nome.startswith("Tração")
+                or nome.startswith("Comp ")
+        ):
+            continue
+
+        serie = pd.to_numeric(df_tvp[coluna], errors="coerce")
+        if serie.notna().sum() >= 2:
+            colunas.append(nome)
+
+    return colunas
+
+
+def _rtp_opcoes_geopressoes():
+    opcoes = [
+        "Sobrecarga",
+        "Pressão de poros",
+        "Fratura",
+        "Lama planejada",
+    ]
+    if st.session_state.get("option") == "Retroanálise":
+        opcoes.append("Lama utilizada")
+
+    opcoes.extend([
+        "Teste RFT",
+        "Gradiente de Colapso",
+        "LOT",
+        "FIT",
+    ])
+    opcoes.extend(_rtp_colunas_df_tvp_disponiveis())
+    return list(dict.fromkeys(opcoes))
+
+
+def _rtp_selecao_geopressoes(cfg):
+    opcoes = _rtp_opcoes_geopressoes()
+    selecao = cfg.get("itens_geopressoes")
+    if isinstance(selecao, list):
+        return [item for item in selecao if item in opcoes]
+
+    migracao = []
+    chaves_antigas = [
+        ("mostrar_sobrecarga", "Sobrecarga"),
+        ("mostrar_poros", "Pressão de poros"),
+        ("mostrar_fratura", "Fratura"),
+        ("mostrar_lama_planejada", "Lama planejada"),
+        ("mostrar_lama_utilizada", "Lama utilizada"),
+        ("mostrar_rft", "Teste RFT"),
+        ("mostrar_colapso", "Gradiente de Colapso"),
+        ("mostrar_lot", "LOT"),
+        ("mostrar_fit", "FIT"),
+    ]
+    for chave, nome in chaves_antigas:
+        if cfg.get(chave, True) and nome in opcoes:
+            migracao.append(nome)
+
+    for coluna in cfg.get("curvas_df_tvp", []):
+        if coluna in opcoes:
+            migracao.append(coluna)
+
+    for limite in ["Max Inf", "Min Sup", "Max Inferior", "Min Superior"]:
+        if limite in opcoes:
+            migracao.append(limite)
+
+    return list(dict.fromkeys(migracao))
+
+
+def _rtp_estilo_geopressao(nome):
+    estilos = _rtp_estilos_geopressoes_pdf()
+    if nome in estilos:
+        return estilos[nome]
+
+    paleta = [
+        "#00695C",
+        "#5E35B1",
+        "#0277BD",
+        "#AD1457",
+        "#558B2F",
+        "#6D4C41",
+        "#00838F",
+        "#4527A0",
+        "#C62828",
+        "#2E7D32",
+    ]
+    indice = int(
+        hashlib.sha1(str(nome).encode("utf-8")).hexdigest()[:8],
+        16,
+    ) % len(paleta)
+    return {
+        "color": paleta[indice],
+        "linestyle": "-",
+        "linewidth": 2.4,
+    }
+
+
+def _rtp_coluna_profundidade(df):
+    for coluna in [
+        "Profundidade (m)",
+        "Profundidade TVD (m)",
+        "Profundidade",
+        "TVD",
+        "Profundidade em relação a mesa rotativa (m)",
+    ]:
+        if coluna in df.columns:
+            return coluna
+    return None
+
+
+def _rtp_curva_geopressao(df, coluna_valor):
+    if not isinstance(df, pd.DataFrame) or df.empty or coluna_valor not in df.columns:
+        return pd.DataFrame(columns=["Profundidade (m)", "Valor"])
+
+    coluna_prof = _rtp_coluna_profundidade(df)
+    if coluna_prof is None:
+        return pd.DataFrame(columns=["Profundidade (m)", "Valor"])
+
+    curva = pd.DataFrame({
+        "Profundidade (m)": pd.to_numeric(df[coluna_prof], errors="coerce"),
+        "Valor": pd.to_numeric(df[coluna_valor], errors="coerce"),
+    })
+    return (
+        curva
+        .dropna()
+        .sort_values("Profundidade (m)")
+        .drop_duplicates(subset=["Profundidade (m)"], keep="last")
+        .reset_index(drop=True)
+    )
+
+
+def _rtp_obter_curvas_geopressoes(dados_poco):
+    cfg = dados_poco.get("config_geopressoes", {})
+    itens_selecionados = set(_rtp_selecao_geopressoes(cfg))
+    df_pp = st.session_state.get("df_pp", pd.DataFrame())
+    df_f = st.session_state.get("df_f", pd.DataFrame())
+    df_mud = st.session_state.get("df_mud", pd.DataFrame())
+    df_sob = st.session_state.get("df_sobrecarga", pd.DataFrame())
+    curvas = []
+
+    if "Sobrecarga" in itens_selecionados:
+        fonte = df_pp if (
+                isinstance(df_pp, pd.DataFrame)
+                and "Gradiente de Sobrecarga (lb/gal)" in df_pp.columns
+        ) else df_sob
+        curva = _rtp_curva_geopressao(
+            fonte,
+            "Gradiente de Sobrecarga (lb/gal)",
+        )
+        if not curva.empty:
+            curvas.append(("Sobrecarga", curva))
+
+    if "Pressão de poros" in itens_selecionados:
+        coluna_pp = "Gradiente de Pressão de Poros (lb/gal)"
+        if (
+                st.session_state.get("spp", "Não") == "Sim"
+                and isinstance(df_pp, pd.DataFrame)
+                and "Gradiente de Pressão de Poros Suavizado (lb/gal)" in df_pp.columns
+        ):
+            coluna_pp = "Gradiente de Pressão de Poros Suavizado (lb/gal)"
+        curva = _rtp_curva_geopressao(df_pp, coluna_pp)
+        if not curva.empty:
+            curvas.append(("Pressão de poros", curva))
+
+    if "Fratura" in itens_selecionados:
+        curva = _rtp_curva_geopressao(
+            df_f,
+            "Gradiente de Fratura (lb/gal)",
+        )
+        if not curva.empty:
+            curvas.append(("Fratura", curva))
+
+    if "Lama planejada" in itens_selecionados:
+        curva = _rtp_curva_geopressao(
+            df_mud,
+            "Peso do Fluido Planejado (lb/gal)",
+        )
+        if not curva.empty:
+            curvas.append(("Lama planejada", curva))
+
+    if (
+            "Lama utilizada" in itens_selecionados
+            and st.session_state.get("option") == "Retroanálise"
+    ):
+        curva = _rtp_curva_geopressao(
+            df_mud,
+            "Peso do Fluido Executado (lb/gal)",
+        )
+        if not curva.empty:
+            curvas.append(("Lama utilizada", curva))
+
+    if "Teste RFT" in itens_selecionados:
+        curva = _rtp_curva_geopressao(
+            st.session_state.get("rft_pontos_pp", pd.DataFrame()),
+            "Teste RFT (lb/gal)",
+        )
+        if not curva.empty:
+            curvas.append(("Teste RFT", curva))
+
+    if "Gradiente de Colapso" in itens_selecionados:
+        curva = _rtp_curva_geopressao(
+            st.session_state.get("colapso_pontos_pp", pd.DataFrame()),
+            "Gradiente de Colapso (lb/gal)",
+        )
+        if not curva.empty:
+            curvas.append(("Gradiente de Colapso", curva))
+
+    df_lot_fit = _normalizar_pontos_lot_fratura(
+        st.session_state.get("lot_pontos_fratura", pd.DataFrame())
+        if st.session_state.get("lot_fratura", "Sim") == "Sim"
+        else st.session_state.get("lot_pontos_yaml_fratura", pd.DataFrame())
+    )
+    for tipo in ["LOT", "FIT"]:
+        if tipo not in itens_selecionados:
+            continue
+        curva = _rtp_curva_geopressao(
+            df_lot_fit[df_lot_fit["Tipo"] == tipo],
+            "Peso Eq. (lb/gal)",
+        )
+        if not curva.empty:
+            curvas.append((tipo, curva))
+
+    curva_perdas = _rtp_curva_geopressao(
+        dados_poco.get("df_perdas_circulacao_rtp", pd.DataFrame()),
+        "Peso do Fluido (lb/gal)",
+    )
+    if not curva_perdas.empty:
+        curvas.append(("Perda de circulação", curva_perdas))
+
+    df_tvp = st.session_state.get("df_est", pd.DataFrame())
+    for coluna in _rtp_colunas_df_tvp_disponiveis():
+        if coluna not in itens_selecionados:
+            continue
+        curva = _rtp_curva_geopressao(df_tvp, coluna)
+        if not curva.empty:
+            curvas.append((coluna, curva))
+
+    return curvas
+
+
+def _rtp_desenhar_legenda_geopressoes_pdf(c, dados_poco, x, y_top, largura):
+    curvas = _rtp_obter_curvas_geopressoes(dados_poco)
+    if not curvas:
+        return y_top
+
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(x, y_top, "Legenda de Geopressões")
+    y_linha = y_top - 8
+    c.setStrokeColor(HexColor("#d71920"))
+    c.setLineWidth(2)
+    c.line(x, y_linha, x + largura, y_linha)
+
+    x_item = x
+    y_item = y_linha - 22
+    largura_item = 190
+    numero_colunas = max(1, int(largura // largura_item))
+    for indice, (nome, _) in enumerate(curvas):
+        coluna_item = indice % numero_colunas
+        linha_item = indice // numero_colunas
+        x_item = x + coluna_item * largura_item
+        y_item = y_linha - 22 - linha_item * 24
+        estilo = _rtp_estilo_geopressao(nome)
+        cor = HexColor(estilo["color"])
+        c.setStrokeColor(cor)
+        c.setFillColor(cor)
+        if "marker" in estilo:
+            c.setStrokeColor(HexColor(estilo.get("markeredgecolor", estilo["color"])))
+            x_marcador = x_item + 17
+            marcador = estilo["marker"]
+            if marcador == "o":
+                c.circle(x_marcador, y_item, 4, stroke=1, fill=1)
+            elif marcador == "s":
+                c.rect(x_marcador - 4, y_item - 4, 8, 8, stroke=1, fill=1)
+            elif marcador == "D":
+                caminho = c.beginPath()
+                caminho.moveTo(x_marcador, y_item + 5)
+                caminho.lineTo(x_marcador + 5, y_item)
+                caminho.lineTo(x_marcador, y_item - 5)
+                caminho.lineTo(x_marcador - 5, y_item)
+                caminho.close()
+                c.drawPath(caminho, stroke=1, fill=1)
+            else:
+                caminho = c.beginPath()
+                caminho.moveTo(x_marcador, y_item + 5)
+                caminho.lineTo(x_marcador + 5, y_item - 4)
+                caminho.lineTo(x_marcador - 5, y_item - 4)
+                caminho.close()
+                c.drawPath(caminho, stroke=1, fill=1)
+        else:
+            c.setLineWidth(estilo["linewidth"])
+            c.setDash(5, 3) if estilo["linestyle"] == "--" else c.setDash()
+            c.line(x_item, y_item, x_item + 34, y_item)
+        c.setDash()
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("Helvetica", 8)
+        c.drawString(x_item + 40, y_item - 3, nome)
+
+    return y_item - 18
+
+
+def _rtp_criar_figura_geopressoes(
+        dados_auto,
+        dados_poco,
+        largura_px=900,
+        altura_px=900,
+):
+    curvas = _rtp_obter_curvas_geopressoes(dados_poco)
+    if not curvas:
+        return None
+
+    cfg = dados_poco.get("config_geopressoes", {})
+    x_min = float(cfg.get("x_min", 7.0))
+    x_max = float(cfg.get("x_max", 21.0))
+    x_step = max(float(cfg.get("x_step", 2.0)), 0.1)
+    profundidade_final = _rtp_profundidade_final_graficos(
+        dados_auto,
+        dados_poco,
+    )
+    profundidade_final = _rtp_final_eixo_y(
+        dados_poco,
+        profundidade_final,
+    )
+    profundidade_inicial = _rtp_inicio_eixo_y(
+        dados_poco,
+        profundidade_final,
+    )
+
+    dpi = 240
+    fig = plt.figure(
+        figsize=(max(largura_px / dpi, 2.0), max(altura_px / dpi, 2.0)),
+        dpi=dpi,
+    )
+    ax = fig.add_subplot(111)
+    valores_perdas = []
+    for nome, curva in curvas:
+        estilo = _rtp_estilo_geopressao(nome)
+        if nome == "Perda de circulação":
+            valores_perdas.extend(
+                pd.to_numeric(curva["Valor"], errors="coerce").dropna().tolist()
+            )
+        if "marker" in estilo:
+            ax.plot(
+                curva["Valor"],
+                curva["Profundidade (m)"],
+                linestyle="none",
+                zorder=7,
+                **estilo,
+            )
+        else:
+            ax.plot(
+                curva["Valor"],
+                curva["Profundidade (m)"],
+                zorder=4,
+                **estilo,
+            )
+
+    if valores_perdas:
+        x_min = min(x_min, min(valores_perdas) - 0.25)
+        x_max = max(x_max, max(valores_perdas) + 0.25)
+    ax.set_xlim(x_min, x_max)
+    ax.set_ylim(profundidade_final, profundidade_inicial)
+    ax.set_xticks(np.arange(x_min, x_max + x_step * 0.5, x_step))
+    ax.set_yticks(
+        _rtp_marcas_profundidade(
+            profundidade_final,
+            _rtp_passo_eixo_y(dados_poco),
+            profundidade_inicial,
+        )
+    )
+    ax.set_xlabel("Gradiente / Peso de Fluido (lb/gal)", fontsize=RTP_EIXO_LABEL_FONTSIZE, fontweight="bold")
+    ax.set_ylabel("TVD (m)", fontsize=RTP_EIXO_LABEL_FONTSIZE, fontweight="bold")
+    ax.tick_params(
+        axis="both",
+        labelsize=RTP_EIXO_TICK_FONTSIZE,
+        width=RTP_EIXO_TICK_WIDTH,
+        length=RTP_EIXO_TICK_LENGTH,
+        pad=2,
+    )
+    ax.grid(True, linestyle="--", linewidth=RTP_GRID_LINEWIDTH, alpha=RTP_GRID_ALPHA)
+    ax.set_axisbelow(True)
+    for spine in ax.spines.values():
+        spine.set_linewidth(1.0)
+    fig.subplots_adjust(
+        left=0.19,
+        right=0.97,
+        top=RTP_PLOT_TOP_FRAC,
+        bottom=RTP_PLOT_BOTTOM_FRAC,
+    )
+    return fig
+
+
+def _rtp_desenhar_geopressoes_pdf(c, dados_auto, dados_poco, x, y_bottom, largura, altura):
+    _rtp_desenhar_quadro_pdf(
+        c,
+        "Curvas de Geopressões",
+        x,
+        y_bottom,
+        largura,
+        altura,
+    )
+
+    margem_interna = 2
+    altura_titulo = 14
+    x_fig = x + margem_interna
+    y_fig = y_bottom + margem_interna
+    largura_fig = largura - 2 * margem_interna
+    altura_fig = altura - altura_titulo - margem_interna
+    fig = _rtp_criar_figura_geopressoes(
+        dados_auto,
+        dados_poco,
+        largura_px=max(int(largura_fig * 8), 1200),
+        altura_px=max(int(altura_fig * 8), 1200),
+    )
+
+    if fig is None:
+        c.setFont("Helvetica", 7)
+        c.drawCentredString(
+            x + largura / 2,
+            y_bottom + altura / 2,
+            "Curvas não disponíveis",
+        )
+        return
+
+    buffer_fig = BytesIO()
+    try:
+        fig.savefig(
+            buffer_fig,
+            format="png",
+            dpi=240,
+            transparent=True,
+        )
+        buffer_fig.seek(0)
+        c.drawImage(
+            ImageReader(buffer_fig),
+            x_fig,
+            y_fig,
+            width=largura_fig,
+            height=altura_fig,
+            preserveAspectRatio=True,
+            anchor="c",
+            mask="auto",
+        )
+    finally:
+        plt.close(fig)
+
+
+def _rtp_dados_cronograma(dados_poco):
+    def _normalizar_curva(chave):
+        df = dados_poco.get(chave, pd.DataFrame())
+        if not isinstance(df, pd.DataFrame):
+            df = pd.DataFrame()
+        else:
+            df = df.copy()
+
+        if "Tempo (dias)" not in df.columns and "Tempo (h)" in df.columns:
+            df["Tempo (dias)"] = (
+                    pd.to_numeric(df["Tempo (h)"], errors="coerce") / 24.0
+            )
+
+        for coluna in ["Tempo (dias)", "Profundidade MD (m)"]:
+            if coluna not in df.columns:
+                df[coluna] = np.nan
+            df[coluna] = pd.to_numeric(df[coluna], errors="coerce")
+
+        return (
+            df
+            .dropna(subset=["Tempo (dias)", "Profundidade MD (m)"])
+            .sort_values("Tempo (dias)")
+            .drop_duplicates(subset=["Tempo (dias)"], keep="last")
+            .reset_index(drop=True)
+        )
+    df_planejado = _normalizar_curva("df_cronograma_planejado_rtp")
+    df_executado = _normalizar_curva("df_cronograma_executado_rtp")
+
+    df_problemas = dados_poco.get("df_problemas_rtp", pd.DataFrame())
+    if not isinstance(df_problemas, pd.DataFrame):
+        df_problemas = pd.DataFrame()
+    else:
+        df_problemas = df_problemas.copy()
+
+    for coluna in [
+        "Profundidade MD (m)",
+        "Problema operacional",
+        "Tempo (dias)",
+        "Duração (dias)",
+        "Mostrar",
+    ]:
+        if coluna not in df_problemas.columns:
+            df_problemas[coluna] = np.nan
+
+    df_problemas["Profundidade MD (m)"] = pd.to_numeric(
+        df_problemas["Profundidade MD (m)"],
+        errors="coerce",
+    )
+    df_problemas["Tempo (dias)"] = pd.to_numeric(
+        df_problemas["Tempo (dias)"],
+        errors="coerce",
+    )
+    df_problemas["Duração (dias)"] = pd.to_numeric(
+        df_problemas["Duração (dias)"],
+        errors="coerce",
+    ).fillna(0.0).clip(lower=0.0)
+    mostrar = (
+        df_problemas["Mostrar"]
+        .astype(str)
+        .str.strip()
+        .str.lower()
+    )
+    df_problemas = df_problemas[
+        ~mostrar.isin(["false", "falso", "não", "nao", "0"])
+    ]
+    df_problemas = (
+        df_problemas
+        .dropna(subset=["Tempo (dias)", "Profundidade MD (m)"])
+        .sort_values("Tempo (dias)")
+        .reset_index(drop=True)
+    )
+
+    return df_planejado, df_executado, df_problemas
+
+
+def _rtp_criar_figura_cronograma(
+        dados_auto,
+        dados_poco,
+        largura_px=900,
+        altura_px=900,
+):
+    cfg = dados_poco.get("config_cronograma", {})
+    mostrar_planejado = cfg.get("mostrar_planejado", True)
+    mostrar_executado = cfg.get("mostrar_executado", True)
+    df_planejado, df_executado, df_problemas = _rtp_dados_cronograma(
+        dados_poco
+    )
+    tem_planejado = (
+            mostrar_planejado
+            and len(df_planejado) >= 2
+    )
+    tem_executado = (
+            mostrar_executado
+            and len(df_executado) >= 2
+    )
+    if not tem_planejado and not tem_executado and df_problemas.empty:
+        return None
+
+    dpi = 240
+    fig = plt.figure(
+        figsize=(max(largura_px / dpi, 2.0), max(altura_px / dpi, 2.0)),
+        dpi=dpi,
+    )
+    ax = fig.add_subplot(111)
+
+    if tem_planejado:
+        ax.plot(
+            df_planejado["Tempo (dias)"],
+            df_planejado["Profundidade MD (m)"],
+            color="#1565C0",
+            linestyle="-",
+            linewidth=RTP_CRONOGRAMA_LINEWIDTH_PLANEJADO,
+            zorder=4,
+        )
+
+    if tem_executado:
+        ax.plot(
+            df_executado["Tempo (dias)"],
+            df_executado["Profundidade MD (m)"],
+            color="#F57C00",
+            linestyle="-",
+            linewidth=RTP_CRONOGRAMA_LINEWIDTH_EXECUTADO,
+            zorder=5,
+        )
+
+    estilos_problemas = _rtp_estilos_problemas_operacionais()
+    anotacoes_problemas = []
+
+    for _, linha in df_problemas.iterrows():
+        tempo = float(linha["Tempo (dias)"])
+        profundidade = float(linha["Profundidade MD (m)"])
+        duracao = float(linha["Duração (dias)"])
+        texto = str(linha.get("Problema operacional", "")).strip()
+        estilo = estilos_problemas.get(
+            texto,
+            {"cor": "red", "marcador": "D"},
+        )
+
+        ax.scatter(
+            [tempo],
+            [profundidade],
+            color=estilo.get("facecolor", estilo["cor"]),
+            edgecolors="#111111",
+            linewidths=1.0,
+            marker=estilo["marcador"],
+            s=RTP_CRONOGRAMA_MARKER_SIZE,
+            zorder=8,
+        )
+        # No gráfico, mostrar apenas o tempo/duração do evento operacional.
+        # O nome do problema fica representado pelo marcador/cor e pela legenda.
+        if duracao > 0:
+            texto_anotacao = f"{duracao:.1f} dias"
+        else:
+            texto_anotacao = f"{tempo:.1f} dias"
+
+        anotacoes_problemas.append({
+            "tempo": tempo,
+            "profundidade": profundidade,
+            "texto": texto_anotacao,
+        })
+
+    tempos = []
+    profundidades = []
+    if tem_planejado:
+        tempos.extend(df_planejado["Tempo (dias)"].tolist())
+        profundidades.extend(df_planejado["Profundidade MD (m)"].tolist())
+    if tem_executado:
+        tempos.extend(df_executado["Tempo (dias)"].tolist())
+        profundidades.extend(df_executado["Profundidade MD (m)"].tolist())
+    if not df_problemas.empty:
+        tempos.extend(df_problemas["Tempo (dias)"].dropna().tolist())
+        profundidades.extend(
+            df_problemas["Profundidade MD (m)"].dropna().tolist()
+        )
+
+    tempo_max = max(tempos) if tempos else 1.0
+    profundidade_max = max(profundidades) if profundidades else 1.0
+
+    profundidade_final = max(
+        _rtp_profundidade_final_graficos(dados_auto, dados_poco),
+        float(profundidade_max),
+    )
+    profundidade_final = _rtp_final_eixo_y(
+        dados_poco,
+        profundidade_final,
+    )
+
+    x_max_crono = max(tempo_max * 1.12, 1.0)
+    y_max_crono = max(profundidade_final, 1.0)
+    profundidade_inicial = _rtp_inicio_eixo_y(
+        dados_poco,
+        y_max_crono,
+    )
+
+    ax.set_xlim(0.0, x_max_crono)
+    ax.set_ylim(y_max_crono, profundidade_inicial)
+
+    for anotacao in anotacoes_problemas:
+        tempo = anotacao["tempo"]
+        profundidade = anotacao["profundidade"]
+
+        texto_anotacao = str(anotacao["texto"])
+
+        dx = 10
+        dy = 10
+        ha = "left"
+        va = "bottom"
+
+        if tempo > x_max_crono * 0.72:
+            dx = -10
+            ha = "right"
+
+        if profundidade < y_max_crono * 0.12:
+            dy = -120
+            va = "top"
+
+        ax.annotate(
+            texto_anotacao,
+            xy=(tempo, profundidade),
+            xytext=(dx, dy),
+            textcoords="offset points",
+            fontsize=RTP_CRONOGRAMA_EVENTO_TEXT_FONTSIZE,
+            fontweight="bold",
+            color="#111111",
+            ha=ha,
+            va=va,
+            annotation_clip=True,
+            clip_on=True,
+            bbox={
+                "boxstyle": "round,pad=0.28",
+                "facecolor": "none",
+                "edgecolor": "#111111",
+                "linewidth": 1.0,
+            },
+            zorder=9,
+        )
+    ax.set_yticks(
+        _rtp_marcas_profundidade(
+            profundidade_final,
+            _rtp_passo_eixo_y(dados_poco),
+            profundidade_inicial,
+        )
+    )
+    ax.set_xlabel("Tempo (dias)", fontsize=RTP_EIXO_LABEL_FONTSIZE, fontweight="bold")
+    ax.set_ylabel("Profundidade MD (m)", fontsize=RTP_EIXO_LABEL_FONTSIZE, fontweight="bold")
+    ax.tick_params(
+        axis="both",
+        labelsize=RTP_EIXO_TICK_FONTSIZE,
+        width=RTP_EIXO_TICK_WIDTH,
+        length=RTP_EIXO_TICK_LENGTH,
+        pad=2,
+    )
+
+    if tem_executado:
+        dias_operacao_valor = pd.to_numeric(
+            df_executado["Tempo (dias)"].iloc[-1],
+            errors="coerce",
+        )
+        dias_operacao = (
+            f"{float(dias_operacao_valor):.1f} dias"
+            if pd.notna(dias_operacao_valor)
+            else "-"
+        )
+    else:
+        dias_operacao = "-"
+
+    ax.text(
+        0.985,
+        0.985,
+        f"Dias de operação: {dias_operacao}",
+        transform=ax.transAxes,
+        ha="right",
+        va="top",
+        fontsize=RTP_CRONOGRAMA_DIAS_OPERACAO_FONTSIZE,
+        fontweight="bold",
+        color="#111111",
+        bbox={
+            "boxstyle": "round,pad=0.32",
+            "facecolor": "white",
+            "edgecolor": "#333333",
+            "linewidth": 0.9,
+            "alpha": 0.96,
+        },
+        zorder=12,
+    )
+
+    ax.grid(True, linestyle="--", linewidth=RTP_GRID_LINEWIDTH, alpha=RTP_GRID_ALPHA)
+    ax.set_axisbelow(True)
+    for spine in ax.spines.values():
+        spine.set_linewidth(1.0)
+
+    fig.subplots_adjust(
+        left=0.22,
+        right=0.97,
+        top=RTP_PLOT_TOP_FRAC,
+        bottom=RTP_PLOT_BOTTOM_FRAC,
+    )
+    return fig
+
+
+def _rtp_cor_reportlab(cor, padrao="#F57C00"):
+    try:
+        import matplotlib.colors as mcolors
+        return HexColor(mcolors.to_hex(cor))
+    except Exception:
+        try:
+            return HexColor(cor)
+        except Exception:
+            return HexColor(padrao)
+
+
+def _rtp_desenhar_marcador_problema_pdf(c, x, y, estilo, tamanho=4.5):
+    marcador = str(estilo.get("marcador", "o"))
+    cor_borda = HexColor("#111111")
+    cor_face = estilo.get("facecolor", estilo.get("cor", "#F57C00"))
+    sem_preenchimento = str(cor_face).lower() in ["none", "transparent", ""]
+
+    c.setStrokeColor(cor_borda)
+    c.setLineWidth(0.9)
+
+    if sem_preenchimento:
+        c.setFillColorRGB(1, 1, 1)
+    else:
+        c.setFillColor(_rtp_cor_reportlab(cor_face))
+
+    if marcador == "o":
+        c.circle(x, y, tamanho, stroke=1, fill=0 if sem_preenchimento else 1)
+
+    elif marcador == "s":
+        c.rect(x - tamanho, y - tamanho, 2 * tamanho, 2 * tamanho, stroke=1, fill=0 if sem_preenchimento else 1)
+
+    elif marcador == "^":
+        p = c.beginPath()
+        p.moveTo(x, y + tamanho)
+        p.lineTo(x - tamanho, y - tamanho)
+        p.lineTo(x + tamanho, y - tamanho)
+        p.close()
+        c.drawPath(p, stroke=1, fill=0 if sem_preenchimento else 1)
+
+    elif marcador == "v":
+        p = c.beginPath()
+        p.moveTo(x, y - tamanho)
+        p.lineTo(x - tamanho, y + tamanho)
+        p.lineTo(x + tamanho, y + tamanho)
+        p.close()
+        c.drawPath(p, stroke=1, fill=0 if sem_preenchimento else 1)
+
+    elif marcador in ["D", "d"]:
+        fator_y = 1.15 if marcador == "D" else 1.35
+        fator_x = 1.00 if marcador == "D" else 0.75
+        p = c.beginPath()
+        p.moveTo(x, y + tamanho * fator_y)
+        p.lineTo(x - tamanho * fator_x, y)
+        p.lineTo(x, y - tamanho * fator_y)
+        p.lineTo(x + tamanho * fator_x, y)
+        p.close()
+        c.drawPath(p, stroke=1, fill=0 if sem_preenchimento else 1)
+
+    elif marcador in ["x", "X"]:
+        c.setStrokeColor(_rtp_cor_reportlab(estilo.get("cor", "#F57C00")))
+        c.setLineWidth(1.5 if marcador == "x" else 2.0)
+        c.line(x - tamanho, y - tamanho, x + tamanho, y + tamanho)
+        c.line(x - tamanho, y + tamanho, x + tamanho, y - tamanho)
+        c.setStrokeColor(cor_borda)
+        c.setLineWidth(0.9)
+
+    elif marcador == "P":
+        c.setStrokeColor(_rtp_cor_reportlab(estilo.get("cor", "#F57C00")))
+        c.setLineWidth(2.0)
+        c.line(x - tamanho, y, x + tamanho, y)
+        c.line(x, y - tamanho, x, y + tamanho)
+        c.setStrokeColor(cor_borda)
+        c.setLineWidth(0.9)
+
+    else:
+        c.circle(x, y, tamanho, stroke=1, fill=0 if sem_preenchimento else 1)
+
+
+def _rtp_desenhar_legenda_cronograma_pdf(c, dados_poco, x, y_top, largura):
+    df_planejado, df_executado, df_problemas = _rtp_dados_cronograma(
+        dados_poco
+    )
+    cfg = dados_poco.get("config_cronograma", {})
+    estilos_problemas = _rtp_estilos_problemas_operacionais()
+
+    itens_linhas = []
+    if cfg.get("mostrar_planejado", True) and len(df_planejado) >= 2:
+        itens_linhas.append(("Planejado", "#1565C0", "-"))
+    if cfg.get("mostrar_executado", True) and len(df_executado) >= 2:
+        itens_linhas.append(("Executado", "#F57C00", "-"))
+
+    problemas_visiveis = []
+    if isinstance(df_problemas, pd.DataFrame) and not df_problemas.empty:
+        for problema in df_problemas["Problema operacional"].dropna().astype(str):
+            problema = problema.strip()
+            if problema and problema not in problemas_visiveis:
+                problemas_visiveis.append(problema)
+
+    if not itens_linhas and not problemas_visiveis:
+        return y_top
+
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica-Bold", 11)
+    c.drawString(x, y_top, "Legenda do Cronograma")
+    y_linha = y_top - 8
+    c.setStrokeColor(HexColor("#d71920"))
+    c.setLineWidth(2)
+    c.line(x, y_linha, x + largura, y_linha)
+
+    x_item = x
+    y_item = y_linha - 22
+
+    for nome, cor, estilo_linha in itens_linhas:
+        c.setStrokeColor(HexColor(cor))
+        c.setLineWidth(3.0)
+        c.setDash(5, 3) if estilo_linha == "--" else c.setDash()
+        c.line(x_item, y_item, x_item + 34, y_item)
+        c.setDash()
+
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("Helvetica", 8)
+        c.drawString(x_item + 42, y_item - 3, nome)
+        x_item += 190
+
+    if problemas_visiveis:
+        if x_item != x:
+            y_item -= 20
+        x_item = x
+
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("Helvetica-Bold", 8.5)
+        c.drawString(x_item, y_item, "Problemas operacionais")
+        y_item -= 15
+
+        n_colunas_problemas = 3
+        espaco_coluna_problema = 145
+        espaco_linha_problema = 12
+
+        for idx, problema in enumerate(problemas_visiveis):
+            coluna = idx % n_colunas_problemas
+            linha = idx // n_colunas_problemas
+
+            x_prob = x + coluna * espaco_coluna_problema
+            y_prob = y_item - linha * espaco_linha_problema
+
+            estilo = estilos_problemas.get(
+                problema,
+                {"cor": "red", "marcador": "D"},
+            )
+
+            _rtp_desenhar_marcador_problema_pdf(
+                c,
+                x_prob + 5,
+                y_prob,
+                estilo,
+                tamanho=3.8,
+            )
+
+            c.setFillColorRGB(0, 0, 0)
+            c.setFont("Helvetica", 7.4)
+            c.drawString(x_prob + 14, y_prob - 2.5, problema)
+
+        linhas_ocupadas = math.ceil(len(problemas_visiveis) / n_colunas_problemas)
+        y_item = y_item - linhas_ocupadas * espaco_linha_problema
+
+    c.setDash()
+    return y_item - 8
+
+
+def _rtp_desenhar_cronograma_pdf(c, dados_auto, dados_poco, x, y_bottom, largura, altura):
+    _rtp_desenhar_quadro_pdf(c, "Cronograma", x, y_bottom, largura, altura)
+
+    margem_interna = 2
+    altura_titulo = 14
+    x_fig = x + margem_interna
+    y_fig = y_bottom + margem_interna
+    largura_fig = largura - 2 * margem_interna
+    altura_fig = altura - altura_titulo - margem_interna
+    fig = _rtp_criar_figura_cronograma(
+        dados_auto,
+        dados_poco,
+        largura_px=max(int(largura_fig * 8), 1200),
+        altura_px=max(int(altura_fig * 8), 1200),
+    )
+
+    if fig is None:
+        c.setFont("Helvetica", 7)
+        c.drawCentredString(
+            x + largura / 2,
+            y_bottom + altura / 2,
+            "Cronograma não disponível",
+        )
+        return
+
+    buffer_fig = BytesIO()
+    try:
+        fig.savefig(
+            buffer_fig,
+            format="png",
+            dpi=240,
+            transparent=True,
+        )
+        buffer_fig.seek(0)
+        c.drawImage(
+            ImageReader(buffer_fig),
+            x_fig,
+            y_fig,
+            width=largura_fig,
+            height=altura_fig,
+            preserveAspectRatio=True,
+            anchor="c",
+            mask="auto",
+        )
+    finally:
+        plt.close(fig)
+
+
+def _rtp_gerar_pdf_bytes(dados_auto, dados_poco):
+    """
+    Gera um PDF preliminar do Relatório Técnico de Poço em memória.
+    Nesta primeira versão, ele monta a estrutura visual básica.
+    Depois substituímos os blocos inferiores pelos gráficos reais.
+    """
+    buffer = BytesIO()
+
+    page_width, page_height = landscape(A4)
+
+    c = canvas.Canvas(buffer, pagesize=landscape(A4))
+
+    margem = 18
+    y_top = page_height - margem
+
+    # ============================================================
+    # Marca d'água centralizada
+    # ============================================================
+    try:
+        if os.path.exists("logo_syga.png"):
+            logo_wm = Image.open("logo_syga.png").convert("RGBA")
+
+            # Transparência da marca d'água: 0 = invisível, 255 = opaco
+            alpha = 25
+            canal_alpha = logo_wm.getchannel("A")
+            canal_alpha = canal_alpha.point(lambda p: min(p, alpha))
+            logo_wm.putalpha(canal_alpha)
+
+            buffer_logo = BytesIO()
+            logo_wm.save(buffer_logo, format="PNG")
+            buffer_logo.seek(0)
+
+            marca_w = page_width * 0.55
+            marca_h = page_height * 0.55
+
+            marca_x = (page_width - marca_w) / 2
+            marca_y = (page_height - marca_h) / 2
+
+            c.drawImage(
+                ImageReader(buffer_logo),
+                marca_x,
+                marca_y,
+                width=marca_w,
+                height=marca_h,
+                preserveAspectRatio=True,
+                mask="auto"
+            )
+    except Exception:
+        pass
+
+    # ============================================================
+    # Cabeçalho
+    # ============================================================
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica-Bold", 14)
+
+    titulo = f"Relatório Técnico do Poço {dados_auto.get('poco', '')}"
+    y_titulo = y_top - 10
+    c.drawCentredString((page_width / 2) - 8, y_titulo, titulo)
+
+    # Linhas vermelhas posicionadas ao lado do título
+    c.setStrokeColorRGB(0.85, 0.05, 0.05)
+    c.setLineWidth(3)
+
+    y_linha = y_titulo + 6
+
+    x_linha_esq_ini = margem
+    x_linha_esq_fim = page_width * 0.32
+
+    x_linha_dir_ini = page_width * 0.66
+    x_linha_dir_fim = page_width - margem
+
+    c.line(x_linha_esq_ini, y_linha, x_linha_esq_fim, y_linha)
+    c.line(x_linha_dir_ini, y_linha, x_linha_dir_fim, y_linha)
+
+    # Linha cinza abaixo das linhas vermelhas
+    c.setStrokeColorRGB(0.65, 0.65, 0.65)
+    c.setLineWidth(0.8)
+
+    y_linha_cinza = y_linha - 5
+
+    c.line(x_linha_esq_ini, y_linha_cinza, x_linha_esq_fim, y_linha_cinza)
+    c.line(x_linha_dir_ini, y_linha_cinza, x_linha_dir_fim, y_linha_cinza)
+
+    # Volta a cor padrão para os próximos desenhos
+    c.setStrokeColorRGB(0, 0, 0)
+
+    y = y_top - 20
+
+    # ============================================================
+    # Dados gerais - esquerda
+    # ============================================================
+    x_info = margem
+    w_info = 190
+
+    # Altura das células
+    h_cell = 16
+
+    # Fontes do bloco de dados do poço
+    fonte_info_rotulo = 8
+    fonte_info_valor = 8
+
+    # Fontes da tabela de fases
+    fonte_tab_cabecalho = 8
+    fonte_tab_linhas = 7
+
+    # Fontes do objetivo
+    fonte_obj_rotulo = 8
+    fonte_obj_texto = 7
+
+    sonda = dados_poco.get("dados_gerais", {}).get("sonda", "Não informado")
+
+    tipo_poco = str(dados_auto.get("tipo_poco", "Onshore")).strip()
+    offshore = tipo_poco.lower() == "offshore"
+
+    linhas_info = [
+        ("Poço:", dados_auto.get("poco", "-")),
+        ("Campo:", dados_auto.get("campo", "-")),
+        ("TVD Final:", _rtp_fmt(dados_auto.get("tvd_final"), 2, " m")),
+        ("MD Final:", _rtp_fmt(dados_auto.get("md_final"), 2, " m")),
+        ("Coord. Easting:", _rtp_fmt(dados_auto.get("easting"), 3)),
+        ("Coord. Northing:", _rtp_fmt(dados_auto.get("northing"), 3)),
+    ]
+
+    if offshore:
+        linhas_info.extend([
+            ("Lâmina D'água:", _rtp_fmt(dados_auto.get("lamina_dagua"), 2, " m")),
+            ("Air gap:", _rtp_fmt(dados_auto.get("mr"), 2, " m")),
+        ])
+    else:
+        linhas_info.extend([
+            ("Elevação DATUM:", _rtp_fmt(dados_auto.get("elevacao_datum"), 2, " m")),
+            ("N. freático:", _rtp_fmt(dados_auto.get("nivel_freatico"), 2, " m")),
+            ("MR:", _rtp_fmt(dados_auto.get("mr"), 2, " m")),
+        ])
+
+    linhas_info.append(("Sonda:", sonda))
+
+    c.setLineWidth(0.8)
+
+    y_info = y
+
+    for rotulo, valor in linhas_info:
+        _rtp_cell(
+            c,
+            x_info,
+            y_info,
+            72,
+            h_cell,
+            rotulo,
+            bold=True,
+            size=fonte_info_rotulo,
+            align="center",
+        )
+
+        _rtp_cell(
+            c,
+            x_info + 72,
+            y_info,
+            w_info - 72,
+            h_cell,
+            valor,
+            size=fonte_info_valor,
+            align="center",
+        )
+
+        y_info -= h_cell
+
+    # ============================================================
+    # Tabela fases / fluido / revestimento - topo central/direita
+    # ============================================================
+    df_fases = dados_poco.get("df_fases_rtp", pd.DataFrame())
+
+    x_tab = x_info + w_info + 12
+    y_tab = y
+    w_tab = page_width - margem - x_tab
+
+    cols = [
+        ("Fase", 38),
+        ("Prof. MD", 44),
+        ("Peso", 38),
+        ("VP", 30),
+        ("Broca", 38),
+        ("Rev.", 38),
+        ("Colar", 34),
+        ("Topo", 44),
+        ("Perfilagem OH", (w_tab - 304) / 2),
+        ("Perfilagem CH", (w_tab - 304) / 2),
+    ]
+
+    x_cursor = x_tab
+
+    for nome_col, largura in cols:
+        _rtp_cell(
+            c,
+            x_cursor,
+            y_tab,
+            largura,
+            h_cell,
+            nome_col,
+            bold=True,
+            size=fonte_tab_cabecalho,
+            align="center",
+        )
+        x_cursor += largura
+
+    y_tab -= h_cell
+
+    if isinstance(df_fases, pd.DataFrame) and not df_fases.empty:
+        for _, row in df_fases.head(5).iterrows():
+            x_cursor = x_tab
+            perfilagem_oh_realizada = _rtp_valor_booleano(
+                row.get("OH realizada", False)
+            )
+            perfilagem_ch_realizada = _rtp_valor_booleano(
+                row.get("CH realizada", False)
+            )
+
+            valores = [
+                _rtp_valor_celula(row.get("Fase", "")),
+                _rtp_valor_celula(row.get("Prof. MD (m)", "")),
+                _rtp_valor_celula(row.get("Peso (ppg)", "")),
+                _rtp_valor_celula(row.get("VP (cp)", "")),
+                _rtp_valor_celula(row.get("Broca (in)", "")),
+                _rtp_valor_revestimento(row.get("Revestimento (in)", "")),
+                _rtp_valor_celula(row.get("Colar (m)", "")),
+                _rtp_valor_celula(row.get("Topo", "")),
+                _rtp_valor_celula(row.get("Perfilagem OH", "")),
+                _rtp_valor_celula(row.get("Perfilagem CH", "")),
+            ]
+
+            for indice_coluna, (valor, (_, largura)) in enumerate(zip(valores, cols)):
+                coluna_perfilagem_oh = indice_coluna == len(cols) - 2
+                coluna_perfilagem_ch = indice_coluna == len(cols) - 1
+                coluna_perfilagem = coluna_perfilagem_oh or coluna_perfilagem_ch
+                perfilagem_realizada = (
+                    perfilagem_oh_realizada
+                    if coluna_perfilagem_oh
+                    else perfilagem_ch_realizada
+                )
+                _rtp_cell(
+                    c,
+                    x_cursor,
+                    y_tab,
+                    largura,
+                    h_cell,
+                    valor,
+                    size=6.5 if coluna_perfilagem else fonte_tab_linhas,
+                    bold=coluna_perfilagem and perfilagem_realizada,
+                    text_color=(
+                        HexColor("#148A2A")
+                        if coluna_perfilagem and perfilagem_realizada
+                        else None
+                    ),
+                    align="center",
+                )
+                x_cursor += largura
+
+            y_tab -= h_cell
+    else:
+        _rtp_cell(c, x_tab, y_tab, w_tab, h_cell, "Tabela não preenchida.", size=7)
+
+    # ============================================================
+    # Objetivo - linha abaixo da tabela de fases
+    # ============================================================
+    objetivo = dados_auto.get("objetivo", "")
+
+    y_obj = y_tab
+    h_obj = 24
+
+    _rtp_cell(
+        c,
+        x_tab,
+        y_obj,
+        60,
+        h_obj,
+        "Objetivo:",
+        bold=True,
+        size=fonte_obj_rotulo,
+        align="center",
+    )
+
+    _rtp_cell_multilinha(
+        c,
+        x_tab + 60,
+        y_obj,
+        w_tab - 60,
+        h_obj,
+        objetivo,
+        size=fonte_obj_texto,
+        bold=True,
+        align="left",
+        padding=5,
+    )
+
+    y_obj_bottom = y_obj - h_obj
+
+    # ============================================================
+    # Blocos inferiores
+    # ============================================================
+    y_blocos_top = min(y_info, y_obj_bottom) - 10
+    y_blocos_bottom = 38
+    h_blocos = y_blocos_top - y_blocos_bottom
+
+    gap = 8
+    w_lito = 75
+    w_traj = 235
+    w_geo = 235
+    w_crono = page_width - 2 * margem - w_lito - w_traj - w_geo - 3 * gap
+
+    x_lito = margem
+    x_traj = x_lito + w_lito + gap
+    x_geo = x_traj + w_traj + gap
+    x_crono = x_geo + w_geo + gap
+
+    _rtp_desenhar_litologia_pdf(
+        c, dados_auto, dados_poco, x_lito, y_blocos_bottom, w_lito, h_blocos
+    )
+    _rtp_desenhar_trajetoria_pdf(
+        c, dados_auto, dados_poco, x_traj, y_blocos_bottom, w_traj, h_blocos
+    )
+    _rtp_desenhar_geopressoes_pdf(
+        c, dados_auto, dados_poco, x_geo, y_blocos_bottom, w_geo, h_blocos
+    )
+    _rtp_desenhar_cronograma_pdf(
+        c, dados_auto, dados_poco, x_crono, y_blocos_bottom, w_crono, h_blocos
+    )
+
+    # Rodapé
+    c.setFont("Helvetica", 6)
+    c.drawRightString(
+        page_width - margem,
+        18,
+        f"Gerado pelo SYGA em {datetime.now().strftime('%d/%m/%Y %H:%M')}"
+    )
+
+    c.showPage()
+
+    # ============================================================
+    # Página 2 - Informações complementares
+    # ============================================================
+    _rtp_desenhar_segunda_pagina_pdf(
+        c,
+        dados_auto,
+        dados_poco,
+        page_width,
+        page_height,
+        margem,
+    )
+
+    c.showPage()
+    c.save()
+
+    buffer.seek(0)
+    return buffer.getvalue()
+
+
+def _rtp_invalidar_pdf():
+    chave_bytes = _rtp_pdf_state_key("bytes")
+    chave_versao = _rtp_pdf_state_key("versao")
+    st.session_state[chave_bytes] = None
+    st.session_state[chave_versao] = st.session_state.get(chave_versao, 0) + 1
+
+
+# ABA RTP
+def pagina_relatorio_tecnico_poco():
+    st.header("Relatório Téc. de Poço")
+    preservar_scroll_pagina("relatorio_tecnico_poco")
+
+    dados_auto = _rtp_coletar_dados_automaticos()
+    dados_poco = _rtp_preparar_dados_poco()
+
+    col_forms, col_pdf = st.columns([0.40, 0.60])
+
+    # ============================================================
+    # PAINEL DE PREENCHIMENTO
+    # ============================================================
+    with col_forms:
+        st.markdown("### Preenchimento")
+
+        # ------------------------------------------------------------
+        # FORM 1 - Dados gerais
+        # ------------------------------------------------------------
+        with st.expander("1. Dados gerais", expanded=True):
+            st.markdown("Dados já carregados automaticamente pelo SYGA:")
+
+            st.caption(f"**Nome do poço:** {dados_auto['poco']}")
+            st.caption(f"**Campo:** {dados_auto['campo']}")
+            st.caption(f"**TVD Final:** {_rtp_fmt(dados_auto['tvd_final'], 2, ' m')}")
+            st.caption(f"**MD Final:** {_rtp_fmt(dados_auto['md_final'], 2, ' m')}")
+            st.caption(f"**N. Freático:** {_rtp_fmt(dados_auto['nivel_freatico'], 2, ' m')}")
+            st.caption(f"**MR:** {_rtp_fmt(dados_auto['mr'], 2, ' m')}")
+
+            with st.form(_rtp_widget_key("form_dados_gerais"), clear_on_submit=False):
+                sonda = st.text_input(
+                    "Nome da sonda",
+                    value=dados_poco["dados_gerais"].get("sonda", ""),
+                    key=_rtp_widget_key("sonda"),
+                )
+
+                salvar_dados_gerais = st.form_submit_button(
+                    "Salvar dados gerais",
+                    type="primary",
+                    use_container_width=True,
+                )
+
+            if salvar_dados_gerais:
+                dados_poco["dados_gerais"]["sonda"] = sonda
+                _rtp_invalidar_pdf()
+                st.toast("Dados gerais salvos.")
+
+        # ------------------------------------------------------------
+        # FORM 2 - Fases / fluido / revestimento
+        # ------------------------------------------------------------
+        with st.expander("2. Fases / Fluido / Revestimento / Viscosidade / Perfilagens ", expanded=False):
+            st.caption(
+                "Para retroanálise, a tabela inicia com os dados importados do Excel quando existirem. "
+                "Para previsão de geopressões, ela usa os dados calculados no aplicativo quando disponíveis."
+            )
+
+            with st.form(_rtp_widget_key("form_fases"), clear_on_submit=False):
+                df_fases_editado = st.data_editor(
+                    dados_poco["df_fases_rtp"],
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="dynamic",
+                    key=_rtp_widget_key("df_fases"),
+                    column_config={
+                        "Perfilagem OH": st.column_config.TextColumn(
+                            "Perfilagem OH",
+                            width="large",
+                            help="Ex.: OH 17,5: FMI-PPC-MSIP-EDTC-AIT-TLD-HGNS-EDTC",
+                        ),
+                        "OH realizada": st.column_config.CheckboxColumn(
+                            "OH realizada",
+                            help=(
+                                "Quando marcada, a perfilagem aparece em verde "
+                                "e negrito no relatório."
+                            ),
+                            default=False,
+                        ),
+                        "Perfilagem CH": st.column_config.TextColumn(
+                            "Perfilagem CH",
+                            width="large",
+                            help="Ex.: CH 13,375: CBL-PPC-MSIP-EDT",
+                        ),
+                        "CH realizada": st.column_config.CheckboxColumn(
+                            "CH realizada",
+                            help="Marque quando a perfilagem CH tiver sido realizada.",
+                            default=False,
+                        ),
+                    },
+                )
+
+                col_f1, col_f2 = st.columns(2)
+
+                with col_f1:
+                    salvar_fases = st.form_submit_button(
+                        "Salvar tabela",
+                        type="primary",
+                        use_container_width=True,
+                    )
+
+                with col_f2:
+                    restaurar_fases = st.form_submit_button(
+                        "Recarregar padrão",
+                        use_container_width=True,
+                    )
+
+            if salvar_fases:
+                if len(df_fases_editado) > 5:
+                    st.error(
+                        "O layout atual do PDF comporta no máximo 5 fases. "
+                        "Remova as linhas excedentes antes de salvar."
+                    )
+                else:
+                    dados_poco["df_fases_rtp"] = df_fases_editado.copy()
+                    _rtp_normalizar_dados_poco(dados_poco)
+                    _rtp_invalidar_pdf()
+                    st.toast("Tabela de fases salva.")
+
+            if restaurar_fases:
+                dados_poco["df_fases_rtp"] = _rtp_montar_tabela_fases_padrao()
+                dados_poco["df_fases_rtp"] = dados_poco["df_fases_rtp"].head(5)
+                _rtp_normalizar_dados_poco(dados_poco)
+                _rtp_limpar_widget("df_fases")
+                _rtp_invalidar_pdf()
+                st.rerun()
+
+        # ------------------------------------------------------------
+        # FORM 3 - Trajetória / sapatas
+        # ------------------------------------------------------------
+        with st.expander("3. Trajetória / sapatas", expanded=False):
+            with st.form(_rtp_widget_key("form_trajetoria"), clear_on_submit=False):
+                cfg_traj = dados_poco["config_trajetoria"]
+
+                mostrar_trajetoria = st.checkbox(
+                    "Mostrar trajetória",
+                    value=cfg_traj.get("mostrar_trajetoria", True),
+                    key=_rtp_widget_key("mostrar_trajetoria"),
+                )
+
+                mostrar_sapatas = st.checkbox(
+                    "Mostrar sapatas",
+                    value=cfg_traj.get("mostrar_sapatas", True),
+                    key=_rtp_widget_key("mostrar_sapatas"),
+                )
+
+                mostrar_topo_sal = st.checkbox(
+                    "Mostrar topo do sal",
+                    value=cfg_traj.get("mostrar_topo_sal", False),
+                    key=_rtp_widget_key("mostrar_topo_sal"),
+                )
+
+                topo_sal_tvd = st.number_input(
+                    "Topo do sal (m TVD)",
+                    min_value=0.0,
+                    value=float(cfg_traj.get("topo_sal_tvd", 0.0)),
+                    step=0.1,
+                    format="%.2f",
+                    key=_rtp_widget_key("topo_sal_tvd"),
+                )
+
+                mostrar_topo_cavidade = st.checkbox(
+                    "Mostrar topo da cavidade",
+                    value=cfg_traj.get("mostrar_topo_cavidade", False),
+                    key=_rtp_widget_key("mostrar_topo_cavidade"),
+                )
+
+                topo_cavidade_tvd = st.number_input(
+                    "Topo da cavidade (m TVD)",
+                    min_value=0.0,
+                    value=float(cfg_traj.get("topo_cavidade_tvd", 0.0)),
+                    step=0.1,
+                    format="%.2f",
+                    key=_rtp_widget_key("topo_cavidade_tvd"),
+                )
+
+                rop_medio = st.number_input(
+                    "ROP médio da fase (m/h)",
+                    min_value=0.0,
+                    value=float(cfg_traj.get("rop_medio", 0.0)),
+                    step=0.01,
+                    format="%.2f",
+                    key=_rtp_widget_key("rop_medio"),
+                )
+
+                salvar_traj = st.form_submit_button(
+                    "Salvar trajetória / sapatas",
+                    type="primary",
+                    use_container_width=True,
+                )
+
+            if salvar_traj:
+                dados_poco["config_trajetoria"] = {
+                    "mostrar_trajetoria": mostrar_trajetoria,
+                    "mostrar_sapatas": mostrar_sapatas,
+                    "mostrar_topo_sal": mostrar_topo_sal,
+                    "mostrar_topo_cavidade": mostrar_topo_cavidade,
+                    "topo_sal_tvd": topo_sal_tvd,
+                    "topo_cavidade_tvd": topo_cavidade_tvd,
+                    "rop_medio": rop_medio,
+                }
+                _rtp_invalidar_pdf()
+                st.toast("Configurações de trajetória salvas.")
+
+        # ------------------------------------------------------------
+        # FORM 4 - Geopressões
+        # ------------------------------------------------------------
+        with st.expander("4. Geopressões", expanded=False):
+            st.caption("Configure as curvas, os testes e as perdas de circulação exibidos no relatório.")
+
+            with st.form(_rtp_widget_key("form_geopressoes"), clear_on_submit=False):
+                cfg_geo = dados_poco["config_geopressoes"]
+
+                opcoes_geopressoes = _rtp_opcoes_geopressoes()
+                itens_geopressoes = st.multiselect(
+                    "Curvas e testes de formação",
+                    options=opcoes_geopressoes,
+                    default=_rtp_selecao_geopressoes(cfg_geo),
+                    placeholder=(
+                        "Calcule a estabilidade para disponibilizar as curvas"
+                        if not opcoes_geopressoes
+                        else "Selecione as curvas e os testes"
+                    ),
+                    key=_rtp_widget_key("geo_itens_geopressoes"),
+                )
+
+                col_x1, col_x2, col_x3 = st.columns(3)
+
+                with col_x1:
+                    x_min = st.number_input(
+                        "X mín.",
+                        value=float(cfg_geo.get("x_min", 7.0)),
+                        step=0.5,
+                        format="%.2f",
+                        key=_rtp_widget_key("geo_x_min"),
+                    )
+
+                with col_x2:
+                    x_max = st.number_input(
+                        "X máx.",
+                        value=float(cfg_geo.get("x_max", 21.0)),
+                        step=0.5,
+                        format="%.2f",
+                        key=_rtp_widget_key("geo_x_max"),
+                    )
+
+                with col_x3:
+                    x_step = st.number_input(
+                        "Passo X",
+                        value=float(cfg_geo.get("x_step", 2.0)),
+                        step=0.5,
+                        format="%.2f",
+                        key=_rtp_widget_key("geo_x_step"),
+                    )
+
+                profundidade_final_automatica = _rtp_profundidade_final_graficos(
+                    dados_auto,
+                    dados_poco,
+                )
+                y_max_salvo = pd.to_numeric(
+                    cfg_geo.get("y_max"),
+                    errors="coerce",
+                )
+                if pd.isna(y_max_salvo):
+                    y_max_salvo = profundidade_final_automatica
+
+                col_y1, col_y2, col_y3 = st.columns(3)
+
+                with col_y1:
+                    y_min = st.number_input(
+                        "Y inicial dos gráficos (m)",
+                        min_value=0.0,
+                        value=float(cfg_geo.get("y_min", 0.0)),
+                        step=50.0,
+                        format="%.2f",
+                        key=_rtp_widget_key("geo_y_min"),
+                    )
+
+                with col_y2:
+                    y_max = st.number_input(
+                        "Y final dos gráficos (m)",
+                        min_value=0.01,
+                        value=float(y_max_salvo),
+                        step=50.0,
+                        format="%.2f",
+                        key=_rtp_widget_key("geo_y_max"),
+                    )
+
+                with col_y3:
+                    y_step = st.number_input(
+                        "Passo do eixo Y dos gráficos (m)",
+                        min_value=0.01,
+                        value=float(cfg_geo.get("y_step", 200.0)),
+                        step=50.0,
+                        format="%.2f",
+                        key=_rtp_widget_key("geo_y_step"),
+                    )
+
+                st.markdown("##### Perdas de circulação")
+                df_perdas_editado = st.data_editor(
+                    dados_poco["df_perdas_circulacao_rtp"],
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="dynamic",
+                    key=_rtp_widget_key("df_perdas_circulacao"),
+                    column_config={
+                        "Profundidade TVD (m)": st.column_config.NumberColumn(
+                            "Profundidade TVD (m)",
+                            min_value=0.0,
+                            format="%.2f",
+                        ),
+                        "Peso do Fluido (lb/gal)": st.column_config.NumberColumn(
+                            "Peso do Fluido (lb/gal)",
+                            min_value=0.0,
+                            format="%.2f",
+                        ),
+                    },
+                )
+
+                salvar_geo = st.form_submit_button(
+                    "Salvar geopressões",
+                    type="primary",
+                    use_container_width=True,
+                )
+
+            if salvar_geo:
+                if x_min >= x_max:
+                    st.error("O valor de X mín. deve ser menor que X máx.")
+                elif x_step <= 0:
+                    st.error("O passo de X deve ser maior que zero.")
+                elif y_min >= y_max:
+                    st.error("O Y inicial deve ser menor que o Y final.")
+                else:
+                    dados_poco["config_geopressoes"] = {
+                        "itens_geopressoes": itens_geopressoes,
+                        "x_min": x_min,
+                        "x_max": x_max,
+                        "x_step": x_step,
+                        "y_min": y_min,
+                        "y_max": y_max,
+                        "y_step": y_step,
+                    }
+                    dados_poco["df_perdas_circulacao_rtp"] = df_perdas_editado.copy()
+                    _rtp_normalizar_dados_poco(dados_poco)
+                    _rtp_invalidar_pdf()
+                    st.toast("Configurações de geopressões salvas.")
+
+        # ------------------------------------------------------------
+        # FORM 5 - Cronograma
+        # ------------------------------------------------------------
+        with st.expander("5. Cronograma / problemas operacionais", expanded=False):
+            with st.form(_rtp_widget_key("form_cronograma"), clear_on_submit=False):
+                cfg_crono = dados_poco["config_cronograma"]
+                col_vis1, col_vis2 = st.columns(2)
+                with col_vis1:
+                    mostrar_crono_planejado = st.checkbox(
+                        "Exibir cronograma planejado",
+                        value=cfg_crono.get("mostrar_planejado", True),
+                        key=_rtp_widget_key("crono_mostrar_planejado"),
+                    )
+                with col_vis2:
+                    mostrar_crono_executado = st.checkbox(
+                        "Exibir cronograma executado",
+                        value=cfg_crono.get("mostrar_executado", True),
+                        key=_rtp_widget_key("crono_mostrar_executado"),
+                    )
+
+                st.markdown("##### Cronograma planejado")
+                df_crono_planejado_editado = st.data_editor(
+                    dados_poco["df_cronograma_planejado_rtp"],
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="dynamic",
+                    key=_rtp_widget_key("df_cronograma_planejado_dias"),
+                    column_config={
+                        "Tempo (dias)": st.column_config.NumberColumn(
+                            "Tempo (dias)", min_value=0.0, format="%.2f"
+                        ),
+                        "Profundidade MD (m)": st.column_config.NumberColumn(
+                            "Profundidade MD (m)", min_value=0.0, format="%.2f"
+                        ),
+                    },
+                )
+
+                st.markdown("##### Cronograma executado")
+                df_crono_executado_editado = st.data_editor(
+                    dados_poco["df_cronograma_executado_rtp"],
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="dynamic",
+                    key=_rtp_widget_key("df_cronograma_executado_dias"),
+                    column_config={
+                        "Tempo (dias)": st.column_config.NumberColumn(
+                            "Tempo (dias)", min_value=0.0, format="%.2f"
+                        ),
+                        "Profundidade MD (m)": st.column_config.NumberColumn(
+                            "Profundidade MD (m)", min_value=0.0, format="%.2f"
+                        ),
+                    },
+                )
+
+                st.markdown("##### Problemas operacionais")
+
+                df_problemas_editado = st.data_editor(
+                    dados_poco["df_problemas_rtp"],
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="dynamic",
+                    key=_rtp_widget_key("df_problemas_manual_dias"),
+                    column_config={
+                        "Profundidade MD (m)": st.column_config.NumberColumn(
+                            "Profundidade MD (m)", min_value=0.0, format="%.2f"
+                        ),
+                        "Problema operacional": st.column_config.SelectboxColumn(
+                            "Problema operacional",
+                            options=list(_rtp_estilos_problemas_operacionais().keys()),
+                            required=True,
+                        ),
+                        "Tempo (dias)": st.column_config.NumberColumn(
+                            "Tempo (dias)", min_value=0.0, format="%.2f"
+                        ),
+                        "Duração (dias)": st.column_config.NumberColumn(
+                            "Duração (dias)", min_value=0.0, format="%.2f"
+                        ),
+                        "Mostrar": st.column_config.CheckboxColumn("Mostrar"),
+                    },
+                )
+
+                salvar_crono = st.form_submit_button(
+                    "Salvar cronograma",
+                    type="primary",
+                    use_container_width=True,
+                )
+
+            if salvar_crono:
+                dados_poco["config_cronograma"] = {
+                    "mostrar_planejado": mostrar_crono_planejado,
+                    "mostrar_executado": mostrar_crono_executado,
+                }
+                dados_poco["df_cronograma_planejado_rtp"] = (
+                    df_crono_planejado_editado.copy()
+                )
+                dados_poco["df_cronograma_executado_rtp"] = (
+                    df_crono_executado_editado.copy()
+                )
+                dados_poco["df_problemas_rtp"] = df_problemas_editado.copy()
+                _rtp_normalizar_dados_poco(dados_poco)
+                _rtp_invalidar_pdf()
+                st.toast("Cronograma salvo.")
+
+        # ------------------------------------------------------------
+        # FORM 6 - Litologia
+        # ------------------------------------------------------------
+        with st.expander("6. Litologia", expanded=False):
+            with st.form(_rtp_widget_key("form_litologia"), clear_on_submit=False):
+                cfg_lito = dados_poco["config_litologia"]
+
+                modo_litologia = st.selectbox(
+                    "Coluna litológica no relatório",
+                    options=["Litologia", "Permeável / Não permeável"],
+                    index=0 if cfg_lito.get("modo_litologia", "Litologia") == "Litologia" else 1,
+                    key=_rtp_widget_key("modo_litologia"),
+                )
+
+                modo_litologia_salvo = cfg_lito.get("modo_litologia", "Litologia")
+                df_lito_base = _rtp_montar_tabela_litologia_padrao(modo_litologia)
+
+                modo_lito_slug = "perm_nao_perm" if modo_litologia == "Permeável / Não permeável" else "litologia"
+
+                if modo_litologia != modo_litologia_salvo:
+                    df_lito_entrada = df_lito_base.copy()
+                else:
+                    df_lito_entrada = dados_poco.get("df_litologia_rtp", df_lito_base).copy()
+
+                df_lito_editado = st.data_editor(
+                    df_lito_entrada,
+                    use_container_width=True,
+                    hide_index=True,
+                    num_rows="dynamic",
+                    key=_rtp_widget_key(f"df_litologia_{modo_lito_slug}"),
+                )
+
+                col_l1, col_l2 = st.columns(2)
+
+                with col_l1:
+                    salvar_lito = st.form_submit_button(
+                        "Salvar litologia",
+                        type="primary",
+                        use_container_width=True,
+                    )
+
+                with col_l2:
+                    recarregar_lito = st.form_submit_button(
+                        "Recarregar padrão",
+                        use_container_width=True,
+                    )
+
+            if salvar_lito:
+                dados_poco["config_litologia"] = {
+                    "modo_litologia": modo_litologia,
+                    "mostrar_rotulos": False,
+                }
+                dados_poco["df_litologia_rtp"] = df_lito_editado.copy()
+                _rtp_normalizar_dados_poco(dados_poco)
+                _rtp_invalidar_pdf()
+                st.toast("Litologia salva.")
+
+            if recarregar_lito:
+                dados_poco["config_litologia"] = {
+                    "modo_litologia": modo_litologia,
+                    "mostrar_rotulos": False,
+                }
+                dados_poco["df_litologia_rtp"] = _rtp_montar_tabela_litologia_padrao(modo_litologia)
+                _rtp_normalizar_dados_poco(dados_poco)
+                _rtp_limpar_widget(f"df_litologia_{modo_lito_slug}")
+                _rtp_invalidar_pdf()
+                st.rerun()
+
+    # ============================================================
+    # PDF
+    # ============================================================
+    with col_pdf:
+        st.markdown("### Relatório em PDF")
+
+        with st.container(border=True):
+            col_pdf1, col_pdf2 = st.columns([0.5, 0.5])
+
+            with col_pdf1:
+                gerar_pdf = st.button(
+                    "Gerar / atualizar PDF",
+                    type="primary",
+                    use_container_width=True,
+                    key=_rtp_widget_key("btn_gerar_pdf"),
+                )
+
+            if gerar_pdf:
+                try:
+                    chave_pdf_bytes = _rtp_pdf_state_key("bytes")
+                    chave_pdf_versao = _rtp_pdf_state_key("versao")
+                    st.session_state[chave_pdf_bytes] = _rtp_gerar_pdf_bytes(
+                        dados_auto=dados_auto,
+                        dados_poco=dados_poco,
+                    )
+
+                    # Força o pdf_viewer a recriar o componente
+                    st.session_state[chave_pdf_versao] = (
+                            st.session_state.get(chave_pdf_versao, 0) + 1
+                    )
+
+                    st.toast("PDF gerado com sucesso.")
+                    st.rerun()
+
+                except Exception as e:
+                    st.error(f"Erro ao gerar o PDF: {e}")
+
+            pdf_bytes = st.session_state.get(_rtp_pdf_state_key("bytes"), None)
+            pdf_versao = st.session_state.get(_rtp_pdf_state_key("versao"), 0)
+
+            if pdf_bytes:
+                with col_pdf2:
+                    st.download_button(
+                        "Baixar PDF",
+                        data=pdf_bytes,
+                        file_name=f"Relatorio_Tecnico_{_rtp_poco_atual().replace(' ', '_')}.pdf",
+                        mime="application/pdf",
+                        use_container_width=True,
+                        key=_rtp_widget_key(f"download_pdf_{pdf_versao}"),
+                    )
+
+                pdf_viewer(
+                    input=pdf_bytes,
+                    width=1000,
+                    height=800,
+                    pages_vertical_spacing=12,
+                    key=_rtp_widget_key(f"pdf_viewer"),
+                )
+            else:
+                st.info("Clique em **Gerar / atualizar PDF** para visualizar o relatório.")
+
+
+def preservar_scroll_pagina(chave="pagina"):
+    """
+    Preserva a posição vertical da página após reruns do Streamlit.
+    Útil para páginas longas com data_editor, botões e filtros.
+    """
+    components.html(
+        f"""
+        <script>
+        (function() {{
+            const key = "syga_scroll_{chave}";
+            const win = window.parent;
+            const doc = window.parent.document;
+
+            function getScrollY() {{
+                return win.scrollY || doc.documentElement.scrollTop || doc.body.scrollTop || 0;
+            }}
+
+            function saveScroll() {{
+                try {{
+                    sessionStorage.setItem(key, String(getScrollY()));
+                }} catch (e) {{}}
+            }}
+
+            function restoreScroll() {{
+                try {{
+                    const y = parseInt(sessionStorage.getItem(key) || "0", 10);
+
+                    if (!isNaN(y) && y > 0) {{
+                        setTimeout(function() {{ win.scrollTo(0, y); }}, 50);
+                        setTimeout(function() {{ win.scrollTo(0, y); }}, 250);
+                        setTimeout(function() {{ win.scrollTo(0, y); }}, 700);
+                    }}
+                }} catch (e) {{}}
+            }}
+
+            restoreScroll();
+
+            if (!win.__sygaScrollListener_{chave}) {{
+                win.__sygaScrollListener_{chave} = true;
+
+                win.addEventListener("scroll", function() {{
+                    saveScroll();
+                }}, {{ passive: true }});
+
+                win.addEventListener("beforeunload", function() {{
+                    saveScroll();
+                }});
+            }}
+        }})();
+        </script>
+        """,
+        height=0,
+    )
+
+
+# ABA ANOTAÇÕES
 def pagina_anotacoes():
     st.header("Anotações")
-    c1, c2 = st.columns((1, 1))
+    preservar_scroll_pagina("anotacoes")
 
-    with c1:
+    # ============================================================
+    # Estados iniciais
+    # ============================================================
+    poco_atual = st.session_state.get(
+        "well_selected",
+        st.session_state.get("poco", "Poço")
+    )
+
+    if "anotacoes_por_poco" not in st.session_state:
+        st.session_state.anotacoes_por_poco = {}
+
+    if poco_atual not in st.session_state.anotacoes_por_poco:
+        st.session_state.anotacoes_por_poco[poco_atual] = st.session_state.get("anotacoes", "")
+
+    if "anotacoes" not in st.session_state:
+        st.session_state.anotacoes = st.session_state.anotacoes_por_poco[poco_atual]
+
+    if "traj_marks_calc" not in st.session_state:
+        st.session_state.traj_marks_calc = pd.DataFrame(columns=[
+            "Tipo",
+            "MD Inicial",
+            "MD Final",
+            "TVD Inicial",
+            "TVD Final",
+            "HD Inicial",
+            "HD Final",
+            "Evento",
+            "Comentário",
+            "_cor_plot",
+            "_simbolo",
+        ])
+    def _criar_df_eventos_manuais_vazio():
+        return pd.DataFrame({
+            "Evento": pd.Series(dtype="string"),
+            "MD Inicial": pd.Series(dtype="float"),
+            "MD Final": pd.Series(dtype="float"),
+            "Comentário": pd.Series(dtype="string"),
+        })
+    def _corrigir_tipos_df_eventos_manuais(df):
+        if not isinstance(df, pd.DataFrame):
+            df = _criar_df_eventos_manuais_vazio()
+
+        df = df.copy()
+
+        for col in ["Evento", "Comentário"]:
+            if col not in df.columns:
+                df[col] = ""
+            df[col] = (
+                df[col]
+                .astype("string")
+                .fillna("")
+            )
+
+        for col in ["MD Inicial", "MD Final"]:
+            if col not in df.columns:
+                df[col] = np.nan
+            df[col] = pd.to_numeric(
+                df[col],
+                errors="coerce"
+            )
+
+        return df[[
+            "Evento",
+            "MD Inicial",
+            "MD Final",
+            "Comentário",
+        ]].copy()
+    if "df_eventos_manuais" not in st.session_state:
+        st.session_state.df_eventos_manuais = _criar_df_eventos_manuais_vazio()
+
+    st.session_state.df_eventos_manuais = _corrigir_tipos_df_eventos_manuais(
+        st.session_state.df_eventos_manuais
+    )
+
+    EVENTOS = [
+        "Drag",
+        "Overpull",
+        "Pescaria",
+        "Repasse",
+        "Coluna presa",
+        "Ameaça de prisão",
+        "Coluna topou",
+        "Ferramenta de perfilagem topou",
+        "Perda parcial de circulação",
+        "Perda severa de circulação",
+    ]
+
+    MAPA_EVENTO_ESTILO = {
+        "Drag": {"cor": "orange", "simbolo": "triangle-up"},
+        "Overpull": {"cor": "black", "simbolo": "square"},
+        "Repasse": {"cor": "blue", "simbolo": "circle"},
+        "Coluna presa": {"cor": "red", "simbolo": "x"},
+        "Ameaça de prisão": {"cor": "purple", "simbolo": "star-square"},
+        "Coluna topou": {"cor": "gray", "simbolo": "diamond"},
+        "Ferramenta de perfilagem topou": {"cor": "black", "simbolo": "diamond-open-dot"},
+        "Perda parcial de circulação": {"cor": "orange", "simbolo": "triangle-down"},
+        "Perda severa de circulação": {"cor": "red", "simbolo": "triangle-down"},
+        "Pescaria": {"cor": "brown", "simbolo": "bowtie"},
+    }
+    def _fmt_od_sapata_anotacoes(valor):
+        """
+        Formata o OD da sapata em polegadas com fração quando possível.
+
+        Exemplos:
+        30.0   -> 30"
+        13.375 -> 13 3/8"
+        9.625  -> 9 5/8"
+        7.0    -> 7"
+        """
+        try:
+            if valor is None or pd.isna(valor):
+                return "—"
+
+            if "_asp_fmt_pol" in globals():
+                texto = _asp_fmt_pol(valor)
+            else:
+                valor_float = float(valor)
+                inteiro = int(valor_float)
+                decimal = valor_float - inteiro
+
+                if abs(decimal) < 1e-6:
+                    texto = str(inteiro)
+                else:
+                    frac = Fraction(decimal).limit_denominator(16)
+
+                    if frac.numerator == frac.denominator:
+                        texto = str(inteiro + 1)
+                    elif inteiro == 0:
+                        texto = f"{frac.numerator}/{frac.denominator}"
+                    else:
+                        texto = f"{inteiro} {frac.numerator}/{frac.denominator}"
+
+            texto = str(texto).strip()
+
+            if not texto or texto.lower() == "nan":
+                return "—"
+
+            if texto.endswith('"'):
+                return texto
+
+            return f'{texto}"'
+
+        except Exception:
+            texto = str(valor).strip()
+
+            if not texto or texto.lower() == "nan":
+                return "—"
+
+            if texto.endswith('"'):
+                return texto
+
+            return f'{texto}"'
+    # ============================================================
+    # Funções auxiliares internas
+    # ============================================================
+    def _preparar_df_traj_anotacoes():
+        fontes = [
+            st.session_state.get("df_out_traj", pd.DataFrame()),
+            st.session_state.get("df2", pd.DataFrame()),
+            st.session_state.get("df_interp", pd.DataFrame()),
+        ]
+
+        for fonte in fontes:
+            if not isinstance(fonte, pd.DataFrame) or fonte.empty:
+                continue
+
+            df_traj = fonte.copy()
+
+            try:
+                if "_normalizar_df_trajetoria_3d" in globals():
+                    df_norm = _normalizar_df_trajetoria_3d(df_traj)
+
+                    if isinstance(df_norm, pd.DataFrame) and not df_norm.empty:
+                        df_traj = df_norm.copy()
+            except Exception:
+                pass
+
+            renomear = {}
+
+            if "Inclinação (°)" in df_traj.columns and "Inc" not in df_traj.columns:
+                renomear["Inclinação (°)"] = "Inc"
+
+            if "Azimute (°)" in df_traj.columns and "Azi" not in df_traj.columns:
+                renomear["Azimute (°)"] = "Azi"
+
+            if renomear:
+                df_traj = df_traj.rename(columns=renomear)
+
+            if "Afastamento Horizontal (m)" not in df_traj.columns:
+                if "Easting" in df_traj.columns and "Northing" in df_traj.columns:
+                    df_traj["Afastamento Horizontal (m)"] = np.sqrt(
+                        pd.to_numeric(df_traj["Easting"], errors="coerce") ** 2
+                        + pd.to_numeric(df_traj["Northing"], errors="coerce") ** 2
+                    )
+
+                elif "MD" in df_traj.columns and "TVD" in df_traj.columns:
+                    md_tmp = pd.to_numeric(df_traj["MD"], errors="coerce")
+                    tvd_tmp = pd.to_numeric(df_traj["TVD"], errors="coerce")
+
+                    df_traj["Afastamento Horizontal (m)"] = np.sqrt(
+                        np.maximum(md_tmp ** 2 - tvd_tmp ** 2, 0)
+                    )
+
+            colunas_necessarias = ["MD", "TVD", "Afastamento Horizontal (m)"]
+
+            if not all(col in df_traj.columns for col in colunas_necessarias):
+                continue
+
+            for col in colunas_necessarias:
+                df_traj[col] = pd.to_numeric(df_traj[col], errors="coerce")
+
+            df_traj = (
+                df_traj
+                .dropna(subset=colunas_necessarias)
+                .sort_values("MD")
+                .drop_duplicates(subset=["MD"], keep="last")
+                .reset_index(drop=True)
+            )
+
+            if not df_traj.empty:
+                return df_traj
+
+        return pd.DataFrame()
+    def _interp_em_md(df_traj: pd.DataFrame, md_alvo: float):
+        df = df_traj.copy().sort_values("MD")
+
+        md = df["MD"].to_numpy(dtype=float)
+        tvd = df["TVD"].to_numpy(dtype=float)
+        hd = df["Afastamento Horizontal (m)"].to_numpy(dtype=float)
+
+        if len(md) < 2:
+            raise ValueError("Trajetória possui poucos pontos para interpolação.")
+
+        if md_alvo < md.min() or md_alvo > md.max():
+            raise ValueError(
+                f"MD fora do intervalo da trajetória ({md.min():.2f} a {md.max():.2f})."
+            )
+
+        tvd_i = float(np.interp(md_alvo, md, tvd))
+        hd_i = float(np.interp(md_alvo, md, hd))
+
+        return tvd_i, hd_i
+    def _segmento_traj_por_md(df_traj: pd.DataFrame, md_ini: float, md_fim: float):
+        if md_fim < md_ini:
+            md_ini, md_fim = md_fim, md_ini
+
+        df = df_traj.copy().sort_values("MD")
+
+        md_all = df["MD"].to_numpy(dtype=float)
+        tvd_all = df["TVD"].to_numpy(dtype=float)
+        hd_all = df["Afastamento Horizontal (m)"].to_numpy(dtype=float)
+
+        if len(md_all) < 2:
+            raise ValueError("Trajetória possui poucos pontos para montar trecho.")
+
+        if md_ini < md_all.min() or md_fim > md_all.max():
+            raise ValueError(
+                f"Trecho fora do intervalo da trajetória em MD ({md_all.min():.2f} a {md_all.max():.2f})."
+            )
+
+        mask = (md_all >= md_ini) & (md_all <= md_fim)
+
+        md_seg = md_all[mask]
+        tvd_seg = tvd_all[mask]
+        hd_seg = hd_all[mask]
+
+        tvd_i = float(np.interp(md_ini, md_all, tvd_all))
+        hd_i = float(np.interp(md_ini, md_all, hd_all))
+
+        tvd_f = float(np.interp(md_fim, md_all, tvd_all))
+        hd_f = float(np.interp(md_fim, md_all, hd_all))
+
+        if md_seg.size == 0 or not np.isclose(md_seg[0], md_ini):
+            md_seg = np.insert(md_seg, 0, md_ini)
+            tvd_seg = np.insert(tvd_seg, 0, tvd_i)
+            hd_seg = np.insert(hd_seg, 0, hd_i)
+
+        if not np.isclose(md_seg[-1], md_fim):
+            md_seg = np.append(md_seg, md_fim)
+            tvd_seg = np.append(tvd_seg, tvd_f)
+            hd_seg = np.append(hd_seg, hd_f)
+
+        return hd_seg, tvd_seg, md_seg
+    def _normalizar_eventos(df_eventos, origem="Excel"):
+        if not isinstance(df_eventos, pd.DataFrame) or df_eventos.empty:
+            return pd.DataFrame(columns=[
+                "Origem",
+                "Evento",
+                "MD Inicial",
+                "MD Final",
+                "Comentário",
+            ])
+
+        df = df_eventos.copy()
+        df.columns = [str(c).strip() for c in df.columns]
+
+        for col in ["Evento", "MD Inicial", "MD Final", "Comentário"]:
+            if col not in df.columns:
+                df[col] = "" if col in ["Evento", "Comentário"] else np.nan
+
+        df = df[["Evento", "MD Inicial", "MD Final", "Comentário"]].copy()
+
+        df["Origem"] = origem
+
+        df["Evento"] = (
+            df["Evento"]
+            .astype("string")
+            .fillna("")
+            .str.strip()
+            .str.replace(r"[,\.:]+$", "", regex=True)
+        )
+
+        df["Comentário"] = (
+            df["Comentário"]
+            .astype("string")
+            .fillna("")
+            .str.strip()
+        )
+
+        df["MD Inicial"] = pd.to_numeric(df["MD Inicial"], errors="coerce")
+        df["MD Final"] = pd.to_numeric(df["MD Final"], errors="coerce")
+
+        df = df.dropna(subset=["MD Inicial"])
+        df = df[df["Evento"] != ""].copy()
+
+        return df[[
+            "Origem",
+            "Evento",
+            "MD Inicial",
+            "MD Final",
+            "Comentário",
+        ]].reset_index(drop=True)
+    def _obter_litologia_anotacoes(base_final):
+        poco = {}
+
+        if isinstance(st.session_state.get("pocos"), dict):
+            poco = st.session_state.pocos.get(poco_atual, {})
+
+        profundidades = poco.get("profundidade", [])
+        litologias = poco.get("litologia", [])
+
+        if profundidades and litologias:
+            return profundidades, litologias
+
+        df_perm = st.session_state.get("df_perm_nao_perm", pd.DataFrame())
+
+        if isinstance(df_perm, pd.DataFrame) and not df_perm.empty:
+            if {"Topo (m)", "Classificação"}.issubset(df_perm.columns):
+                profundidades = (
+                    pd.to_numeric(df_perm["Topo (m)"], errors="coerce")
+                    .dropna()
+                    .astype(float)
+                    .tolist()
+                )
+
+                litologias = df_perm["Classificação"].astype(str).tolist()
+
+                if profundidades and litologias:
+                    return profundidades, litologias
+
+        return [0.0], ["Fm. Permeável"]
+    def _paleta_lito_plotly():
+        return {
+            "Água": {"bg": "#bfefff", "simbol": None},
+            "Argilito": {"bg": "#9ACD32", "simbol": "|"},
+            "Folhelho": {"bg": "#2f4f4f", "simbol": "-"},
+            "Siltito": {"bg": "#A67B5B", "simbol": "-"},
+            "Arenito": {"bg": "#FFD580", "simbol": "."},
+            "Fm. Permeável": {"bg": "#FFD580", "simbol": "."},
+            "Diamictito": {"bg": "#E97451", "simbol": "."},
+            "Conglomerado": {"bg": "#CD853F", "simbol": "."},
+            "Calcário": {"bg": "#B0C4DE", "simbol": "."},
+            "Carbonato": {"bg": "#cfe8f3", "simbol": "x"},
+            "Calcilutito": {"bg": "#C9B7D8", "simbol": "-"},
+            "Margas": {"bg": "#C7D4B5", "simbol": "\\"},
+            "Calcissiltito": {"bg": "#D8BFD8", "simbol": "."},
+            "Anidrita / Gipsita": {"bg": "#E6E6FA", "simbol": "/"},
+            "Halita": {"bg": "#FFFFFF", "simbol": "."},
+            "Calcarenito": {"bg": "#F5DEB3", "simbol": "."},
+            "Calcirrudito": {"bg": "#4682B4", "simbol": "."},
+            "Coquina": {"bg": "#FFDEAD", "simbol": "."},
+            "Dolomito": {"bg": "#C2B280", "simbol": "x"},
+            "Basalto": {"bg": "#2F4F4F", "simbol": "+"},
+            "Diabásio": {"bg": "#556B2F", "simbol": "."},
+        }
+    def _add_lito_track_plotly(fig, profundidades, litologias, base_final, show_labels=True):
+        paleta = _paleta_lito_plotly()
+
+        for i in range(len(profundidades)):
+            z_top = float(profundidades[i])
+
+            if i < len(profundidades) - 1:
+                z_base = float(profundidades[i + 1])
+            else:
+                z_base = float(base_final)
+
+            if z_base <= z_top:
+                continue
+
+            lit = str(litologias[i])
+            estilo = paleta.get(lit, {"bg": "#CCCCCC", "simbol": "."})
+
+            trace_kwargs = dict(
+                x=[0, 1, 1, 0, 0],
+                y=[z_top, z_top, z_base, z_base, z_top],
+                fill="toself",
+                mode="lines",
+                line=dict(color="black", width=1),
+                showlegend=False,
+                hoverinfo="skip",
+            )
+
+            if estilo.get("simbol") is None:
+                trace_kwargs["fillcolor"] = estilo["bg"]
+            else:
+                trace_kwargs["fillpattern"] = dict(
+                    shape=estilo["simbol"],
+                    fgcolor="black",
+                    bgcolor=estilo["bg"],
+                    size=4,
+                    solidity=0.05,
+                )
+
+            fig.add_trace(
+                go.Scatter(**trace_kwargs),
+                row=1,
+                col=1,
+            )
+
+            if show_labels:
+                altura_intervalo = abs(z_base - z_top)
+
+                if altura_intervalo >= 30:
+                    font_size = 11
+                elif altura_intervalo >= 15:
+                    font_size = 10
+                elif altura_intervalo >= 8:
+                    font_size = 9
+                else:
+                    font_size = 8
+
+                if altura_intervalo >= 6:
+                    fig.add_annotation(
+                        x=0.5,
+                        y=(z_top + z_base) / 2,
+                        text=lit,
+                        showarrow=False,
+                        xanchor="center",
+                        yanchor="middle",
+                        font=dict(size=font_size, color="black"),
+                        align="center",
+                        row=1,
+                        col=1,
+                    )
+    def _calcular_eventos(df_traj, df_eventos_total):
+        rows = []
+        linhas_com_erro = []
+        avisos = []
+
+        if not isinstance(df_eventos_total, pd.DataFrame) or df_eventos_total.empty:
+            return pd.DataFrame(columns=[
+                "Tipo",
+                "Origem",
+                "MD Inicial",
+                "MD Final",
+                "TVD Inicial",
+                "TVD Final",
+                "HD Inicial",
+                "HD Final",
+                "Evento",
+                "Comentário",
+                "_cor_plot",
+                "_simbolo",
+            ]), linhas_com_erro, avisos
+
+        for idx, r in df_eventos_total.iterrows():
+            try:
+                md_i = float(r["MD Inicial"])
+                md_f = r.get("MD Final", np.nan)
+                evento = str(r.get("Evento", "")).strip()
+                origem = str(r.get("Origem", "")).strip()
+                comentario = str(r.get("Comentário", "")).strip()
+
+                if evento not in MAPA_EVENTO_ESTILO:
+                    avisos.append({
+                        "Linha": idx + 1,
+                        "Origem": origem,
+                        "Evento": evento,
+                        "Aviso": "Evento não cadastrado no mapa de estilos. Será usado estilo padrão.",
+                    })
+
+                estilo = MAPA_EVENTO_ESTILO.get(
+                    evento,
+                    {"cor": "red", "simbolo": "diamond"}
+                )
+
+                cor_plot = estilo["cor"]
+                simbolo = estilo["simbolo"]
+
+                if pd.isna(md_f):
+                    tvd_i, hd_i = _interp_em_md(df_traj, md_i)
+
+                    rows.append({
+                        "Tipo": "Ponto",
+                        "Origem": origem,
+                        "MD Inicial": md_i,
+                        "MD Final": np.nan,
+                        "TVD Inicial": tvd_i,
+                        "TVD Final": np.nan,
+                        "HD Inicial": hd_i,
+                        "HD Final": np.nan,
+                        "Evento": evento,
+                        "Comentário": comentario,
+                        "_cor_plot": cor_plot,
+                        "_simbolo": simbolo,
+                    })
+
+                else:
+                    md_f = float(md_f)
+
+                    if md_f < md_i:
+                        avisos.append({
+                            "Linha": idx + 1,
+                            "Origem": origem,
+                            "Evento": evento,
+                            "Aviso": "MD Final menor que MD Inicial. O trecho foi invertido automaticamente.",
+                        })
+
+                    md_a, md_b = (md_i, md_f) if md_f >= md_i else (md_f, md_i)
+
+                    tvd_a, hd_a = _interp_em_md(df_traj, md_a)
+                    tvd_b, hd_b = _interp_em_md(df_traj, md_b)
+
+                    rows.append({
+                        "Tipo": "Trecho",
+                        "Origem": origem,
+                        "MD Inicial": md_a,
+                        "MD Final": md_b,
+                        "TVD Inicial": tvd_a,
+                        "TVD Final": tvd_b,
+                        "HD Inicial": hd_a,
+                        "HD Final": hd_b,
+                        "Evento": evento,
+                        "Comentário": comentario,
+                        "_cor_plot": cor_plot,
+                        "_simbolo": simbolo,
+                    })
+
+            except Exception as e:
+                linhas_com_erro.append({
+                    "Linha": idx + 1,
+                    "Origem": r.get("Origem", ""),
+                    "MD Inicial": r.get("MD Inicial", np.nan),
+                    "MD Final": r.get("MD Final", np.nan),
+                    "Evento": r.get("Evento", ""),
+                    "Erro": str(e),
+                })
+
+        df_calc = pd.DataFrame(rows)
+
+        if not df_calc.empty:
+            df_calc = (
+                df_calc
+                .sort_values(["Tipo", "MD Inicial"])
+                .reset_index(drop=True)
+            )
+
+        return df_calc, linhas_com_erro, avisos
+    def _plotar_trajetoria_2d(df_traj, df_notes, eventos_plotar):
+        hd_traj = df_traj["Afastamento Horizontal (m)"].to_numpy(dtype=float)
+        tvd_traj = df_traj["TVD"].to_numpy(dtype=float)
+
+        hd_min = float(np.nanmin(hd_traj)) if len(hd_traj) else 0.0
+        hd_max = float(np.nanmax(hd_traj)) if len(hd_traj) else 0.0
+        hd_span = max(hd_max - hd_min, 1.0)
+
+        margem_traj = max(10.0, 0.03 * hd_span)
+        x_left_traj = hd_min - margem_traj
+        x_right_traj = hd_max + margem_traj
+
+        tvd_max = float(np.nanmax(tvd_traj)) if len(tvd_traj) else 1000.0
+        base_final = float(st.session_state.get("y_max_pp", tvd_max))
+
+        if not np.isfinite(base_final) or base_final <= 0:
+            base_final = tvd_max
+
+        altura_fig = int(min(1400, max(700, 0.10 * base_final)))
+
+        fig2d = make_subplots(
+            rows=1,
+            cols=2,
+            shared_yaxes=True,
+            horizontal_spacing=0.03,
+            column_widths=[0.20, 0.80],
+        )
+
+        profundidades, litologias = _obter_litologia_anotacoes(base_final)
+
+        _add_lito_track_plotly(
+            fig2d,
+            profundidades=profundidades,
+            litologias=litologias,
+            base_final=base_final,
+            show_labels=True,
+        )
+
+        fig2d.add_trace(
+            go.Scatter(
+                x=hd_traj,
+                y=tvd_traj,
+                mode="lines",
+                line=dict(color="red", width=4),
+                name="Trajetória",
+                showlegend=False,
+            ),
+            row=1,
+            col=2,
+        )
+
+        if isinstance(df_notes, pd.DataFrame) and not df_notes.empty:
+            df_plot = df_notes[df_notes["Evento"].isin(eventos_plotar)].copy()
+
+            df_trechos = df_plot[df_plot["Tipo"] == "Trecho"].copy()
+
+            for _, r in df_trechos.iterrows():
+                cor_plot = r["_cor_plot"]
+                simbolo = r["_simbolo"]
+
+                md_a = float(r["MD Inicial"])
+                md_b = float(r["MD Final"])
+
+                try:
+                    hd_seg, tvd_seg, md_seg = _segmento_traj_por_md(
+                        df_traj,
+                        md_a,
+                        md_b
+                    )
+
+                    fig2d.add_trace(
+                        go.Scatter(
+                            x=hd_seg,
+                            y=tvd_seg,
+                            mode="lines",
+                            line=dict(width=6, color=cor_plot),
+                            showlegend=False,
+                            hovertemplate=(
+                                "Trecho<br>"
+                                f"Evento: {r['Evento']}<br>"
+                                f"Origem: {r.get('Origem', '')}<br>"
+                                "MD: %{customdata[0]:.1f} m<br>"
+                                "TVD: %{y:.1f} m<br>"
+                                "HD: %{x:.1f} m<extra></extra>"
+                            ),
+                            customdata=np.c_[md_seg],
+                        ),
+                        row=1,
+                        col=2,
+                    )
+
+                    md_centro = (md_a + md_b) / 2.0
+                    tvd_centro, hd_centro = _interp_em_md(df_traj, md_centro)
+
+                    fig2d.add_trace(
+                        go.Scatter(
+                            x=[hd_centro],
+                            y=[tvd_centro],
+                            mode="markers",
+                            marker=dict(
+                                size=14,
+                                color=cor_plot,
+                                symbol=simbolo,
+                                line=dict(color="black", width=1.5),
+                            ),
+                            showlegend=False,
+                            hovertemplate=(
+                                "Trecho<br>"
+                                f"Evento: {r['Evento']}<br>"
+                                f"Origem: {r.get('Origem', '')}<br>"
+                                f"MD inicial: {md_a:.1f} m<br>"
+                                f"MD final: {md_b:.1f} m<br>"
+                                f"MD centro: {md_centro:.1f} m<br>"
+                                f"TVD centro: {tvd_centro:.1f} m<br>"
+                                f"HD centro: {hd_centro:.1f} m<extra></extra>"
+                            ),
+                        ),
+                        row=1,
+                        col=2,
+                    )
+
+                except Exception as e:
+                    st.warning(f"Erro ao plotar trecho {r.get('Evento', '')}: {e}")
+
+            df_pontos = df_plot[df_plot["Tipo"] == "Ponto"].copy()
+
+            for _, r in df_pontos.iterrows():
+                cor_plot = r["_cor_plot"]
+                simbolo = r["_simbolo"]
+
+                fig2d.add_trace(
+                    go.Scatter(
+                        x=[float(r["HD Inicial"])],
+                        y=[float(r["TVD Inicial"])],
+                        mode="markers",
+                        marker=dict(
+                            size=12,
+                            color=cor_plot,
+                            symbol=simbolo,
+                            line=dict(color="black", width=1.5),
+                        ),
+                        showlegend=False,
+                        hovertemplate=(
+                            "Ponto<br>"
+                            f"Evento: {r['Evento']}<br>"
+                            f"Origem: {r.get('Origem', '')}<br>"
+                            f"MD: {float(r['MD Inicial']):.1f} m<br>"
+                            f"TVD: {float(r['TVD Inicial']):.1f} m<br>"
+                            f"HD: {float(r['HD Inicial']):.1f} m<extra></extra>"
+                        ),
+                    ),
+                    row=1,
+                    col=2,
+                )
+
+            eventos_unicos = [
+                e for e in df_plot["Evento"].dropna().astype(str).unique().tolist()
+                if e in MAPA_EVENTO_ESTILO
+            ]
+
+            for evento in eventos_unicos:
+                estilo = MAPA_EVENTO_ESTILO[evento]
+
+                fig2d.add_trace(
+                    go.Scatter(
+                        x=[None],
+                        y=[None],
+                        mode="markers",
+                        name=evento,
+                        showlegend=True,
+                        marker=dict(
+                            size=12,
+                            symbol=estilo["simbolo"],
+                            color=estilo["cor"],
+                            line=dict(color="black", width=1.5),
+                        ),
+                        hoverinfo="skip",
+                    ),
+                    row=1,
+                    col=2,
+                )
+
+        # Rig no topo, caso exista o arquivo
+        if os.path.exists("rig_t.png"):
+            try:
+                rig_sizex = max(150.0, 0.06 * hd_span)
+                rig_sizey = max(190.0, 0.06 * hd_span)
+                rig_img = Image.open("rig_t.png")
+
+                fig2d.add_layout_image(
+                    dict(
+                        source=rig_img,
+                        xref="x2",
+                        yref="y2",
+                        x=0,
+                        y=0,
+                        sizex=rig_sizex,
+                        sizey=rig_sizey,
+                        xanchor="center",
+                        yanchor="bottom",
+                        layer="above",
+                    )
+                )
+            except Exception:
+                pass
+
+        # ========================================================
+        # Sapatas com OD em fração e cards visíveis
+        # ========================================================
+        sapatas_df = st.session_state.get("sapatas_df", pd.DataFrame())
+
+        if isinstance(sapatas_df, pd.DataFrame) and not sapatas_df.empty:
+            sapatas_df_plot = sapatas_df.copy()
+
+            if "Profundidade da sapata (m)" in sapatas_df_plot.columns:
+                sapatas_df_plot["Profundidade da sapata (m)"] = pd.to_numeric(
+                    sapatas_df_plot["Profundidade da sapata (m)"],
+                    errors="coerce"
+                )
+
+            sapatas_df_plot = sapatas_df_plot.dropna(
+                subset=["Profundidade da sapata (m)"]
+            )
+
+            sapatas_df_plot = sapatas_df_plot[
+                sapatas_df_plot["Profundidade da sapata (m)"] > 0
+                ].copy()
+
+            if "Ordem" in sapatas_df_plot.columns:
+                sapatas_df_plot = sapatas_df_plot.sort_values("Ordem")
+            else:
+                sapatas_df_plot = sapatas_df_plot.sort_values("Profundidade da sapata (m)")
+
+            tvd_ordem = np.argsort(tvd_traj)
+            tvd_ref = tvd_traj[tvd_ordem]
+            hd_ref = hd_traj[tvd_ordem]
+
+            sapatas_plot = []
+
+            for _, row in sapatas_df_plot.iterrows():
+                prof_sapata = row.get("Profundidade da sapata (m)", None)
+                fase = row.get("Fase", "")
+
+                if prof_sapata is None or pd.isna(prof_sapata):
+                    continue
+
+                prof_sapata = float(prof_sapata)
+
+                if prof_sapata < tvd_ref.min() or prof_sapata > tvd_ref.max():
+                    continue
+
+                x_sapata = float(np.interp(prof_sapata, tvd_ref, hd_ref))
+                fase_fmt = _fmt_od_sapata_anotacoes(fase)
+
+                sapatas_plot.append({
+                    "prof": prof_sapata,
+                    "fase": fase_fmt,
+                    "fase_raw": fase,
+                    "x": x_sapata,
+                })
+
+            sapatas_plot = sorted(sapatas_plot, key=lambda s: s["prof"])
+
+            cores_sapatas = [
+                "#111827",
+                "#1f77b4",
+                "#2ca02c",
+                "#ff7f0e",
+                "#d62728",
+                "#9467bd",
+                "#8c564b",
+                "#e377c2",
+            ]
+
+            for i, s in enumerate(sapatas_plot):
+                prof_sapata = float(s["prof"])
+                fase = s["fase"]
+                x_sapata = float(s["x"])
+                cor_sapata = cores_sapatas[i % len(cores_sapatas)]
+
+                nome_sapata = (
+                    f"Sapata {fase}"
+                    if str(fase).strip() not in ["", "—", "nan", "None"]
+                    else "Sapata"
+                )
+
+                texto_sapata = (
+                    f"{nome_sapata}<br>"
+                    f"{prof_sapata:.0f} m (TVD)"
+                )
+
+                fig2d.add_trace(
+                    go.Scatter(
+                        x=[x_left_traj, x_right_traj],
+                        y=[prof_sapata, prof_sapata],
+                        mode="lines",
+                        line=dict(
+                            color=cor_sapata,
+                            width=1.5,
+                            dash="dot",
+                        ),
+                        opacity=0.45,
+                        showlegend=False,
+                        hoverinfo="skip",
+                    ),
+                    row=1,
+                    col=2,
+                )
+
+                desloc_x = 0.06 * hd_span
+
+                x_texto = x_sapata + desloc_x if i % 2 == 0 else x_sapata - desloc_x
+                anchor_x = "left" if i % 2 == 0 else "right"
+                ax_seta = 35 if i % 2 == 0 else -35
+
+                margem_label = 0.025 * hd_span
+                limite_esquerdo_label = x_left_traj + margem_label
+                limite_direito_label = x_right_traj - margem_label
+
+                if x_texto < limite_esquerdo_label:
+                    x_texto = min(x_sapata + desloc_x, limite_direito_label)
+                    anchor_x = "left"
+                    ax_seta = 35
+
+                elif x_texto > limite_direito_label:
+                    x_texto = max(x_sapata - desloc_x, limite_esquerdo_label)
+                    anchor_x = "right"
+                    ax_seta = -35
+
+                fig2d.add_annotation(
+                    x=x_texto,
+                    y=prof_sapata,
+                    text=texto_sapata,
+                    showarrow=True,
+                    arrowhead=2,
+                    arrowsize=1,
+                    arrowwidth=1.2,
+                    arrowcolor="black",
+                    ax=ax_seta,
+                    ay=0,
+                    xanchor=anchor_x,
+                    yanchor="middle",
+                    align="center",
+                    font=dict(
+                        size=11,
+                        color="black",
+                    ),
+                    bgcolor="rgba(255,255,255,0.90)",
+                    bordercolor="black",
+                    borderwidth=1,
+                    borderpad=3,
+                    row=1,
+                    col=2,
+                )
+
+        fig2d.update_layout(
+            height=altura_fig,
+            margin=dict(l=100, r=120, t=80, b=100),
+            showlegend=True,
+            legend=dict(
+                orientation="v",
+                yanchor="top",
+                y=1,
+                xanchor="left",
+                x=1.02,
+            ),
+        )
+
+        fig2d.update_xaxes(
+            range=[0, 1],
+            visible=False,
+            row=1,
+            col=1,
+        )
+
+        fig2d.update_xaxes(
+            title_text="Afastamento Horizontal (m)",
+            title_standoff=25,
+            automargin=True,
+            tickfont=dict(size=10),
+            range=[x_left_traj, x_right_traj],
+            row=1,
+            col=2,
+        )
+
+        fig2d.update_yaxes(
+            title_text="TVD (m)",
+            title_standoff=25,
+            automargin=True,
+            tickfont=dict(size=10),
+            autorange="reversed",
+            row=1,
+            col=1,
+        )
+
+        fig2d.update_yaxes(
+            title_standoff=25,
+            automargin=True,
+            tickfont=dict(size=10),
+            autorange="reversed",
+            row=1,
+            col=2,
+        )
+
+        return fig2d
+    # ============================================================
+    # Preparação dos dados
+    # ============================================================
+    df_traj = _preparar_df_traj_anotacoes()
+
+    df_eventos_excel = _normalizar_eventos(
+        st.session_state.get("df_eventos", pd.DataFrame()),
+        origem="Excel"
+    )
+
+    df_eventos_manuais_base = st.session_state.get(
+        "df_eventos_manuais",
+        _criar_df_eventos_manuais_vazio()
+    )
+
+    df_eventos_manuais_base = _corrigir_tipos_df_eventos_manuais(
+        df_eventos_manuais_base
+    )
+
+    st.session_state.df_eventos_manuais = df_eventos_manuais_base.copy()
+
+    df_eventos_manuais = _normalizar_eventos(
+        df_eventos_manuais_base,
+        origem="Manual"
+    )
+
+    df_eventos_total = pd.concat(
+        [df_eventos_excel, df_eventos_manuais],
+        ignore_index=True
+    )
+
+    eventos_existentes = (
+        sorted(df_eventos_total["Evento"].dropna().astype(str).unique().tolist())
+        if not df_eventos_total.empty
+        else []
+    )
+
+    eventos_default = [
+        e for e in eventos_existentes
+        if e in EVENTOS
+    ]
+
+    if not eventos_default and eventos_existentes:
+        eventos_default = eventos_existentes
+
+    if "eventos_anotacoes_visiveis" not in st.session_state:
+        st.session_state.eventos_anotacoes_visiveis = eventos_default
+
+    eventos_visiveis_validos = [
+        e for e in st.session_state.eventos_anotacoes_visiveis
+        if e in eventos_existentes
+    ]
+
+    if eventos_existentes and not eventos_visiveis_validos:
+        eventos_visiveis_validos = eventos_default
+
+    st.session_state.eventos_anotacoes_visiveis = eventos_visiveis_validos
+
+    if "_w_eventos_anotacoes_visiveis" not in st.session_state:
+        st.session_state["_w_eventos_anotacoes_visiveis"] = (
+            st.session_state.eventos_anotacoes_visiveis.copy()
+            if isinstance(st.session_state.eventos_anotacoes_visiveis, list)
+            else []
+        )
+
+    st.session_state["_w_eventos_anotacoes_visiveis"] = [
+        e for e in st.session_state["_w_eventos_anotacoes_visiveis"]
+        if e in eventos_existentes
+    ]
+
+    if eventos_existentes and not st.session_state["_w_eventos_anotacoes_visiveis"]:
+        st.session_state["_w_eventos_anotacoes_visiveis"] = (
+            st.session_state.eventos_anotacoes_visiveis.copy()
+            if isinstance(st.session_state.eventos_anotacoes_visiveis, list)
+            else eventos_default
+        )
+
+    if isinstance(df_traj, pd.DataFrame) and not df_traj.empty:
+        df_calc, linhas_com_erro, avisos_eventos = _calcular_eventos(
+            df_traj,
+            df_eventos_total
+        )
+    else:
+        df_calc = pd.DataFrame(columns=[
+            "Tipo",
+            "Origem",
+            "MD Inicial",
+            "MD Final",
+            "TVD Inicial",
+            "TVD Final",
+            "HD Inicial",
+            "HD Final",
+            "Evento",
+            "Comentário",
+            "_cor_plot",
+            "_simbolo",
+        ])
+        linhas_com_erro = []
+        avisos_eventos = []
+
+    st.session_state.traj_marks_calc = df_calc
+
+    # ============================================================
+    # Subabas
+    # ============================================================
+    tab_traj, tab_eventos, tab_anotacoes, tab_validacao = st.tabs([
+        "Trajetória 2D",
+        "Eventos",
+        "Anotações",
+        "Validação",
+    ])
+
+    # ============================================================
+    # Aba: Trajetória 2D
+    # ============================================================
+    with tab_traj:
         with st.container(border=True):
+            st.markdown("### Trajetória 2D com Eventos Operacionais")
+
+            if not isinstance(df_traj, pd.DataFrame) or df_traj.empty:
+                st.info("A trajetória ainda não foi calculada ou carregada.")
+            else:
+                if eventos_existentes:
+                    with st.form("form_eventos_anotacoes_visiveis", clear_on_submit=False):
+                        st.multiselect(
+                            "Eventos para exibir",
+                            options=eventos_existentes,
+                            key="_w_eventos_anotacoes_visiveis",
+                        )
+
+                        aplicar_filtro_eventos = st.form_submit_button(
+                            "Aplicar filtro",
+                            use_container_width=True,
+                            type="primary",
+                        )
+
+                    if aplicar_filtro_eventos:
+                        st.session_state.eventos_anotacoes_visiveis = (
+                            st.session_state.get("_w_eventos_anotacoes_visiveis", []).copy()
+                        )
+
+                else:
+                    st.info(
+                        "Nenhum evento encontrado. O gráfico será exibido apenas com trajetória, litologia e sapatas.")
+
+                eventos_plotar = st.session_state.get("eventos_anotacoes_visiveis", [])
+
+                fig2d = _plotar_trajetoria_2d(
+                    df_traj=df_traj,
+                    df_notes=df_calc,
+                    eventos_plotar=eventos_plotar,
+                )
+
+                st.session_state.fig2d = fig2d
+
+                st.plotly_chart(
+                    fig2d,
+                    use_container_width=True,
+                )
+
+    # ============================================================
+    # Aba: Eventos
+    # ============================================================
+    with tab_eventos:
+        col_e1, col_e2 = st.columns(2)
+
+        with col_e1:
+            with st.container(border=True):
+                st.markdown("### Eventos importados do Excel")
+
+                if isinstance(df_eventos_excel, pd.DataFrame) and not df_eventos_excel.empty:
+                    st.dataframe(
+                        df_eventos_excel,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.info("Nenhum evento encontrado na aba **Eventos** do Excel.")
+
+        with col_e2:
+            with st.container(border=True):
+                st.markdown("### Eventos manuais")
+
+                st.session_state.df_eventos_manuais = _corrigir_tipos_df_eventos_manuais(
+                    st.session_state.df_eventos_manuais
+                )
+
+                eventos_manuais_editados = st.data_editor(
+                    st.session_state.df_eventos_manuais,
+                    num_rows="dynamic",
+                    use_container_width=True,
+                    hide_index=True,
+                    key="eventos_manuais_editor_v3",
+                    column_config={
+                        "Evento": st.column_config.SelectboxColumn(
+                            "Evento",
+                            options=EVENTOS,
+                            required=False,
+                        ),
+                        "MD Inicial": st.column_config.NumberColumn(
+                            "MD Inicial",
+                            format="%.2f",
+                        ),
+                        "MD Final": st.column_config.NumberColumn(
+                            "MD Final",
+                            format="%.2f",
+                            help="Deixe vazio para evento pontual.",
+                        ),
+                        "Comentário": st.column_config.TextColumn(
+                            "Comentário",
+                        ),
+                    },
+                )
+
+                col_btn_1, col_btn_2 = st.columns(2)
+
+                with col_btn_1:
+                    if st.button(
+                            "💾 Salvar eventos manuais",
+                            use_container_width=True,
+                            type="primary",
+                    ):
+                        eventos_manuais_salvar = _corrigir_tipos_df_eventos_manuais(
+                            eventos_manuais_editados
+                        )
+
+                        st.session_state.df_eventos_manuais = eventos_manuais_salvar.copy()
+
+                        st.toast("Eventos manuais salvos.")
+                        st.rerun()
+
+                with col_btn_2:
+                    if st.button(
+                            "🗑️ Limpar eventos manuais",
+                            use_container_width=True,
+                    ):
+                        st.session_state.df_eventos_manuais = _criar_df_eventos_manuais_vazio()
+
+                        if "eventos_manuais_editor_v3" in st.session_state:
+                            del st.session_state["eventos_manuais_editor_v3"]
+
+                        st.rerun()
+
+        with st.container(border=True):
+            st.markdown("### Eventos catalogados")
+
+            if isinstance(df_calc, pd.DataFrame) and not df_calc.empty:
+                colunas_visiveis = [
+                    "Origem",
+                    "Tipo",
+                    "Evento",
+                    "MD Inicial",
+                    "MD Final",
+                    "TVD Inicial",
+                    "TVD Final",
+                    "HD Inicial",
+                    "HD Final",
+                    "Comentário",
+                ]
+
+                colunas_visiveis = [
+                    col for col in colunas_visiveis
+                    if col in df_calc.columns
+                ]
+
+                st.dataframe(
+                    df_calc[colunas_visiveis],
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.info("Nenhum evento catalogado.")
+
+    # ============================================================
+    # Aba: Anotações
+    # ============================================================
+    with tab_anotacoes:
+        with st.container(border=True):
+            st.markdown(f"### Anotações do poço: **{poco_atual}**")
+
+            texto_atual = st.session_state.anotacoes_por_poco.get(poco_atual, "")
+
+            anotacoes_editadas = st.text_area(
+                "Registre aqui observações, decisões e pendências do estudo:",
+                value=texto_atual,
+                height=320,
+                placeholder=(
+                    "Ex.: Ajustar coesão na formação X; revisar LOT do poço Y; "
+                    "confirmar densidade do fluido na fase Z..."
+                ),
+                key=f"anotacoes_text_area_{poco_atual}",
+            )
+
+            col_a1, col_a2, col_a3 = st.columns(3)
+
+            with col_a1:
+                if st.button(
+                        "💾 Salvar anotações",
+                        use_container_width=True,
+                        type="primary",
+                ):
+                    st.session_state.anotacoes_por_poco[poco_atual] = anotacoes_editadas
+                    st.session_state.anotacoes = anotacoes_editadas
+                    st.toast("Anotações salvas.")
+
+            with col_a2:
+                if st.button(
+                        "🗑️ Limpar anotações",
+                        use_container_width=True,
+                ):
+                    st.session_state.anotacoes_por_poco[poco_atual] = ""
+                    st.session_state.anotacoes = ""
+                    st.rerun()
+
+            with col_a3:
+                if st.button(
+                        "📌 Usar no relatório",
+                        use_container_width=True,
+                ):
+                    st.session_state.anotacoes_por_poco[poco_atual] = anotacoes_editadas
+                    st.session_state.anotacoes = anotacoes_editadas
+                    st.toast("Anotações atualizadas para o relatório.")
+
+            st.markdown("#### Prévia")
+
+            if anotacoes_editadas.strip():
+                st.markdown(anotacoes_editadas)
+            else:
+                st.info("Nenhuma anotação registrada para este poço.")
+
+    # ============================================================
+    # Aba: Validação
+    # ============================================================
+    with tab_validacao:
+        with st.container(border=True):
+            st.markdown("### Validação dos dados")
+
+            problemas_gerais = []
+
+            if not isinstance(df_traj, pd.DataFrame) or df_traj.empty:
+                problemas_gerais.append("Trajetória não encontrada ou vazia.")
+
+            if isinstance(df_traj, pd.DataFrame) and not df_traj.empty:
+                for col in ["MD", "TVD", "Afastamento Horizontal (m)"]:
+                    if col not in df_traj.columns:
+                        problemas_gerais.append(f"Coluna ausente na trajetória: {col}")
+
+            if not isinstance(df_eventos_total, pd.DataFrame) or df_eventos_total.empty:
+                problemas_gerais.append("Nenhum evento importado ou manual informado.")
+
+            if problemas_gerais:
+                st.warning("Foram encontrados pontos de atenção gerais:")
+
+                st.dataframe(
+                    pd.DataFrame({"Problema": problemas_gerais}),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.success("Dados gerais da aba de anotações estão consistentes.")
+
+        with st.container(border=True):
+            st.markdown("### Avisos de eventos")
+
+            if avisos_eventos:
+                st.dataframe(
+                    pd.DataFrame(avisos_eventos),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.success("Nenhum aviso de evento.")
+
+        with st.container(border=True):
+            st.markdown("### Eventos ignorados / erros")
+
+            if linhas_com_erro:
+                st.dataframe(
+                    pd.DataFrame(linhas_com_erro),
+                    use_container_width=True,
+                    hide_index=True,
+                )
+            else:
+                st.success("Nenhum evento foi ignorado.")
+
+        with st.container(border=True):
+            st.markdown("### Dados usados no gráfico")
+
+            c1, c2 = st.columns(2)
+
+            with c1:
+                st.markdown("**Trajetória normalizada**")
+
+                if isinstance(df_traj, pd.DataFrame) and not df_traj.empty:
+                    st.dataframe(
+                        df_traj.head(200),
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.info("Trajetória indisponível.")
+
+            with c2:
+                st.markdown("**Eventos totais normalizados**")
+
+                if isinstance(df_eventos_total, pd.DataFrame) and not df_eventos_total.empty:
+                    st.dataframe(
+                        df_eventos_total,
+                        use_container_width=True,
+                        hide_index=True,
+                    )
+                else:
+                    st.info("Eventos indisponíveis.")
+
+
+def _fmt_polegada(v):
+    try:
+        if v is None or pd.isna(v):
+            return "—"
+        v = float(v)
+        if v.is_integer():
+            return f'{int(v)}"'
+        return f'{v:g}"'
+    except Exception:
+        return str(v)
+
+
+def _montar_paginas_fases(fases_df, sapatas_df):
+    """
+    Retorna uma lista de dicts, um por página.
+
+    Regras:
+    - associa por ordem
+    - se houver sapata correspondente:
+        'Fase de X, Revestimento de Y'
+    - se não houver:
+        'Fase de X, Poço aberto'
+    """
+    paginas = []
+
+    if fases_df is None or fases_df.empty:
+        return paginas
+
+    sap_map = {}
+    if sapatas_df is not None and not sapatas_df.empty:
+        for _, row in sapatas_df.iterrows():
+            ordem = int(row["Ordem"])
+            sap_map[ordem] = {
+                "fase_revestimento": row.get("Fase", None),
+                "prof_sapata": row.get("Profundidade da sapata (m)", None),
+            }
+
+    for _, row in fases_df.iterrows():
+        ordem = int(row["Ordem"])
+        fase_broca = row.get("Fase", None)
+
+        if ordem in sap_map:
+            fase_revest = sap_map[ordem]["fase_revestimento"]
+            prof_sapata = sap_map[ordem]["prof_sapata"]
+            titulo = f'Análise da Fase de {_fmt_polegada(fase_broca)}, Revestimento de {_fmt_polegada(fase_revest)}'
+        else:
+            fase_revest = None
+            prof_sapata = None
+            titulo = f'Fase de {_fmt_polegada(fase_broca)}, Poço aberto'
+
+        paginas.append({
+            "ordem": ordem,
+            "fase_broca": fase_broca,
+            "fase_revestimento": fase_revest,
+            "prof_sapata": prof_sapata,
+            "titulo": titulo,
+        })
+
+    return paginas
+
+
+def _to_num(s):
+    return pd.to_numeric(s, errors="coerce")
+
+
+def _fmt2(v, suf=""):
+    return f"{float(v):.2f}{suf}" if v is not None and pd.notna(v) else "—"
+
+
+def _filtrar_intervalo(df, col_prof, prof_ini, prof_fim, incluir_fim=False):
+    if df is None or df.empty or col_prof not in df.columns:
+        return pd.DataFrame()
+
+    s = pd.to_numeric(df[col_prof], errors="coerce")
+
+    if prof_ini is None or prof_fim is None or pd.isna(prof_ini) or pd.isna(prof_fim):
+        return pd.DataFrame()
+
+    if incluir_fim:
+        mask = (s >= float(prof_ini)) & (s <= float(prof_fim))
+    else:
+        mask = (s >= float(prof_ini)) & (s < float(prof_fim))
+
+    return df.loc[mask].copy()
+
+
+def _seg_contiguos(df_base, mask_bool, col_prof, col_exec, col_req):
+    segs = []
+    if df_base.empty:
+        return segs
+
+    mask = mask_bool.fillna(False).astype(bool).values
+    prof = df_base[col_prof].astype(float).values
+    execv = df_base[col_exec].astype(float).values
+    reqv = df_base[col_req].astype(float).values
+
+    i = 0
+    n = len(df_base)
+    while i < n:
+        if not mask[i]:
+            i += 1
+            continue
+
+        j = i
+        while j + 1 < n and mask[j + 1]:
+            j += 1
+
+        prof_ini = prof[i]
+        prof_fim = prof[j]
+
+        exec_seg = execv[i:j + 1]
+        req_seg = reqv[i:j + 1]
+
+        diffs = np.abs(req_seg - exec_seg)
+        if np.isfinite(diffs).any():
+            k_rel = int(np.nanargmax(diffs))
+            k_abs = i + k_rel
+            diff_max = float(np.nanmax(diffs))
+            prof_pior = float(prof[k_abs])
+        else:
+            diff_max = np.nan
+            prof_pior = np.nan
+
+        segs.append({
+            "pi": prof_ini,
+            "pf": prof_fim,
+            "prof_pior": prof_pior,
+            "exec_min": np.nanmin(exec_seg) if np.isfinite(exec_seg).any() else np.nan,
+            "exec_max": np.nanmax(exec_seg) if np.isfinite(exec_seg).any() else np.nan,
+            "req_min": np.nanmin(req_seg) if np.isfinite(req_seg).any() else np.nan,
+            "req_max": np.nanmax(req_seg) if np.isfinite(req_seg).any() else np.nan,
+            "diff_max": diff_max
+        })
+
+        i = j + 1
+
+    return segs
+
+
+def _draw_centered_text(c, x_center, y, text, font_name="Helvetica", font_size=9):
+    c.setFont(font_name, font_size)
+    tw = c.stringWidth(str(text), font_name, font_size)
+    c.drawString(x_center - tw / 2, y, str(text))
+
+
+def desenhar_mapa_folium_no_pdf(c, mapa_folium, left, right, top, bottom):
+    mapa_folium.save('filename.png')
+    if mapa_folium is None:
+        raise ValueError("Mapa Folium não informado.")
+
+    largura = right - left
+    altura = top - bottom
+
+    if largura <= 0 or altura <= 0:
+        raise ValueError("Área inválida para desenhar o mapa.")
+
+    try:
+        png_data = mapa_folium._to_png(2)
+    except Exception as e:
+        raise RuntimeError(
+            "Falha ao converter o mapa Folium para PNG. "
+            "O método _to_png depende de Selenium + Firefox headless + GeckoDriver. "
+            f"Erro original: {e}"
+        )
+
+    img = ImageReader(BytesIO(png_data))
+
+    c.drawImage(
+        img,
+        left,
+        bottom,
+        width=largura,
+        height=altura,
+        preserveAspectRatio=True,
+        mask='auto'
+    )
+
+
+def _unir_intervalos_mesmo_problema(subtrechos, tol=1e-9):
+    """
+    Une intervalos consecutivos/contíguos que possuem o mesmo tipo de problema.
+    Retorna lista no formato:
+    [
+        {"pi": ..., "pf": ..., "tipo": ...},
+        ...
+    ]
+    """
+    if not subtrechos:
+        return []
+
+    # ordena por profundidade inicial
+    itens = sorted(
+        [
+            {
+                "pi": float(x["pi"]),
+                "pf": float(x["pf"]),
+                "tipo": str(x["tipo"])
+            }
+            for x in subtrechos
+            if x.get("pi") is not None and x.get("pf") is not None
+        ],
+        key=lambda z: (z["pi"], z["pf"])
+    )
+
+    if not itens:
+        return []
+
+    unidos = [itens[0].copy()]
+
+    for atual in itens[1:]:
+        ultimo = unidos[-1]
+
+        mesmo_tipo = atual["tipo"] == ultimo["tipo"]
+        contiguo_ou_sobreposto = atual["pi"] <= (ultimo["pf"] + tol)
+
+        if mesmo_tipo and contiguo_ou_sobreposto:
+            ultimo["pf"] = max(ultimo["pf"], atual["pf"])
+        else:
+            unidos.append(atual.copy())
+
+    return unidos
+
+
+def _montar_interpretacoes_syga(sub_under, sub_over):
+    """
+    Agrupa os subtrechos por tipo de problema, mesmo que estejam em
+    profundidades separadas.
+
+    Retorna lista de dicts no formato:
+    [
+        {
+            "tipo": "...",
+            "intervalos": ["150.00 m–200.00 m", "350.00 m–400.00 m"],
+            "texto": "..."
+        },
+        ...
+    ]
+    """
+    todos = []
+
+    for item in (sub_under or []):
+        todos.append({
+            "pi": float(item["pi"]),
+            "pf": float(item["pf"]),
+            "tipo": str(item["tipo"])
+        })
+
+    for item in (sub_over or []):
+        todos.append({
+            "pi": float(item["pi"]),
+            "pf": float(item["pf"]),
+            "tipo": str(item["tipo"])
+        })
+
+    if not todos:
+        return []
+
+    # ordena por profundidade
+    todos = sorted(todos, key=lambda x: (x["pi"], x["pf"]))
+
+    agrupados = {}
+    ordem_tipos = []
+
+    for item in todos:
+        tipo = item["tipo"]
+        intervalo_txt = f'{_fmt2(item["pi"], " m")}–{_fmt2(item["pf"], " m")}'
+
+        if tipo not in agrupados:
+            agrupados[tipo] = []
+            ordem_tipos.append(tipo)
+
+        agrupados[tipo].append(intervalo_txt)
+
+    interpretacoes = []
+    for tipo in ordem_tipos:
+        interpretacoes.append({
+            "tipo": tipo,
+            "intervalos": agrupados[tipo],
+            "texto": f"[Texto para: {tipo}]"
+        })
+
+    return interpretacoes
+
+
+def _fmt_range_lbgal(vmin, vmax):
+    try:
+        vmin = float(vmin)
+        vmax = float(vmax)
+
+        if pd.isna(vmin) and pd.isna(vmax):
+            return "—"
+
+        if pd.isna(vmin):
+            return f"{vmax:.2f} lb/gal"
+
+        if pd.isna(vmax):
+            return f"{vmin:.2f} lb/gal"
+
+        if np.isclose(vmin, vmax, atol=1e-9):
+            return f"{vmin:.2f} lb/gal"
+
+        return f"{vmin:.2f}–{vmax:.2f} lb/gal"
+
+    except Exception:
+        return "—"
+
+
+def _desenhar_tabela_paginada(
+        c,
+        left_margin,
+        right_margin,
+        y_top,
+        titulo,
+        headers,
+        rows,
+        col_w,
+        footer_y=None,
+        nova_pagina_cb=None,
+        linha_altura=15,
+        header_h=18,
+):
+    """
+    Desenha tabela quebrando automaticamente em novas páginas.
+
+    nova_pagina_cb:
+        função criada dentro de _desenhar_pagina_fase.
+        Ela fecha a página atual, abre uma nova página e retorna o novo y.
+    """
+
+    if not rows:
+        return y_top
+
+    box_width = right_margin - left_margin
+    box_x = left_margin
+
+    pad_left = 6
+    pad_right = 6
+
+    inner_w = box_width - (pad_left + pad_right) * 2
+    widths = [inner_w * w for w in col_w]
+
+    x0 = box_x + pad_left
+    xs = [x0]
+
+    for w in widths:
+        xs.append(xs[-1] + w)
+
+    # Caso a função seja usada fora da análise por fase,
+    # mantém comportamento seguro sem quebra de página.
+    if footer_y is None or nova_pagina_cb is None:
+        footer_y = -10000
+        def nova_pagina_cb(y_atual, altura_necessaria=0, forcar=False):
+            return y_atual
+
+    page_bottom = footer_y + 35
+    min_table_height = 30 + header_h + linha_altura
+
+    i = 0
+    primeiro_bloco = True
+
+    while i < len(rows):
+        y_top = nova_pagina_cb(
+            y_top,
+            altura_necessaria=min_table_height,
+            forcar=False
+        )
+
+        altura_disponivel = y_top - page_bottom
+        max_rows = int((altura_disponivel - 30 - header_h) // linha_altura)
+
+        if max_rows < 1:
+            y_top = nova_pagina_cb(
+                y_top,
+                altura_necessaria=min_table_height,
+                forcar=True
+            )
+
+            altura_disponivel = y_top - page_bottom
+            max_rows = int((altura_disponivel - 30 - header_h) // linha_altura)
+
+            if max_rows < 1:
+                max_rows = 1
+
+        rows_bloco = rows[i:i + max_rows]
+
+        titulo_bloco = titulo if primeiro_bloco else f"{titulo} (continuação)"
+
+        box_height = 30 + header_h + len(rows_bloco) * linha_altura
+        box_y = y_top - box_height
+
+        c.setFillColorRGB(0.95, 0.95, 0.95)
+        c.rect(box_x, box_y, box_width, box_height, fill=1, stroke=0)
+
+        c.setStrokeColorRGB(0, 0, 0)
+        c.setLineWidth(0.8)
+        c.rect(box_x, box_y, box_width, box_height, fill=0, stroke=1)
+
+        c.line(
+            box_x,
+            box_y + box_height - 18,
+            box_x + box_width,
+            box_y + box_height - 18
+        )
+
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(
+            box_x + 10,
+            box_y + box_height - 14,
+            titulo_bloco
+        )
+
+        texto_y = box_y + box_height - 32
+
+        c.setLineWidth(0.5)
+        c.line(
+            box_x + 8,
+            texto_y - 4,
+            box_x + box_width - 8,
+            texto_y - 4
+        )
+
+        for j, htxt in enumerate(headers):
+            xc = (xs[j] + xs[j + 1]) / 2
+            _draw_centered_text(
+                c,
+                xc,
+                texto_y,
+                htxt,
+                font_name="Helvetica-Bold",
+                font_size=10
+            )
+
+        texto_y -= header_h
+
+        for row in rows_bloco:
+            for j, txt in enumerate(row):
+                xc = (xs[j] + xs[j + 1]) / 2
+                _draw_centered_text(
+                    c,
+                    xc,
+                    texto_y,
+                    txt,
+                    font_name="Helvetica",
+                    font_size=10
+                )
+
+            texto_y -= linha_altura
+
+        y_top = box_y - 14
+
+        i += len(rows_bloco)
+        primeiro_bloco = False
+
+        if i < len(rows):
+            y_top = nova_pagina_cb(
+                y_top,
+                altura_necessaria=min_table_height,
+                forcar=True
+            )
+
+    return y_top
+
+
+def desenhar_tabela_segmentos(
+        c,
+        left_margin,
+        right_margin,
+        y_top,
+        titulo,
+        segs,
+        col_balanco_label,
+        footer_y=None,
+        nova_pagina_cb=None
+):
+    if not segs:
+        return y_top
+
+    headers = [
+        "Prof. inicial",
+        "Prof. final",
+        "Peso aplicado",
+        "Limite requerido",
+        col_balanco_label
+    ]
+
+    rows = []
+
+    for seg in segs:
+        rows.append([
+            _fmt2(seg.get("pi"), " m"),
+            _fmt2(seg.get("pf"), " m"),
+            _fmt_range_lbgal(seg.get("exec_min"), seg.get("exec_max")),
+            _fmt_range_lbgal(seg.get("req_min"), seg.get("req_max")),
+            _fmt2(seg.get("diff_max"), " lb/gal")
+        ])
+
+    return _desenhar_tabela_paginada(
+        c=c,
+        left_margin=left_margin,
+        right_margin=right_margin,
+        y_top=y_top,
+        titulo=titulo,
+        headers=headers,
+        rows=rows,
+        col_w=[0.20, 0.20, 0.21, 0.21, 0.18],
+        footer_y=footer_y,
+        nova_pagina_cb=nova_pagina_cb,
+        linha_altura=15,
+        header_h=18
+    )
+
+
+def desenhar_tabela_falhas_quebrada(
+        c,
+        left_margin,
+        right_margin,
+        y_top,
+        titulo,
+        subtrechos,
+        footer_y=None,
+        nova_pagina_cb=None
+):
+    if not subtrechos:
+        return y_top
+
+    headers = [
+        "Prof. inicial",
+        "Prof. final",
+        "Tipo de falha"
+    ]
+
+    rows = []
+
+    for stc in subtrechos:
+        rows.append([
+            _fmt2(stc.get("pi"), " m"),
+            _fmt2(stc.get("pf"), " m"),
+            str(stc.get("tipo", "—"))
+        ])
+
+    return _desenhar_tabela_paginada(
+        c=c,
+        left_margin=left_margin,
+        right_margin=right_margin,
+        y_top=y_top,
+        titulo=titulo,
+        headers=headers,
+        rows=rows,
+        col_w=[0.25, 0.25, 0.50],
+        footer_y=footer_y,
+        nova_pagina_cb=nova_pagina_cb,
+        linha_altura=15,
+        header_h=18
+    )
+
+
+def desenhar_tabela_interpretacoes_syga(
+        c,
+        left_margin,
+        right_margin,
+        y_top,
+        interpretacoes,
+        footer_y=None,
+        nova_pagina_cb=None
+):
+    if not interpretacoes:
+        return y_top
+
+    headers = [
+        "Tipo de problema",
+        "Intervalo",
+        "Interpretação"
+    ]
+
+    rows = []
+
+    for item in interpretacoes:
+        tipo = str(item.get("tipo", "—"))
+        texto = str(item.get("texto", "—"))
+        intervalos = item.get("intervalos", [])
+
+        if not intervalos:
+            intervalos = ["—"]
+
+        for i, intervalo in enumerate(intervalos):
+            rows.append([
+                tipo if i == 0 else "",
+                str(intervalo),
+                texto if i == 0 else ""
+            ])
+
+    return _desenhar_tabela_paginada(
+        c=c,
+        left_margin=left_margin,
+        right_margin=right_margin,
+        y_top=y_top,
+        titulo="Interpretação SYGA",
+        headers=headers,
+        rows=rows,
+        col_w=[0.34, 0.28, 0.38],
+        footer_y=footer_y,
+        nova_pagina_cb=nova_pagina_cb,
+        linha_altura=15,
+        header_h=18
+    )
+
+
+def _desenhar_pagina_fase(c, width, height, logo, footer_y, titulo, fase_broca, fase_revestimento, prof_ini, prof_fim,
+                          df_cmp_global, draw_header, incluir_fim=False):
+    # -------------------------------------------------
+    # Validação ANTES de desenhar a página
+    # -------------------------------------------------
+    if (
+            prof_ini is None
+            or prof_fim is None
+            or pd.isna(prof_ini)
+            or pd.isna(prof_fim)
+            or prof_fim <= prof_ini
+    ):
+        return
+
+    if df_cmp_global is None or df_cmp_global.empty:
+        return
+
+    if "Profundidade (m)" not in df_cmp_global.columns:
+        return
+
+    df_cmp_fase = _filtrar_intervalo(
+        df_cmp_global,
+        "Profundidade (m)",
+        prof_ini,
+        prof_fim,
+        incluir_fim=incluir_fim
+    )
+
+    # Se não houver dados na fase, não gera página
+    if df_cmp_fase.empty:
+        return
+
+    df_cmp_fase = df_cmp_fase.copy()
+
+    # -------------------------------------------------
+    # Validação dos dados necessários para análise
+    # -------------------------------------------------
+    colunas_obrigatorias = [
+        "Profundidade (m)",
+        "Peso do Fluido (lb/gal)",
+        "Max Inferior",
+        "Min Superior",
+    ]
+
+    for col in colunas_obrigatorias:
+        if col not in df_cmp_fase.columns:
+            return
+
+    for col in colunas_obrigatorias:
+        df_cmp_fase[col] = pd.to_numeric(df_cmp_fase[col], errors="coerce")
+
+    df_cmp_fase = df_cmp_fase.dropna(
+        subset=[
+            "Profundidade (m)",
+            "Peso do Fluido (lb/gal)",
+            "Max Inferior",
+            "Min Superior",
+        ]
+    ).copy()
+
+    if df_cmp_fase.empty:
+        return
+
+    # Recalcula as flags para garantir consistência
+    df_cmp_fase["is_under"] = (
+            df_cmp_fase["Peso do Fluido (lb/gal)"] < df_cmp_fase["Max Inferior"]
+    )
+
+    df_cmp_fase["is_over"] = (
+            df_cmp_fase["Peso do Fluido (lb/gal)"] > df_cmp_fase["Min Superior"]
+    )
+
+    # -------------------------------------------------
+    # Detecção dos trechos ANTES de desenhar a página
+    # -------------------------------------------------
+    segs_under = _seg_contiguos(
+        df_base=df_cmp_fase,
+        mask_bool=df_cmp_fase["is_under"],
+        col_prof="Profundidade (m)",
+        col_exec="Peso do Fluido (lb/gal)",
+        col_req="Max Inferior"
+    )
+
+    segs_over = _seg_contiguos(
+        df_base=df_cmp_fase,
+        mask_bool=df_cmp_fase["is_over"],
+        col_prof="Profundidade (m)",
+        col_exec="Peso do Fluido (lb/gal)",
+        col_req="Min Superior"
+    )
+
+    # Se não foi detectado nada, não gera página.
+    # Isso evita página aparecendo apenas com "Diâmetro da fase".
+    if not segs_under and not segs_over:
+        return
+
+    sub_under = _subtrechos_por_falha_cmp(
+        df_cmp_fase,
+        segs_under,
+        lado="inferior"
+    )
+
+    sub_over = _subtrechos_por_falha_cmp(
+        df_cmp_fase,
+        segs_over,
+        lado="superior"
+    )
+
+    interpretacoes_syga = _montar_interpretacoes_syga(
+        sub_under,
+        sub_over
+    )
+
+    # -------------------------------------------------
+    # Começa a desenhar a página somente se houver detecção
+    # -------------------------------------------------
+    left_margin = 40
+    right_margin = width - 40
+    def abrir_pagina_fase(continua=False):
+        y_local = draw_header(c, width, height, logo)
+
+        c.setFont("Helvetica-Bold", 18)
+
+        titulo_local = titulo
+        if continua:
+            titulo_local = f"{titulo} (continuação)"
+
+        c.drawString(left_margin, y_local, titulo_local)
+        y_local -= 10
+
+        c.line(left_margin, y_local, right_margin, y_local)
+        y_local -= 18
+
+        return y_local
+    def nova_pagina_fase(y_atual, altura_necessaria=0, forcar=False):
+        limite_inferior = footer_y + 35
+
+        if forcar or (y_atual - altura_necessaria < limite_inferior):
+            draw_footer(c, width, footer_y)
+            c.showPage()
+            return abrir_pagina_fase(continua=True)
+
+        return y_atual
+    y = abrir_pagina_fase(continua=False)
+    # -------------------------------------------------
+    # Tabela-resumo da fase
+    # -------------------------------------------------
+    def desenhar_tabela_resumo_fase(y_top):
+        y_top = nova_pagina_fase(
+            y_top,
+            altura_necessaria=70,
+            forcar=False
+        )
+        box_width = right_margin - left_margin
+        box_x = left_margin
+
+        pad_left = 6
+        pad_right = 6
+
+        col_w = [0.28, 0.30, 0.42]
+        inner_w = box_width - (pad_left + pad_right) * 2
+        widths = [inner_w * w for w in col_w]
+
+        x0 = box_x + pad_left
+        xs = [x0]
+
+        for w in widths:
+            xs.append(xs[-1] + w)
+
+        linha_altura = 18
+        header_h = 18
+        box_height = 30 + header_h + linha_altura
+        box_y = y_top - box_height
+
+        c.setFillColorRGB(0.95, 0.95, 0.95)
+        c.rect(box_x, box_y, box_width, box_height, fill=1, stroke=0)
+
+        c.setStrokeColorRGB(0, 0, 0)
+        c.setLineWidth(0.8)
+        c.rect(box_x, box_y, box_width, box_height, fill=0, stroke=1)
+
+        c.line(
+            box_x,
+            box_y + box_height - 18,
+            box_x + box_width,
+            box_y + box_height - 18
+        )
+
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(
+            box_x + 10,
+            box_y + box_height - 14,
+            "Dados da Fase"
+        )
+
+        texto_y = box_y + box_height - 32
+
+        headers = [
+            "Diâmetro da fase",
+            "Diâmetro do revestimento",
+            "Intervalo analisado"
+        ]
+
+        c.setLineWidth(0.5)
+        c.line(
+            box_x + 8,
+            texto_y - 4,
+            box_x + box_width - 8,
+            texto_y - 4
+        )
+
+        for i, htxt in enumerate(headers):
+            xc = (xs[i] + xs[i + 1]) / 2
+            _draw_centered_text(
+                c,
+                xc,
+                texto_y,
+                htxt,
+                font_name="Helvetica-Bold",
+                font_size=10
+            )
+
+        texto_y -= header_h
+
+        diam_fase_txt = _fmt_polegada(fase_broca)
+
+        diam_revest_txt = (
+            _fmt_polegada(fase_revestimento)
+            if fase_revestimento is not None and pd.notna(fase_revestimento)
+            else "Poço aberto"
+        )
+
+        intervalo_txt = f'{_fmt2(prof_ini, " m")} até {_fmt2(prof_fim, " m")}'
+
+        row = [
+            diam_fase_txt,
+            diam_revest_txt,
+            intervalo_txt
+        ]
+
+        for i, txt in enumerate(row):
+            xc = (xs[i] + xs[i + 1]) / 2
+            _draw_centered_text(
+                c,
+                xc,
+                texto_y,
+                txt,
+                font_name="Helvetica",
+                font_size=10
+            )
+
+        return box_y - 14
+    y = desenhar_tabela_resumo_fase(y)
+
+    # -------------------------------------------------
+    # Análise dos trechos
+    # -------------------------------------------------
+    if segs_under:
+        y = desenhar_tabela_segmentos(
+            c=c,
+            left_margin=left_margin,
+            right_margin=right_margin,
+            y_top=y,
+            titulo="Trechos em Underbalance (Peso do Fluido < Limite Inferior)",
+            segs=segs_under,
+            col_balanco_label="Underbalance máx.",
+            footer_y=footer_y,
+            nova_pagina_cb=nova_pagina_fase
+        )
+
+    if segs_over:
+        y = desenhar_tabela_segmentos(
+            c=c,
+            left_margin=left_margin,
+            right_margin=right_margin,
+            y_top=y,
+            titulo="Trechos em Overbalance (Peso do Fluido > Limite Superior)",
+            segs=segs_over,
+            col_balanco_label="Overbalance máx.",
+            footer_y=footer_y,
+            nova_pagina_cb=nova_pagina_fase
+        )
+
+    # -------------------------------------------------
+    # Classificação do tipo de falha
+    # -------------------------------------------------
+    if sub_under:
+        y = desenhar_tabela_falhas_quebrada(
+            c=c,
+            left_margin=left_margin,
+            right_margin=right_margin,
+            y_top=y,
+            titulo="Classificação do Tipo de Falha (Trechos em Underbalance)",
+            subtrechos=sub_under,
+            footer_y=footer_y,
+            nova_pagina_cb=nova_pagina_fase
+        )
+
+    if sub_over:
+        y = desenhar_tabela_falhas_quebrada(
+            c=c,
+            left_margin=left_margin,
+            right_margin=right_margin,
+            y_top=y,
+            titulo="Classificação do Tipo de Falha (Trechos Acima do Gradiente de Fratura)",
+            subtrechos=sub_over,
+            footer_y=footer_y,
+            nova_pagina_cb=nova_pagina_fase
+        )
+
+    # -------------------------------------------------
+    # Interpretações SYGA
+    # -------------------------------------------------
+    if interpretacoes_syga:
+        y = desenhar_tabela_interpretacoes_syga(
+            c=c,
+            left_margin=left_margin,
+            right_margin=right_margin,
+            y_top=y,
+            interpretacoes=interpretacoes_syga,
+            footer_y=footer_y,
+            nova_pagina_cb=nova_pagina_fase
+        )
+
+    draw_footer(c, width, footer_y)
+    c.showPage()
+
+
+def _montar_df_cmp_global(df_mud, df_suav):
+    if not isinstance(df_mud, pd.DataFrame) or df_mud.empty:
+        return pd.DataFrame()
+
+    if not isinstance(df_suav, pd.DataFrame) or df_suav.empty:
+        return pd.DataFrame()
+
+    df_mud2 = df_mud.copy()
+    df_suav2 = df_suav.copy()
+
+    if "Profundidade (m)" not in df_mud2.columns:
+        for alt in ["Profundidade", "MD", "MD(m)"]:
+            if alt in df_mud2.columns:
+                df_mud2 = df_mud2.rename(columns={alt: "Profundidade (m)"})
+                break
+
+    col_exec = "Peso do Fluido Executado (lb/gal)"
+    if "Profundidade (m)" not in df_mud2.columns or col_exec not in df_mud2.columns:
+        return pd.DataFrame()
+
+    df_mud2["Profundidade (m)"] = pd.to_numeric(df_mud2["Profundidade (m)"], errors="coerce")
+    df_mud2[col_exec] = pd.to_numeric(df_mud2[col_exec], errors="coerce")
+
+    df_mud2 = (
+        df_mud2.dropna(subset=["Profundidade (m)", col_exec])
+        .sort_values("Profundidade (m)")
+        .reset_index(drop=True)
+    )
+
+    if df_mud2.empty:
+        return pd.DataFrame()
+
+    col_prof_suav = "Profundidade (m)" if "Profundidade (m)" in df_suav2.columns else "MD"
+    obrig = [col_prof_suav, "Max Inferior", "Min Superior"]
+
+    if col_prof_suav not in df_suav2.columns or any(c not in df_suav2.columns for c in obrig[1:]):
+        return pd.DataFrame()
+
+    cols_falha = [
+        col_prof_suav,
+        "Max Inferior",
+        "Min Superior",
+        "Gradiente de Pressão de Poros (lb/gal)",
+        "Tração Inferior",
+        "Comp Inferior σθA",
+        "Comp Inferior σθB",
+        "Tração Superior (σθA)",
+        "Tração Superior (σθB)",
+        "Comp Superior σθA",
+        "Comp Superior σθB",
+    ]
+    cols_exist = [c for c in cols_falha if c in df_suav2.columns]
+    df_suav2 = df_suav2[cols_exist].copy()
+
+    for ccol in [col_prof_suav, "Max Inferior", "Min Superior"]:
+        df_suav2[ccol] = pd.to_numeric(df_suav2[ccol], errors="coerce")
+
+    df_suav2 = (
+        df_suav2.dropna(subset=[col_prof_suav, "Max Inferior", "Min Superior"])
+        .sort_values(col_prof_suav)
+        .reset_index(drop=True)
+    )
+
+    if df_suav2.empty:
+        return pd.DataFrame()
+
+    prof_s = df_suav2[col_prof_suav].astype(float)
+
+    rows_ref = []
+    for d in df_mud2["Profundidade (m)"].astype(float).values:
+        idx = (prof_s - float(d)).abs().idxmin()
+        rows_ref.append(df_suav2.loc[idx].to_dict())
+
+    df_cmp = df_mud2[["Profundidade (m)", col_exec]].copy()
+    df_cmp = df_cmp.rename(columns={col_exec: "Peso do Fluido (lb/gal)"})
+
+    df_cmp["Prof (ref df_suav)"] = [float(r.get(col_prof_suav, np.nan)) for r in rows_ref]
+    df_cmp["Max Inferior"] = pd.to_numeric([r.get("Max Inferior", np.nan) for r in rows_ref], errors="coerce")
+    df_cmp["Min Superior"] = pd.to_numeric([r.get("Min Superior", np.nan) for r in rows_ref], errors="coerce")
+
+    extras = [
+        "Gradiente de Pressão de Poros (lb/gal)",
+        "Tração Inferior",
+        "Comp Inferior σθA",
+        "Comp Inferior σθB",
+        "Tração Superior (σθA)",
+        "Tração Superior (σθB)",
+        "Comp Superior σθA",
+        "Comp Superior σθB",
+    ]
+    for col in extras:
+        df_cmp[col] = pd.to_numeric([r.get(col, np.nan) for r in rows_ref], errors="coerce")
+
+    df_cmp["is_under"] = df_cmp["Peso do Fluido (lb/gal)"] < df_cmp["Max Inferior"]
+    df_cmp["is_over"] = df_cmp["Peso do Fluido (lb/gal)"] > df_cmp["Min Superior"]
+
+    return df_cmp
+
+
+PAGINAS_PDF_OPCOES = {
+    "dados_poco_elevacao": "Dados do Poço",
+    "pressao_poros_lbf": "LBF",
+    "sobrecarga": "Gradiente de Sobrecarga",
+    "pressao_poros_trending": "Trending",
+    "pressao_poros_grafico": "Gradiente de Pressão de Poros",
+    "janela_operacional": "Janela Operacional",
+    "fratura_tensoes_minimas": "Gradiente de Fratura",
+    "kick_tolerance": "Kick Tolerance",
+    "esquematico_poco_previsao": "Esquemático do Poço",
+    "fluido_previsao": "Peso do Fluido",
+    "trajetoria_eventos": "Eventos Operacionais",
+    "anotacoes": "Anotações",
+}
+
+
+def obter_paginas_relatorio_disponiveis():
+    paginas = dict(PAGINAS_PDF_OPCOES)
+
+    if st.session_state.get("option") == "Previsão de Geopressões":
+        paginas.pop("analise_por_fase", None)
+
+    return paginas
+
+
+def _rel_limpar_cache_pdf():
+    st.session_state.pdf_bytes = None
+    st.session_state.pdf_ready = False
+    st.session_state.pdf_view_open = False
+    st.session_state.pdf_params_hash = None
+
+
+def _rel_texto_seguro(texto):
+    if texto is None:
+        return "Não informado"
+
+    try:
+        if pd.isna(texto):
+            return "Não informado"
+    except Exception:
+        pass
+
+    texto = str(texto)
+
+    substituicoes = {
+        "—": "-",
+        "–": "-",
+        "≤": "<=",
+        "≥": ">=",
+        "σ": "sigma",
+        "θ": "theta",
+        "τ": "tau",
+        "φ": "phi",
+        "Δ": "Delta",
+        "µ": "u",
+    }
+
+    for antigo, novo in substituicoes.items():
+        texto = texto.replace(antigo, novo)
+
+    return texto if texto.strip() else "Não informado"
+
+
+def _rel_fmt(valor, sufixo="", casas=2):
+    try:
+        if valor is None or pd.isna(valor):
+            return "Não informado"
+
+        if isinstance(valor, (int, float, np.integer, np.floating)):
+            return f"{float(valor):.{casas}f}{sufixo}"
+
+        texto = str(valor).strip()
+        return texto if texto else "Não informado"
+
+    except Exception:
+        return "Não informado"
+
+
+def _rel_get_fig(*chaves):
+    for chave in chaves:
+        fig = st.session_state.get(chave, None)
+
+        if fig is not None:
+            return fig
+
+    return None
+
+
+def _rel_get_df(*chaves):
+    for chave in chaves:
+        df = st.session_state.get(chave, None)
+
+        if isinstance(df, pd.DataFrame) and not df.empty:
+            return df.copy()
+
+    return pd.DataFrame()
+
+
+def _rel_draw_footer(c, width, footer_y):
+    c.line(30, footer_y, width - 30, footer_y)
+
+
+def _rel_draw_header(c, width, height, logo_path):
+    logo_width = 150
+    logo_height = 100
+    logo_y = height - 90
+
+    try:
+        c.drawImage(
+            logo_path,
+            (width - logo_width) / 2,
+            logo_y,
+            width=logo_width,
+            height=logo_height,
+            preserveAspectRatio=True,
+            mask="auto"
+        )
+    except Exception:
+        pass
+
+    return logo_y - 10
+
+
+def _rel_titulo_pagina(c, y, titulo, left_margin, right_margin):
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica-Bold", 20)
+    c.drawString(left_margin, y, _rel_texto_seguro(titulo))
+
+    y -= 10
+    c.line(left_margin, y, right_margin, y)
+    y -= 18
+
+    return y
+
+
+def _rel_abrir_pagina(c, width, height, logo_path, footer_y, titulo):
+    y = _rel_draw_header(c, width, height, logo_path)
+    return _rel_titulo_pagina(c, y, titulo, 40, width - 40)
+
+
+def _rel_draw_text_fit(c, x, y, txt, max_width, font_name="Helvetica", font_size=8):
+    txt = _rel_texto_seguro(txt)
+
+    c.setFont(font_name, font_size)
+
+    if c.stringWidth(txt, font_name, font_size) <= max_width:
+        c.drawString(x, y, txt)
+        return
+
+    txt_reduzido = txt
+
+    while (
+            txt_reduzido
+            and c.stringWidth(txt_reduzido + "...", font_name, font_size) > max_width
+    ):
+        txt_reduzido = txt_reduzido[:-1]
+
+    c.drawString(x, y, txt_reduzido + "...")
+
+
+def _rel_draw_wrapped_text(c, texto, x, y, max_width, font_name="Helvetica", font_size=10, leading=13):
+    texto = _rel_texto_seguro(texto)
+
+    c.setFont(font_name, font_size)
+
+    linhas = []
+
+    for bloco in texto.split("\n"):
+        if bloco.strip():
+            linhas.extend(wrap(bloco, width=95))
+        else:
+            linhas.append("")
+
+    for linha in linhas:
+        c.drawString(x, y, linha)
+        y -= leading
+
+    return y
+
+
+def _rel_desenhar_caixa_duas_colunas(
+        c,
+        y_top,
+        titulo_secao,
+        linhas_esq,
+        linhas_dir,
+        titulo_pagina,
+        width,
+        height,
+        logo_path,
+        footer_y,
+        left_margin=40,
+        right_margin=None,
+        linha_altura=16,
+):
+    if right_margin is None:
+        right_margin = width - 40
+
+    linhas_esq = linhas_esq or []
+    linhas_dir = linhas_dir or []
+
+    num_linhas = max(len(linhas_esq), len(linhas_dir), 1)
+    box_height = 40 + num_linhas * linha_altura
+    box_width = right_margin - left_margin
+    box_x = left_margin
+
+    if y_top - box_height < footer_y + 35:
+        _rel_draw_footer(c, width, footer_y)
+        c.showPage()
+        y_top = _rel_abrir_pagina(c, width, height, logo_path, footer_y, titulo_pagina)
+
+    y_top -= 14
+    box_y = y_top - box_height
+
+    c.setFillColorRGB(0.95, 0.95, 0.95)
+    c.rect(box_x, box_y, box_width, box_height, fill=1, stroke=0)
+
+    c.setStrokeColorRGB(0, 0, 0)
+    c.setLineWidth(0.8)
+    c.rect(box_x, box_y, box_width, box_height, fill=0, stroke=1)
+
+    c.line(box_x, box_y + box_height - 22, box_x + box_width, box_y + box_height - 22)
+
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(box_x + 10, box_y + box_height - 16, _rel_texto_seguro(titulo_secao))
+
+    col1_x = box_x + 12
+    col2_x = box_x + box_width / 2
+    texto_y = box_y + box_height - 36
+
+    col_width = box_width / 2 - 18
+    def draw_label_valor(x, y, label, valor, max_width):
+        label = _rel_texto_seguro(label)
+        valor = _rel_texto_seguro(valor)
+
+        c.setFont("Helvetica-Bold", 9)
+        label_width = c.stringWidth(label, "Helvetica-Bold", 9)
+
+        valor_x = x + label_width + 4
+        valor_width = max_width - label_width - 4
+
+        if valor_width < 45:
+            label_reduzido = label
+
+            while (
+                    label_reduzido
+                    and c.stringWidth(label_reduzido + "...", "Helvetica-Bold", 9) > max_width * 0.62
+            ):
+                label_reduzido = label_reduzido[:-1]
+
+            label = label_reduzido + "..."
+            label_width = c.stringWidth(label, "Helvetica-Bold", 9)
+            valor_x = x + label_width + 4
+            valor_width = max_width - label_width - 4
+
+        c.setFont("Helvetica-Bold", 9)
+        c.drawString(x, y, label)
+
+        c.setFont("Helvetica", 9)
+
+        valor_reduzido = valor
+
+        while (
+                valor_reduzido
+                and c.stringWidth(valor_reduzido + "...", "Helvetica", 9) > valor_width
+        ):
+            valor_reduzido = valor_reduzido[:-1]
+
+        if valor_reduzido != valor:
+            valor_reduzido += "..."
+
+        c.drawString(valor_x, y, valor_reduzido)
+    for i in range(num_linhas):
+        if i < len(linhas_esq):
+            draw_label_valor(col1_x, texto_y, linhas_esq[i][0], linhas_esq[i][1], col_width)
+
+        if i < len(linhas_dir):
+            draw_label_valor(col2_x, texto_y, linhas_dir[i][0], linhas_dir[i][1], col_width)
+
+        texto_y -= linha_altura
+
+    return box_y - 12
+
+
+def _rel_desenhar_tabela_padrao(
+        c,
+        y_top,
+        titulo_tabela,
+        headers,
+        rows,
+        width,
+        height,
+        logo_path,
+        footer_y,
+        titulo_pagina,
+        left_margin=40,
+        right_margin=None,
+        col_fracs=None,
+        linha_altura=15,
+):
+    if right_margin is None:
+        right_margin = width - 40
+
+    if not rows:
+        return y_top
+
+    if col_fracs is None:
+        col_fracs = [1 / len(headers)] * len(headers)
+
+    box_width = right_margin - left_margin
+    box_x = left_margin
+
+    header_altura = 15
+    i = 0
+    primeiro_bloco = True
+
+    while i < len(rows):
+        altura_disponivel = y_top - (footer_y + 35)
+        max_linhas = int((altura_disponivel - 30 - header_altura) // linha_altura)
+
+        if max_linhas < 1:
+            _rel_draw_footer(c, width, footer_y)
+            c.showPage()
+            y_top = _rel_abrir_pagina(c, width, height, logo_path, footer_y, titulo_pagina)
+            altura_disponivel = y_top - (footer_y + 35)
+            max_linhas = int((altura_disponivel - 30 - header_altura) // linha_altura)
+
+        max_linhas = max(1, max_linhas)
+
+        rows_bloco = rows[i:i + max_linhas]
+
+        titulo_bloco = titulo_tabela
+        if not primeiro_bloco:
+            titulo_bloco = f"{titulo_tabela} (continuação)"
+
+        box_height = 30 + header_altura + len(rows_bloco) * linha_altura
+
+        y_top -= 14
+        box_y = y_top - box_height
+
+        c.setFillColorRGB(0.95, 0.95, 0.95)
+        c.rect(box_x, box_y, box_width, box_height, fill=1, stroke=0)
+
+        c.setStrokeColorRGB(0, 0, 0)
+        c.setLineWidth(0.8)
+        c.rect(box_x, box_y, box_width, box_height, fill=0, stroke=1)
+
+        c.line(box_x, box_y + box_height - 18, box_x + box_width, box_y + box_height - 18)
+
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("Helvetica-Bold", 12)
+        c.drawString(box_x + 10, box_y + box_height - 14, _rel_texto_seguro(titulo_bloco))
+
+        col_widths = [box_width * frac for frac in col_fracs]
+
+        x_cols = [box_x + 8]
+
+        for w_col in col_widths[:-1]:
+            x_cols.append(x_cols[-1] + w_col)
+
+        texto_y = box_y + box_height - 32
+
+        for j, header in enumerate(headers):
+            _rel_draw_text_fit(
+                c,
+                x_cols[j],
+                texto_y,
+                header,
+                col_widths[j] - 10,
+                font_name="Helvetica-Bold",
+                font_size=8
+            )
+
+        c.setLineWidth(0.5)
+        c.line(box_x + 8, texto_y - 4, box_x + box_width - 8, texto_y - 4)
+
+        texto_y -= header_altura
+
+        for row in rows_bloco:
+            for j, txt in enumerate(row):
+                _rel_draw_text_fit(
+                    c,
+                    x_cols[j],
+                    texto_y,
+                    txt,
+                    col_widths[j] - 10,
+                    font_name="Helvetica",
+                    font_size=8
+                )
+
+            texto_y -= linha_altura
+
+        y_top = box_y - 12
+
+        i += len(rows_bloco)
+        primeiro_bloco = False
+
+        if i < len(rows):
+            _rel_draw_footer(c, width, footer_y)
+            c.showPage()
+            y_top = _rel_abrir_pagina(c, width, height, logo_path, footer_y, titulo_pagina)
+
+    return y_top
+
+
+def _rel_desenhar_df_padrao(
+        c,
+        y_top,
+        titulo_tabela,
+        df,
+        colunas,
+        width,
+        height,
+        logo_path,
+        footer_y,
+        titulo_pagina,
+        max_linhas=30,
+):
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return y_top
+
+    colunas = [col for col in colunas if col in df.columns]
+
+    if not colunas:
+        colunas = list(df.columns[:5])
+
+    df_show = df[colunas].head(max_linhas).copy()
+
+    rows = []
+
+    for _, row in df_show.iterrows():
+        rows.append([_rel_texto_seguro(row[col]) for col in colunas])
+
+    col_fracs = [1 / len(colunas)] * len(colunas)
+
+    y_top = _rel_desenhar_tabela_padrao(
+        c=c,
+        y_top=y_top,
+        titulo_tabela=titulo_tabela,
+        headers=colunas,
+        rows=rows,
+        width=width,
+        height=height,
+        logo_path=logo_path,
+        footer_y=footer_y,
+        titulo_pagina=titulo_pagina,
+        col_fracs=col_fracs,
+    )
+
+    if len(df) > max_linhas:
+        c.setFont("Helvetica-Oblique", 8)
+        c.drawString(
+            40,
+            y_top,
+            f"Tabela exibindo as primeiras {max_linhas} linhas de {len(df)} registros."
+        )
+        y_top -= 12
+
+    return y_top
+
+
+def _rel_desenhar_figura(c, fig, left, right, top, bottom, titulo=None, dpi=105):
+    if fig is None:
+        c.setFont("Helvetica-Oblique", 10)
+        c.drawString(left, top - 14, "Figura indisponível.")
+        return top - 30
+
+    try:
+        img_buffer = io.BytesIO()
+
+        if hasattr(fig, "savefig"):
+            facecolor = "white"
+
+            try:
+                facecolor = fig.get_facecolor()
+            except Exception:
+                pass
+
+            fig.savefig(
+                img_buffer,
+                format="png",
+                dpi=dpi,
+                facecolor=facecolor,
+                bbox_inches="tight"
+            )
+            img_buffer.seek(0)
+
+        elif hasattr(fig, "to_image"):
+            img_bytes = fig.to_image(
+                format="png",
+                width=900,
+                height=650,
+                scale=1
+            )
+            img_buffer = io.BytesIO(img_bytes)
+
+        else:
+            raise ValueError("Tipo de figura não suportado.")
+
+        img_reader = ImageReader(img_buffer)
+
+        img_w_px, img_h_px = img_reader.getSize()
+
+        available_width = right - left
+        available_height = top - bottom
+
+        scale = min(available_width / img_w_px, available_height / img_h_px)
+
+        img_width = img_w_px * scale
+        img_height = img_h_px * scale
+
+        x_pos = left + (available_width - img_width) / 2
+        y_pos = top - img_height
+
+        if titulo:
+            c.setFont("Helvetica-Bold", 12)
+            c.drawCentredString(left + available_width / 2, top + 6, _rel_texto_seguro(titulo))
+
+        c.drawImage(
+            img_reader,
+            x_pos,
+            y_pos,
+            width=img_width,
+            height=img_height,
+            preserveAspectRatio=True,
+            mask="auto"
+        )
+
+        return y_pos - 18
+
+    except Exception as e:
+        c.setFont("Helvetica-Oblique", 9)
+        c.drawString(left, top - 14, f"Não foi possível inserir a figura: {e}")
+        return top - 30
+
+
+MAPA_RELATORIO_ZOOM = 7
+MAPA_RELATORIO_PNG_SCALE = 3
+def _rel_paginas_ordenadas_selecionadas():
+    paginas_disponiveis = obter_paginas_relatorio_disponiveis()
+
+    selecionadas = st.session_state.get(
+        "pdf_paginas_selecionadas",
+        list(paginas_disponiveis.keys())
+    )
+
+    selecionadas = set(selecionadas)
+
+    return [
+        pagina
+        for pagina in paginas_disponiveis.keys()
+        if pagina in selecionadas
+    ]
+
+
+def _rel_draw_justified_line(c, line, x, y, max_width, font_name="Helvetica", font_size=10):
+    words = str(line).split()
+
+    if len(words) <= 1:
+        c.drawString(x, y, line)
+        return
+
+    text_width = sum(c.stringWidth(w, font_name, font_size) for w in words)
+    total_spaces = len(words) - 1
+    extra_space = max((max_width - text_width) / total_spaces, 0)
+
+    x_atual = x
+
+    for i, word in enumerate(words):
+        c.drawString(x_atual, y, word)
+        word_width = c.stringWidth(word, font_name, font_size)
+
+        if i < len(words) - 1:
+            x_atual += word_width + extra_space
+
+
+def _rel_draw_wrapped_text_justificado(
+        c,
+        text,
+        x,
+        y,
+        max_width,
+        min_y,
+        width,
+        height,
+        logo_path,
+        footer_y,
+        titulo_pagina,
+        line_height=14,
+        font_name="Helvetica",
+        font_size=10,
+):
+    if not text:
+        return y
+
+    c.setFont(font_name, font_size)
+
+    paragraphs = str(text).replace("\r\n", "\n").replace("\r", "\n").split("\n")
+
+    for p in paragraphs:
+        if p.strip() == "":
+            y -= line_height
+            continue
+
+        words = p.split()
+        line = ""
+        linhas_paragrafo = []
+
+        for w in words:
+            test = (line + " " + w).strip()
+
+            if c.stringWidth(test, font_name, font_size) <= max_width:
+                line = test
+            else:
+                if line:
+                    linhas_paragrafo.append(line)
+                line = w
+
+        if line:
+            linhas_paragrafo.append(line)
+
+        for i, linha in enumerate(linhas_paragrafo):
+            if y < min_y:
+                _rel_draw_footer(c, width, footer_y)
+                c.showPage()
+                y = _rel_abrir_pagina(c, width, height, logo_path, footer_y, titulo_pagina)
+
+            ultima_linha = i == len(linhas_paragrafo) - 1
+
+            if not ultima_linha:
+                _rel_draw_justified_line(
+                    c=c,
+                    line=linha,
+                    x=x,
+                    y=y,
+                    max_width=max_width,
+                    font_name=font_name,
+                    font_size=font_size
+                )
+            else:
+                c.drawString(x, y, linha)
+
+            y -= line_height
+
+    return y
+
+
+def _rel_criar_mapa_pdf_zoomado():
+    """
+    Recria um mapa exclusivo para o PDF.
+
+    Não usa o objeto st.session_state["mapa_folium_pdf"] diretamente,
+    porque ele foi criado para visualização em tela com zoom_start=7.
+    Para o relatório, o mapa é reconstruído com zoom maior.
+    """
+
+    easting = st.session_state.get("easting", None)
+    northing = st.session_state.get("northing", None)
+    zona = st.session_state.get("zona", None)
+    hem = st.session_state.get("hem", "Sul")
+
+    if easting is None or northing is None or zona is None:
+        raise ValueError("Coordenadas UTM do poço não informadas.")
+    def _hemisferio_norte(valor):
+        txt = str(valor).strip().lower()
+        return txt in ("n", "norte", "north")
+    lat_base, lon_base = utm.to_latlon(
+        float(easting),
+        float(northing),
+        int(zona),
+        northern=_hemisferio_norte(hem)
+    )
+
+    mapa_pdf = folium.Map(
+        location=[lat_base, lon_base],
+        zoom_start=int(MAPA_RELATORIO_ZOOM),
+        zoom_control=False,
+        attributionControl=False,
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Esri"
+    )
+
+    raio_km = float(st.session_state.get("raio", 0.1) or 0.1)
+
+    folium.Circle(
+        location=[lat_base, lon_base],
+        radius=raio_km * 1000,
+        color="green",
+        fill=True,
+        fill_opacity=0.20,
+        popup=f"Raio: {raio_km:.2f} km"
+    ).add_to(mapa_pdf)
+
+    # Poço principal
+    try:
+        folium.Marker(
+            location=[lat_base, lon_base],
+            popup=st.session_state.get("poco", "Poço"),
+            icon=folium.CustomIcon("poço.png", icon_size=(30, 30)),
+            z_index_offset=10000
+        ).add_to(mapa_pdf)
+    except Exception:
+        folium.Marker(
+            location=[lat_base, lon_base],
+            popup=st.session_state.get("poco", "Poço"),
+            icon=folium.Icon(color="blue", icon="star")
+        ).add_to(mapa_pdf)
+
+    # Poços vizinhos do YAML, se existirem
+    try:
+        with open("pocos.yaml", "r", encoding="utf-8") as f:
+            dados_yaml = yaml.safe_load(f) or {}
+
+        pocos_yaml = dados_yaml.get("pocos", [])
+
+        profundidade_maxima = st.session_state.get("profundidade_maxima", None)
+
+        if profundidade_maxima is not None:
+            pocos_plotar = [
+                poco for poco in pocos_yaml
+                if poco.get("profundidade_vertical_m") is not None
+                   and poco.get("profundidade_vertical_m") <= profundidade_maxima
+            ]
+        else:
+            pocos_plotar = pocos_yaml
+
+        for poco in pocos_plotar:
+            try:
+                e = poco["coordenadas"]["easting"]
+                n = poco["coordenadas"]["northing"]
+                zona_p = poco.get("zona_utm", zona)
+                hem_p = poco.get("hem", hem)
+
+                lat_p, lon_p = utm.to_latlon(
+                    float(e),
+                    float(n),
+                    int(zona_p),
+                    northern=_hemisferio_norte(hem_p)
+                )
+
+                dist_m = haversine(lat_base, lon_base, lat_p, lon_p)
+
+                popup_text = (
+                    f"{poco.get('nome', 'Poço vizinho')}"
+                    f"<br>Distância: {dist_m / 1000:.2f} km"
+                )
+
+                folium.Marker(
+                    location=[lat_p, lon_p],
+                    popup=folium.Popup(popup_text, max_width=300),
+                    icon=folium.Icon(color="red", icon="map-marker")
+                ).add_to(mapa_pdf)
+
+            except Exception:
+                continue
+
+    except Exception:
+        pass
+
+    # Poços manuais, caso existam no session_state
+    try:
+        pocos_adicionais = st.session_state.get("pocos_adicionais", [])
+
+        for row in pocos_adicionais:
+            nome = row.get("nome", "Poço manual")
+            e = row.get("easting", None)
+            n = row.get("northing", None)
+
+            if e is None or n is None:
+                continue
+
+            lat_p, lon_p = utm.to_latlon(
+                float(e),
+                float(n),
+                int(zona),
+                northern=_hemisferio_norte(hem)
+            )
+
+            dist_m = haversine(lat_base, lon_base, lat_p, lon_p)
+
+            popup_text = (
+                f"{nome}"
+                f"<br>Distância: {dist_m / 1000:.2f} km"
+            )
+
+            folium.Marker(
+                location=[lat_p, lon_p],
+                popup=folium.Popup(popup_text, max_width=300),
+                icon=folium.Icon(color="red", icon="map-marker")
+            ).add_to(mapa_pdf)
+
+    except Exception:
+        pass
+
+    return mapa_pdf
+
+
+def _rel_desenhar_mapa_pdf_com_zoom(
+        c,
+        mapa_folium,
+        left,
+        right,
+        top,
+        bottom,
+        zoom_delta=None,
+        png_scale=None,
+):
+    """
+    Desenha o mapa no PDF com zoom real.
+
+    O argumento mapa_folium é mantido só para compatibilidade,
+    mas a função recria o mapa com MAPA_RELATORIO_ZOOM.
+    """
+
+    largura = right - left
+    altura = top - bottom
+
+    if largura <= 0 or altura <= 0:
+        raise ValueError("Área inválida para desenhar o mapa.")
+
+    try:
+        mapa_pdf = _rel_criar_mapa_pdf_zoomado()
+        png_data = mapa_pdf._to_png(int(MAPA_RELATORIO_PNG_SCALE))
+
+    except Exception:
+        if mapa_folium is None:
+            raise ValueError("Mapa Folium não informado.")
+
+        png_data = mapa_folium._to_png(int(MAPA_RELATORIO_PNG_SCALE))
+
+    img = ImageReader(BytesIO(png_data))
+
+    c.drawImage(
+        img,
+        left,
+        bottom,
+        width=largura,
+        height=altura,
+        preserveAspectRatio=True,
+        mask="auto"
+    )
+
+
+def _rel_desenhar_tabela_df_rapida(
+        c,
+        y_top,
+        titulo_tabela,
+        df,
+        colunas,
+        width,
+        height,
+        logo_path,
+        footer_y,
+        titulo_pagina,
+        max_linhas=22,
+        col_fracs=None,
+):
+    if not isinstance(df, pd.DataFrame) or df.empty:
+        return y_top
+
+    colunas = [col for col in colunas if col in df.columns]
+
+    if not colunas:
+        return y_top
+
+    df_show = df[colunas].head(max_linhas).copy()
+
+    rows = []
+
+    for _, row in df_show.iterrows():
+        linha = []
+
+        for col in colunas:
+            valor = row[col]
+
+            if isinstance(valor, (int, float, np.integer, np.floating)):
+                try:
+                    if pd.notna(valor):
+                        valor = f"{float(valor):.2f}"
+                except Exception:
+                    pass
+
+            linha.append(_rel_texto_seguro(valor))
+
+        rows.append(linha)
+
+    if col_fracs is None:
+        col_fracs = [1 / len(colunas)] * len(colunas)
+
+    y_top = _rel_desenhar_tabela_padrao(
+        c=c,
+        y_top=y_top,
+        titulo_tabela=titulo_tabela,
+        headers=colunas,
+        rows=rows,
+        width=width,
+        height=height,
+        logo_path=logo_path,
+        footer_y=footer_y,
+        titulo_pagina=titulo_pagina,
+        col_fracs=col_fracs,
+    )
+
+    return y_top
+
+
+def _rel_pagina_capa(c, width, height, logo_path, footer_y):
+    hora_now = datetime.now() + timedelta(hours=0)
+
+    try:
+        c.drawImage(
+            logo_path,
+            230,
+            height - 100,
+            width=150,
+            height=100,
+            preserveAspectRatio=True,
+            mask="auto"
+        )
+    except Exception:
+        pass
+
+    # Logo central entre o cabeçalho e o título principal
+    try:
+        logo_syga_width = 300
+        logo_syga_height = 150
+        logo_syga_x = (width - logo_syga_width) / 2
+        logo_syga_y = height - 255
+
+        c.drawImage(
+            "logo_syga.png",
+            logo_syga_x,
+            logo_syga_y,
+            width=logo_syga_width,
+            height=logo_syga_height,
+            preserveAspectRatio=True,
+            mask="auto"
+        )
+    except Exception:
+        pass
+
+    c.setFont("Helvetica-Bold", 25)
+    c.drawCentredString(width / 2, height - 285, "Syngular Geopressure Analysis - SYGA")
+
+    tipo_relatorio = st.session_state.get("option", "")
+
+    if tipo_relatorio not in ["Retroanálise", "Previsão de Geopressões"]:
+        tipo_relatorio = "Não informado"
+
+    titulo_relatorio = f"Relatório Final - {tipo_relatorio}"
+
+    c.setFont("Helvetica-Bold", 20)
+    c.drawCentredString(width / 2, height - 320, titulo_relatorio)
+
+    well_name = f"{st.session_state.get('poco', st.session_state.get('well_name', 'Não informado'))}"
+    user_name = f"{st.session_state.get('user_name', 'Não informado')}"
+
+    c.setFont("Helvetica-Bold", 18)
+    c.drawCentredString(width / 2, height - 365, _rel_texto_seguro(well_name))
+
+    c.setFont("Helvetica", 15)
+    c.drawCentredString(width / 2, height - 395, f"Responsável Técnico: {_rel_texto_seguro(user_name)}")
+
+    c.setFont("Helvetica", 12)
+    c.line(30, 80, width - 30, 80)
+
+    c.drawString(40, 60, "Syngular Solutions")
+    c.drawString(40, 45, "Houston, TX 77077")
+
+    data_relatorio = datetime.today().strftime("%d/%m/%Y")
+    hora_relatorio = hora_now.strftime("%H:%M")
+
+    c.drawRightString(width - 40, 60, f"Data do Relatório: {data_relatorio} {hora_relatorio}")
+
+    c.setFont("Helvetica-Bold", 18)
+    c.drawRightString(75, 90, "V-1.0")
+
+    c.showPage()
+
+
+def _rel_pagina_dados_poco_elevacao(c, width, height, logo_path, footer_y):
+    y = _rel_abrir_pagina(c, width, height, logo_path, footer_y, "Dados do Poço")
+
+    left_margin = 40
+    right_margin = width - 40
+
+    page_top = y
+    page_bottom = footer_y + 20
+
+    usable_h = page_top - page_bottom
+    mid_y = page_bottom + usable_h / 2
+    def desenhar_caixa_padrao(titulo, x_left, x_right, y_top, y_bottom):
+        box_x = x_left
+        box_w = x_right - x_left
+        box_y = y_bottom
+        box_h = y_top - y_bottom
+
+        if box_h < 40 or box_w < 80:
+            return x_left, x_right, y_top, y_bottom
+
+        c.setFillColorRGB(0.95, 0.95, 0.95)
+        c.rect(box_x, box_y, box_w, box_h, fill=1, stroke=0)
+
+        c.setStrokeColorRGB(0, 0, 0)
+        c.setLineWidth(0.8)
+        c.rect(box_x, box_y, box_w, box_h, fill=0, stroke=1)
+
+        c.line(box_x, box_y + box_h - 18, box_x + box_w, box_y + box_h - 18)
+
+        c.setFillColorRGB(0, 0, 0)
+        c.setFont("Helvetica-Bold", 12)
+        c.drawCentredString(box_x + box_w / 2, box_y + box_h - 14, _rel_texto_seguro(titulo))
+
+        inner_left = box_x + 10
+        inner_right = box_x + box_w - 10
+        inner_top = box_y + box_h - 24
+        inner_bottom = box_y + 10
+
+        return inner_left, inner_right, inner_top, inner_bottom
+    sup_left, sup_right, sup_top, sup_bottom = desenhar_caixa_padrao(
+        titulo="Referência de Elevação",
+        x_left=left_margin,
+        x_right=right_margin,
+        y_top=page_top,
+        y_bottom=mid_y + 8
+    )
+
+    tipo_poco = st.session_state.get("tipo_poco", "Onshore")
+    onshore = tipo_poco == "Onshore"
+
+    img_path = "rig.png" if onshore else "rig_offshore.png"
+
+    img_height = 240
+    img_width = img_height * 0.65
+    img_x = sup_left + 80
+    img_y = sup_top - img_height
+
+    if img_y < sup_bottom:
+        img_y = sup_bottom + 5
+
+    try:
+        c.drawImage(
+            img_path,
+            img_x,
+            img_y,
+            width=img_width,
+            height=img_height,
+            preserveAspectRatio=True,
+            mask="auto"
+        )
+    except Exception:
+        c.setFont("Helvetica-Oblique", 9)
+        c.drawString(img_x, sup_top - 20, f"Imagem {img_path} não encontrada.")
+
+    texto_x = img_x + img_width + 5
+    texto_base_y = img_y + img_height
+
+    datum = st.session_state.get("datum", "Não informado")
+    rtkb = st.session_state.get("rtkb", None)
+    es = st.session_state.get("es", None)
+    lda = st.session_state.get("lda", None)
+
+    c.setFont("Helvetica-Bold", 12)
+
+    c.drawString(texto_x, texto_base_y - 78, f"DATUM: {_rel_texto_seguro(datum)}")
+    c.drawString(texto_x, texto_base_y - 130, f"Airgap: {_rel_fmt(rtkb, ' metros')}")
+
+    if onshore:
+        c.drawString(texto_x, texto_base_y - 108, f"Elevação DATUM: {_rel_fmt(es, ' metros')}")
+        c.drawString(texto_x, texto_base_y - 152, "Solo")
+
+        try:
+            elev_solo = float(es) - float(rtkb)
+            elev_solo_txt = f"{elev_solo:.2f} metros"
+        except Exception:
+            elev_solo_txt = "Não informado"
+
+        c.drawString(texto_x, texto_base_y - 190, f"Elevação do solo: {elev_solo_txt}")
+        c.drawString(texto_x, texto_base_y - 228, "Nível do mar")
+
+    else:
+        c.drawString(texto_x, texto_base_y - 160, f"Lâmina d'água: {_rel_fmt(lda, ' metros')}")
+        c.drawString(texto_x, texto_base_y - 230, "Leito marinho")
+
+    nome_poco = st.session_state.get("poco", "Poço")
+
+    map_left, map_right, map_top, map_bottom = desenhar_caixa_padrao(
+        titulo=f"Localização do poço {nome_poco}",
+        x_left=left_margin,
+        x_right=right_margin,
+        y_top=mid_y - 10,
+        y_bottom=page_bottom
+    )
+
+    mapa_folium_pdf = st.session_state.get("mapa_folium_pdf", None)
+
+    if mapa_folium_pdf is not None:
+        try:
+            _rel_desenhar_mapa_pdf_com_zoom(
+                c=c,
+                mapa_folium=mapa_folium_pdf,
+                left=map_left,
+                right=map_right,
+                top=map_top,
+                bottom=map_bottom,
+            )
+        except Exception as e:
+            c.setFont("Helvetica", 10)
+            c.drawString(map_left, map_top - 15, f"Não foi possível inserir o mapa: {e}")
+    else:
+        c.setFont("Helvetica", 10)
+        c.drawString(map_left, map_top - 15, "Mapa: Não informado")
+
+    _rel_draw_footer(c, width, footer_y)
+    c.showPage()
+
+
+def _rel_pagina_analise_por_fase(c, width, height, logo_path, footer_y):
+    if st.session_state.get("option") != "Retroanálise":
+        return
+
+    if "_desenhar_pagina_fase" not in globals() or "_montar_df_cmp_global" not in globals():
+        y = _rel_abrir_pagina(c, width, height, logo_path, footer_y, "Análise por fase")
+        c.setFont("Helvetica-Oblique", 10)
+        c.drawString(
+            40,
+            y,
+            "Para esta página ficar igual à versão 6.0, copie os helpers de análise por fase da 6.0."
+        )
+        _rel_draw_footer(c, width, footer_y)
+        c.showPage()
+        return
+
+    fases_df = st.session_state.get("fases_df", None)
+    sapatas_df = st.session_state.get("sapatas_df", None)
+    df_suav = st.session_state.get("df_suav", None)
+    df_mud = st.session_state.get("df_mud", None)
+
+    df_cmp_global = _montar_df_cmp_global(df_mud, df_suav)
+
+    td_final = None
+
+    if isinstance(df_cmp_global, pd.DataFrame) and not df_cmp_global.empty:
+        td_final = pd.to_numeric(
+            df_cmp_global["Profundidade (m)"],
+            errors="coerce"
+        ).max()
+
+    if not isinstance(fases_df, pd.DataFrame) or fases_df.empty:
+        fases_df = pd.DataFrame(columns=["Ordem", "Fase"])
+
+    if not isinstance(sapatas_df, pd.DataFrame) or sapatas_df.empty:
+        sapatas_df = pd.DataFrame(columns=["Ordem", "Fase", "Profundidade da sapata (m)"])
+
+    fases_df = fases_df.copy()
+    sapatas_df = sapatas_df.copy()
+
+    if "Ordem" in fases_df.columns:
+        fases_df = fases_df.sort_values("Ordem")
+
+    if "Ordem" in sapatas_df.columns:
+        sapatas_df = sapatas_df.sort_values("Ordem")
+
+    fases_df = fases_df.reset_index(drop=True)
+    sapatas_df = sapatas_df.reset_index(drop=True)
+
+    if "Profundidade da sapata (m)" in sapatas_df.columns:
+        sapatas_df["Profundidade da sapata (m)"] = pd.to_numeric(
+            sapatas_df["Profundidade da sapata (m)"],
+            errors="coerce"
+        )
+
+        sapatas_df = sapatas_df.dropna(subset=["Profundidade da sapata (m)"])
+        sapatas_df = sapatas_df[sapatas_df["Profundidade da sapata (m)"] > 0].copy()
+        sapatas_df = sapatas_df.reset_index(drop=True)
+
+    if td_final is not None and pd.notna(td_final):
+        td_final = float(td_final)
+    else:
+        td_final = None
+
+    for i, row_fase in fases_df.iterrows():
+        fase_broca = row_fase.get("Fase", None)
+
+        if fase_broca is None or pd.isna(fase_broca):
+            continue
+
+        if i == 0:
+            prof_ini = 0.0
+        else:
+            if i - 1 < len(sapatas_df):
+                prof_ini = sapatas_df.iloc[i - 1]["Profundidade da sapata (m)"]
+            else:
+                continue
+
+        existe_sapata_da_fase = i < len(sapatas_df)
+
+        if existe_sapata_da_fase:
+            fase_revestimento = sapatas_df.iloc[i]["Fase"]
+            prof_fim = sapatas_df.iloc[i]["Profundidade da sapata (m)"]
+
+            titulo = (
+                f"Análise da fase {_fmt_polegada(fase_broca)}, "
+                f"revestimento {_fmt_polegada(fase_revestimento)}"
+            )
+
+            incluir_fim = False
+
+        else:
+            if td_final is None:
+                continue
+
+            fase_revestimento = None
+            prof_fim = td_final
+            titulo = f"Análise da fase {_fmt_polegada(fase_broca)}, poço aberto"
+            incluir_fim = True
+
+        try:
+            prof_ini = float(prof_ini)
+            prof_fim = float(prof_fim)
+        except Exception:
+            continue
+
+        if pd.isna(prof_ini) or pd.isna(prof_fim):
+            continue
+
+        if prof_fim <= prof_ini:
+            continue
+
+        _desenhar_pagina_fase(
+            c,
+            width,
+            height,
+            logo_path,
+            footer_y,
+            titulo=titulo,
+            fase_broca=fase_broca,
+            fase_revestimento=fase_revestimento,
+            prof_ini=prof_ini,
+            prof_fim=prof_fim,
+            df_cmp_global=df_cmp_global,
+            draw_header=_rel_draw_header,
+            incluir_fim=incluir_fim
+        )
+
+
+def _rel_linhas_sobrecarga():
+    gard_sel = st.session_state.get("gard", [])
+    ex_sel = st.session_state.get("ex", "")
+
+    if isinstance(gard_sel, list):
+        gard_sel = ", ".join(gard_sel) if gard_sel else "Nenhum"
+
+    if not ex_sel:
+        ex_sel = "Não informado"
+
+    linhas_esq = [
+        ("Densidade:", gard_sel),
+        ("Extrapolação:", ex_sel),
+    ]
+
+    linhas_dir = []
+
+    if ex_sel == "Ativada":
+        linhas_dir.append(("Densidade média camadas sup.:", _rel_fmt(st.session_state.get("ds"), " g/cm³", 3)))
+
+    linhas_dir.append(("Air Gap:", _rel_fmt(st.session_state.get("rtkb"), " m")))
+
+    if st.session_state.get("tipo_poco") == "Onshore":
+        linhas_dir.append(("Elevação DATUM:", _rel_fmt(st.session_state.get("es"), " m")))
+    else:
+        linhas_dir.append(("Lâmina d'água:", _rel_fmt(st.session_state.get("lda"), " m")))
+
+    return linhas_esq, linhas_dir
+
+
+def _rel_pagina_sobrecarga(c, width, height, logo_path, footer_y):
+    y = _rel_abrir_pagina(c, width, height, logo_path, footer_y, "Gradiente de Sobrecarga")
+
+    fig = _rel_get_fig("fig_gs")
+
+    y = _rel_desenhar_figura(
+        c,
+        fig,
+        left=40,
+        right=width - 40,
+        top=y,
+        bottom=footer_y + 190,
+        dpi=105
+    )
+
+    linhas_esq, linhas_dir = _rel_linhas_sobrecarga()
+
+    _rel_desenhar_caixa_duas_colunas(
+        c,
+        y_top=y,
+        titulo_secao="Parâmetros Utilizados no Cálculo",
+        linhas_esq=linhas_esq,
+        linhas_dir=linhas_dir,
+        titulo_pagina="Gradiente de Sobrecarga",
+        width=width,
+        height=height,
+        logo_path=logo_path,
+        footer_y=footer_y,
+    )
+
+    _rel_draw_footer(c, width, footer_y)
+    c.showPage()
+
+
+def _rel_pagina_figura_unica(c, width, height, logo_path, footer_y, titulo, fig, bottom_extra=20):
+    y = _rel_abrir_pagina(c, width, height, logo_path, footer_y, titulo)
+
+    _rel_desenhar_figura(
+        c,
+        fig,
+        left=40,
+        right=width - 40,
+        top=y,
+        bottom=footer_y + bottom_extra,
+        dpi=105
+    )
+
+    _rel_draw_footer(c, width, footer_y)
+    c.showPage()
+
+
+def _rel_linhas_tabela_trending():
+    n_trending = int(st.session_state.get("n_trending", 0) or 0)
+
+    rows = []
+    def pegar(*chaves):
+        for chave in chaves:
+            if chave in st.session_state:
+                return st.session_state.get(chave)
+        return None
+    for i in range(n_trending):
+        pp1 = pegar(f"trend_pp1_{i}", f"pp1_{i}")
+        pp2 = pegar(f"trend_pp2_{i}", f"pp2_{i}")
+        s1 = pegar(f"trend_s1_{i}", f"s1_{i}")
+        s2 = pegar(f"trend_s2_{i}", f"s2_{i}")
+        prof_ini = pegar(f"trend_prof_ini_{i}", f"prof_ini_trending_{i}")
+        prof_fim = pegar(f"trend_prof_fim_{i}", f"prof_fim_trending_{i}")
+
+        intervalo = "Não informado"
+
+        try:
+            if prof_ini is not None and prof_fim is not None and float(prof_fim) > float(prof_ini):
+                intervalo = f"{float(prof_ini):.0f} - {float(prof_fim):.0f} m"
+        except Exception:
             pass
 
-    with c2:
-        with st.container(border=True):
+        rows.append([
+            f"Trending {i + 1}",
+            _rel_fmt(pp1, " m", 0),
+            _rel_fmt(pp2, " m", 0),
+            _rel_fmt(s1, "", 2),
+            _rel_fmt(s2, "", 2),
+            intervalo,
+        ])
+
+    return rows
+
+
+def _rel_linhas_tabela_lbf():
+    n_lbf = int(st.session_state.get("n_lbf", st.session_state.get("n_trending", 0)) or 0)
+
+    rows = []
+    def pegar(*chaves):
+        for chave in chaves:
+            if chave in st.session_state:
+                return st.session_state.get(chave)
+        return None
+    for i in range(n_lbf):
+        lbf = pegar(f"lbf_valor_{i}", f"lbf_{i}")
+        inclbf = pegar(f"lbf_inclinacao_{i}", f"inclbf_{i}")
+        prof_ini = pegar(f"lbf_prof_ini_{i}", f"prof_ini_lbf_{i}")
+        prof_fim = pegar(f"lbf_prof_fim_{i}", f"prof_fim_lbf_{i}")
+
+        intervalo = "Não informado"
+
+        try:
+            if prof_ini is not None and prof_fim is not None and float(prof_fim) > float(prof_ini):
+                intervalo = f"{float(prof_ini):.0f} - {float(prof_fim):.0f} m"
+        except Exception:
             pass
 
+        rows.append([
+            f"LBF {i + 1}",
+            _rel_fmt(lbf, "", 2),
+            _rel_fmt(inclbf, "", 2),
+            intervalo,
+        ])
 
+    return rows
+
+
+def _rel_pagina_trending(c, width, height, logo_path, footer_y):
+    y = _rel_abrir_pagina(c, width, height, logo_path, footer_y, "Pressão de Poros | Trending")
+
+    fig_trending = _rel_get_fig("fig_trending_poros", "fig1")
+
+    y = _rel_desenhar_figura(
+        c,
+        fig_trending,
+        left=40,
+        right=width - 40,
+        top=y,
+        bottom=footer_y + 180,
+        dpi=105
+    )
+
+    rows = _rel_linhas_tabela_trending()
+
+    y = _rel_desenhar_tabela_padrao(
+        c=c,
+        y_top=y,
+        titulo_tabela="Dados do Trending",
+        headers=["Trending", "P1", "P2", "S1", "S2", "Intervalo"],
+        rows=rows,
+        width=width,
+        height=height,
+        logo_path=logo_path,
+        footer_y=footer_y,
+        titulo_pagina="Pressão de Poros | Trending",
+        col_fracs=[0.18, 0.14, 0.14, 0.13, 0.13, 0.28],
+    )
+
+    _rel_draw_footer(c, width, footer_y)
+    c.showPage()
+
+
+def _rel_pagina_lbf(c, width, height, logo_path, footer_y):
+    y = _rel_abrir_pagina(c, width, height, logo_path, footer_y, "Linda Base de Folhelhos")
+
+    fig_lbf = _rel_get_fig("fig_lbf_poros", "fig2")
+
+    y = _rel_desenhar_figura(
+        c,
+        fig_lbf,
+        left=40,
+        right=width - 40,
+        top=y,
+        bottom=footer_y + 170,
+        dpi=105
+    )
+
+    rows = _rel_linhas_tabela_lbf()
+
+    y = _rel_desenhar_tabela_padrao(
+        c=c,
+        y_top=y,
+        titulo_tabela="Dados da LBF",
+        headers=["LBF", "Ponto inicial", "Inclinação", "Intervalo"],
+        rows=rows,
+        width=width,
+        height=height,
+        logo_path=logo_path,
+        footer_y=footer_y,
+        titulo_pagina="Pressão de Poros | LBF",
+        col_fracs=[0.18, 0.25, 0.25, 0.32],
+    )
+
+    _rel_draw_footer(c, width, footer_y)
+    c.showPage()
+
+
+def _rel_pagina_kick_tolerance(c, width, height, logo_path, footer_y):
+    y = _rel_abrir_pagina(c, width, height, logo_path, footer_y, "Kick Tolerance")
+
+    fig_asp = _rel_get_fig("fig_asp")
+
+    _rel_desenhar_figura(
+        c,
+        fig_asp,
+        left=40,
+        right=width - 40,
+        top=y,
+        bottom=footer_y + 20,
+        dpi=105
+    )
+
+    _rel_draw_footer(c, width, footer_y)
+    c.showPage()
+
+
+def _rel_pagina_fluido(c, width, height, logo_path, footer_y):
+    y = _rel_abrir_pagina(c, width, height, logo_path, footer_y, "Peso do Fluido")
+
+    fig_fp = _rel_get_fig("fig_fp")
+
+    y = _rel_desenhar_figura(
+        c,
+        fig_fp,
+        left=40,
+        right=width - 40,
+        top=y,
+        bottom=footer_y + 170,
+        dpi=105
+    )
+
+    df_intervalos_fluido = _rel_get_df("df_intervalos_fluido")
+
+    y = _rel_desenhar_tabela_df_rapida(
+        c=c,
+        y_top=y,
+        titulo_tabela="Peso do Fluido por Fase",
+        df=df_intervalos_fluido,
+        colunas=[
+            "Topo do Intervalo (m)",
+            "Base do Intervalo (m)",
+            "Margem do Intervalo (lb/gal)",
+            "Peso do Fluido (lb/gal)",
+            "Linha média do Intervalo (lb/gal)",
+        ],
+        width=width,
+        height=height,
+        logo_path=logo_path,
+        footer_y=footer_y,
+        titulo_pagina="Peso do Fluido",
+        max_linhas=18,
+        col_fracs=[0.19, 0.19, 0.22, 0.20, 0.20],
+    )
+
+    _rel_draw_footer(c, width, footer_y)
+    c.showPage()
+
+
+def _rel_pagina_eventos_operacionais(c, width, height, logo_path, footer_y):
+    y = _rel_abrir_pagina(c, width, height, logo_path, footer_y, "Eventos Operacionais")
+
+    fig2d = _rel_get_fig("fig2d")
+
+    y = _rel_desenhar_figura(
+        c,
+        fig2d,
+        left=40,
+        right=width - 40,
+        top=y,
+        bottom=footer_y + 210,
+        dpi=105
+    )
+
+    df_eventos_excel = _rel_get_df("df_eventos")
+    df_eventos_manuais = _rel_get_df("df_eventos_manuais")
+    df_marks = _rel_get_df("traj_marks_calc")
+
+    eventos_para_tabela = []
+
+    if isinstance(df_eventos_excel, pd.DataFrame) and not df_eventos_excel.empty:
+        df_tmp = df_eventos_excel.copy()
+        df_tmp["Origem"] = df_tmp.get("Origem", "Excel")
+        eventos_para_tabela.append(df_tmp)
+
+    if isinstance(df_eventos_manuais, pd.DataFrame) and not df_eventos_manuais.empty:
+        df_tmp = df_eventos_manuais.copy()
+        df_tmp["Origem"] = df_tmp.get("Origem", "Manual")
+        eventos_para_tabela.append(df_tmp)
+
+    if eventos_para_tabela:
+        df_evt = pd.concat(eventos_para_tabela, ignore_index=True)
+    elif isinstance(df_marks, pd.DataFrame) and not df_marks.empty:
+        df_evt = df_marks.copy()
+    else:
+        df_evt = pd.DataFrame()
+
+    if isinstance(df_evt, pd.DataFrame) and not df_evt.empty:
+        for col in ["MD Inicial", "MD Final", "TVD Inicial", "TVD Final"]:
+            if col in df_evt.columns:
+                df_evt[col] = pd.to_numeric(df_evt[col], errors="coerce")
+
+        if "Evento" in df_evt.columns:
+            df_evt["Evento"] = df_evt["Evento"].astype(str).str.strip()
+
+        if "MD Inicial" in df_evt.columns:
+            df_evt = df_evt.dropna(subset=["MD Inicial"])
+
+        if "Evento" in df_evt.columns:
+            df_evt = df_evt[df_evt["Evento"] != ""]
+
+        if "Origem" not in df_evt.columns:
+            df_evt["Origem"] = df_evt.get("Tipo", "Não informado")
+
+        colunas_eventos = [
+            "Origem",
+            "Evento",
+            "MD Inicial",
+            "MD Final",
+            "TVD Inicial",
+            "TVD Final",
+            "Comentário",
+        ]
+
+        y = _rel_desenhar_tabela_df_rapida(
+            c=c,
+            y_top=y,
+            titulo_tabela="Eventos Operacionais",
+            df=df_evt,
+            colunas=colunas_eventos,
+            width=width,
+            height=height,
+            logo_path=logo_path,
+            footer_y=footer_y,
+            titulo_pagina="Eventos Operacionais",
+            max_linhas=20,
+            col_fracs=[0.12, 0.24, 0.13, 0.13, 0.13, 0.13, 0.12],
+        )
+
+    _rel_draw_footer(c, width, footer_y)
+    c.showPage()
+
+
+def _rel_pagina_anotacoes(c, width, height, logo_path, footer_y):
+    y = _rel_abrir_pagina(c, width, height, logo_path, footer_y, "Anotações")
+
+    left_margin = 40
+    right_margin = width - 40
+
+    anotacoes_txt = st.session_state.get("anotacoes", "")
+    anotacoes_txt = str(anotacoes_txt).strip()
+
+    if not anotacoes_txt:
+        anotacoes_txt = "Nenhuma anotação registrada para este poço."
+
+    box_width = right_margin - left_margin
+    box_x = left_margin
+
+    top = y
+    bottom = footer_y + 20
+    box_height = top - bottom
+
+    c.setFillColorRGB(0.95, 0.95, 0.95)
+    c.rect(box_x, bottom, box_width, box_height, fill=1, stroke=0)
+
+    c.setStrokeColorRGB(0, 0, 0)
+    c.setLineWidth(0.8)
+    c.rect(box_x, bottom, box_width, box_height, fill=0, stroke=1)
+
+    c.line(box_x, top - 22, box_x + box_width, top - 22)
+
+    c.setFillColorRGB(0, 0, 0)
+    c.setFont("Helvetica-Bold", 12)
+    c.drawString(box_x + 10, top - 16, "Registro de anotações")
+
+    text_x = box_x + 12
+    text_y = top - 38
+    max_width = box_width - 24
+
+    _rel_draw_wrapped_text_justificado(
+        c=c,
+        text=anotacoes_txt,
+        x=text_x,
+        y=text_y,
+        max_width=max_width,
+        min_y=bottom + 12,
+        width=width,
+        height=height,
+        logo_path=logo_path,
+        footer_y=footer_y,
+        titulo_pagina="Anotações",
+        line_height=12,
+        font_name="Helvetica",
+        font_size=10,
+    )
+
+    _rel_draw_footer(c, width, footer_y)
+    c.showPage()
+
+
+def _rel_pagina_disclaimer(c, width, height, logo_path, footer_y):
+    y = _rel_abrir_pagina(c, width, height, logo_path, footer_y, "Disclaimer")
+
+    texto = (
+        "O USO E A CONFIABILIDADE DAS INFORMAÇÕES FORNECIDAS PELO SYNGULAR "
+        "GEOPRESSURE ANALYSIS A EMPRESA QUE UTILIZA ESTE SOFTWARE (INCLUINDO "
+        "QUAISQUER DE SUAS AFILIADAS, PARCEIROS, REPRESENTANTES, AGENTES, "
+        "CONSULTORES E FUNCIONÁRIOS) ESTÃO SUJEITOS AOS TERMOS E CONDIÇÕES "
+        "ACORDADOS ENTRE ESTA E A SYNGULAR SOLUTIONS, INCLUINDO: (a) ISENÇÃO "
+        "DE RESPONSABILIDADE E RENÚNCIA DE GARANTIAS RELACIONADAS AO USO DAS "
+        "INFORMAÇÕES FORNECIDAS PELO CLIENTE; E (b) A RESPONSABILIDADE TOTAL "
+        "E EXCLUSIVA DO CLIENTE POR QUAISQUER INFERÊNCIAS OU DECISÕES TOMADAS "
+        "COM BASE NESTAS INFORMAÇÕES FORNECIDAS."
+    )
+
+    left_margin = 55
+    right_margin = width - 55
+    max_width = right_margin - left_margin
+
+    y -= 20
+
+    _rel_draw_wrapped_text_justificado(
+        c=c,
+        text=texto,
+        x=left_margin,
+        y=y,
+        max_width=max_width,
+        min_y=footer_y + 35,
+        width=width,
+        height=height,
+        logo_path=logo_path,
+        footer_y=footer_y,
+        titulo_pagina="Disclaimer",
+        line_height=16,
+        font_name="Helvetica",
+        font_size=11,
+    )
+
+    _rel_draw_footer(c, width, footer_y)
+    c.showPage()
+
+
+def _rtp_preparar_dados_para_relatorio_final():
+    """
+    Garante que os dados do Relatório Técnico de Poço existam
+    mesmo que o usuário não tenha aberto a aba 'Relatório Téc. de Poço'
+    antes de gerar o relatório final.
+    """
+    dados_auto = _rtp_coletar_dados_automaticos()
+    dados_poco = _rtp_preparar_dados_poco()
+
+    return dados_auto, dados_poco
+
+
+def _rel_inserir_rtp_depois_da_capa(pdf_bytes):
+    """
+    Insere a folha do Relatório Técnico de Poço logo após a capa
+    do relatório final.
+
+    Requer pypdf ou PyPDF2 instalado.
+    """
+    try:
+        try:
+            from pypdf import PdfReader, PdfWriter
+        except Exception:
+            from PyPDF2 import PdfReader, PdfWriter
+
+        dados_auto, dados_poco = _rtp_preparar_dados_para_relatorio_final()
+
+        rtp_bytes = _rtp_gerar_pdf_bytes(
+            dados_auto=dados_auto,
+            dados_poco=dados_poco,
+        )
+
+        rel_reader = PdfReader(BytesIO(pdf_bytes))
+        rtp_reader = PdfReader(BytesIO(rtp_bytes))
+        writer = PdfWriter()
+
+        # Página 1: capa do relatório final
+        if len(rel_reader.pages) > 0:
+            writer.add_page(rel_reader.pages[0])
+
+        # Página 2: Relatório Técnico de Poço
+        for page in rtp_reader.pages:
+            writer.add_page(page)
+
+        # Demais páginas do relatório final
+        for page in rel_reader.pages[1:]:
+            writer.add_page(page)
+
+        saida = BytesIO()
+        writer.write(saida)
+        saida.seek(0)
+
+        return saida.getvalue()
+
+    except Exception as e:
+        st.warning(
+            "Não foi possível inserir a folha do Relatório Técnico de Poço "
+            f"após a capa. O relatório será gerado sem essa folha. Detalhe: {e}"
+        )
+        return pdf_bytes
+
+
+
+def gerar_relatorio_pdf():
+    pdf_buffer = io.BytesIO()
+
+    c = canvas.Canvas(pdf_buffer, pagesize=letter, pageCompression=1)
+
+    width, height = letter
+    footer_y = 20
+
+    paginas_pdf_selecionadas = _rel_paginas_ordenadas_selecionadas()
+
+    logo_path = logo
+
+    # Página fixa 1: Capa
+    _rel_pagina_capa(c, width, height, logo_path, footer_y)
+
+    # Páginas selecionáveis, sempre na sequência definida em PAGINAS_PDF_OPCOES
+    for pagina in paginas_pdf_selecionadas:
+        if pagina == "dados_poco_elevacao":
+            _rel_pagina_dados_poco_elevacao(c, width, height, logo_path, footer_y)
+
+        elif pagina == "pressao_poros_lbf":
+            _rel_pagina_lbf(c, width, height, logo_path, footer_y)
+
+        elif pagina == "sobrecarga":
+            _rel_pagina_sobrecarga(c, width, height, logo_path, footer_y)
+
+        elif pagina == "pressao_poros_trending":
+            _rel_pagina_trending(c, width, height, logo_path, footer_y)
+
+        elif pagina == "pressao_poros_grafico":
+            _rel_pagina_figura_unica(
+                c,
+                width,
+                height,
+                logo_path,
+                footer_y,
+                "Gradiente de Pressão de Poros",
+                _rel_get_fig("fig_pp", "fig_pressao_poros"),
+                bottom_extra=20
+            )
+
+        elif pagina == "janela_operacional":
+            _rel_pagina_figura_unica(
+                c,
+                width,
+                height,
+                logo_path,
+                footer_y,
+                "Janela Operacional",
+                _rel_get_fig("fig_jo"),
+                bottom_extra=20
+            )
+
+        elif pagina == "fratura_tensoes_minimas":
+            _rel_pagina_figura_unica(
+                c,
+                width,
+                height,
+                logo_path,
+                footer_y,
+                "Gradiente de Fratura",
+                _rel_get_fig("fig_fratura"),
+                bottom_extra=20
+            )
+
+        elif pagina == "kick_tolerance":
+            _rel_pagina_kick_tolerance(c, width, height, logo_path, footer_y)
+
+        elif pagina == "esquematico_poco_previsao":
+            _rel_pagina_figura_unica(
+                c,
+                width,
+                height,
+                logo_path,
+                footer_y,
+                "Esquemático do Poço",
+                _rel_get_fig("fig_esquematico_asp"),
+                bottom_extra=20
+            )
+
+        elif pagina == "fluido_previsao":
+            _rel_pagina_fluido(c, width, height, logo_path, footer_y)
+
+        elif pagina == "trajetoria_eventos":
+            _rel_pagina_eventos_operacionais(c, width, height, logo_path, footer_y)
+
+        elif pagina == "anotacoes":
+            _rel_pagina_anotacoes(c, width, height, logo_path, footer_y)
+
+    # Página fixa final: Disclaimer
+    _rel_pagina_disclaimer(c, width, height, logo_path, footer_y)
+
+    c.save()
+
+    pdf_buffer.seek(0)
+    pdf_bytes = pdf_buffer.getvalue()
+
+    # Insere a folha do Relatório Técnico de Poço logo após a capa
+    pdf_bytes = _rel_inserir_rtp_depois_da_capa(pdf_bytes)
+
+    return pdf_bytes
+
+
+# ABA RELATÓRIOS
 def pagina_relatorio():
     st.header("Relatório")
-    c1, c2 = st.columns((1, 1))
 
-    with c1:
+    paginas_disponiveis = obter_paginas_relatorio_disponiveis()
+
+    if st.session_state.get("pdf_paginas_selecionadas") is None:
+        st.session_state.pdf_paginas_selecionadas = list(paginas_disponiveis.keys())
+
+    st.session_state.pdf_paginas_selecionadas = [
+        p for p in st.session_state.pdf_paginas_selecionadas
+        if p in paginas_disponiveis
+    ]
+
+    nome_base = (
+            st.session_state.get("well_name")
+            or st.session_state.get("poco")
+            or "Relatorio_Final"
+    )
+
+    nome_base = re.sub(r"[^a-zA-Z0-9_\-]+", "_", str(nome_base)).strip("_")
+
+    if not nome_base:
+        nome_base = "Relatorio_Final"
+
+    report_name = f"{nome_base}.pdf"
+
+    col_config, col_preview, c3 = st.columns((0.65, 1., 0.25))
+
+    with col_config:
         with st.container(border=True):
-            pass
+            st.markdown("### Páginas do relatório")
 
-    with c2:
-        with st.container(border=True):
-            pass
+            col_sel1, col_sel2 = st.columns(2)
+
+            with col_sel1:
+                if st.button(
+                        "Selecionar todas",
+                        use_container_width=True,
+                        type="primary",
+                        key="relatorio_selecionar_todas"
+                ):
+                    st.session_state.pdf_paginas_selecionadas = list(paginas_disponiveis.keys())
+                    _rel_limpar_cache_pdf()
+                    st.rerun()
+
+            with col_sel2:
+                if st.button(
+                        "Limpar",
+                        use_container_width=True,
+                        type="primary",
+                        key="relatorio_limpar_paginas"
+                ):
+                    st.session_state.pdf_paginas_selecionadas = []
+                    _rel_limpar_cache_pdf()
+                    st.rerun()
+
+            selecao_anterior = st.session_state.get(
+                "_pdf_paginas_selecionadas_anterior",
+                st.session_state.pdf_paginas_selecionadas.copy()
+            )
+
+            paginas_escolhidas = st.multiselect(
+                "Escolha quais páginas devem aparecer no PDF:",
+                options=list(paginas_disponiveis.keys()),
+                default=st.session_state.pdf_paginas_selecionadas,
+                format_func=lambda x: paginas_disponiveis.get(x, x),
+                key="pdf_paginas_multiselect_v62"
+            )
+
+            st.session_state.pdf_paginas_selecionadas = paginas_escolhidas
+
+            if paginas_escolhidas != selecao_anterior:
+                _rel_limpar_cache_pdf()
+
+            st.session_state._pdf_paginas_selecionadas_anterior = paginas_escolhidas.copy()
+
+            if not paginas_escolhidas:
+                st.warning("Selecione pelo menos uma página para gerar o relatório.")
+
+            view = st.button(
+                "📑 Ver Relatório",
+                key="pdf_view_bt_v62",
+                use_container_width=True,
+                disabled=not st.session_state.pdf_paginas_selecionadas,
+                type="primary"
+            )
+
+            if view:
+                with st.spinner("Gerando relatório..."):
+                    st.session_state.pdf_bytes = gerar_relatorio_pdf()
+                    st.session_state.pdf_ready = True
+                    st.session_state.pdf_view_open = True
+
+            if st.session_state.pdf_ready and st.session_state.pdf_bytes is not None:
+                st.download_button(
+                    label="⬇️ Baixar Relatório",
+                    data=st.session_state.pdf_bytes,
+                    file_name=report_name,
+                    mime="application/pdf",
+                    use_container_width=True,
+                    type="primary",
+                    key="download_relatorio_v62"
+                )
+
+    with col_preview:
+        with st.container(border=True, height=900):
+            if st.session_state.pdf_view_open and st.session_state.pdf_bytes is not None:
+                pdf_viewer(
+                    input=st.session_state.pdf_bytes,
+                    width=700,
+                    pages_vertical_spacing=12
+                )
+            else:
+                st.info("Clique em **Ver Relatório** para gerar a pré-visualização.")
 
 
+# ABA INFO
 def pagina_info():
-    st.header("Informações sobre o SYGA")
-    pass
+    st.title("📘 Informações Gerais do SYGA")
+
+    parameters = {
+        "Curvas de geopressões": {
+            "Gradiente": {
+                "Sigla": ["Gradiente"],
+                "Nome": [
+                    "Variação de pressão ao longo de um intervalo de profundidade, "
+                    "medido com base em um determinado referencial (Datum)."
+                ],
+                "Unidade": "massa/volume"
+            },
+            "Sobrecarga": {
+                "Sigla": ["Sobrecarga"],
+                "Nome": [
+                    "Pressão gerada em uma certa profundidade devido ao peso das "
+                    "camadas de rochas sobrepostas. Pode ser expressa em gradiente."
+                ],
+                "Unidade": "pressão ou massa/volume"
+            },
+            "Pressão de poros": {
+                "Sigla": ["Pressão de poros"],
+                "Nome": [
+                    "Pressão contida nos poros da rocha. Normalmente é expressa em gradiente."
+                ],
+                "Unidade": "pressão ou massa/volume"
+            },
+            "Pressão de fratura": {
+                "Sigla": ["Pressão de fratura"],
+                "Nome": [
+                    "Pressão necessária para levar a formação à falha por tração, "
+                    "podendo ser fratura superior ou inferior. Normalmente é expressa em gradiente."
+                ],
+                "Unidade": "pressão ou massa/volume"
+            },
+            "Pressão de colapso": {
+                "Sigla": ["Pressão de colapso"],
+                "Nome": [
+                    "Pressão necessária para levar a formação à falha por cisalhamento, "
+                    "podendo ser colapso superior ou inferior. Pode ser expressa em gradiente."
+                ],
+                "Unidade": "pressão ou massa/volume"
+            },
+        },
+        "Perfil": {
+            "Sônico compressional": {
+                "Sigla": ["DT", "DTCO"],
+                "Nome": ["Delta-T Compressional"],
+                "Unidade": "µs/ft"
+            },
+            "Sônico cisalhante": {
+                "Sigla": ["DTS", "DTSM"],
+                "Nome": ["Compressional Wave Transit Time", "Sonic Transit Time"],
+                "Unidade": "µs/ft"
+            },
+            "Densidade": {
+                "Sigla": ["RHOB", "DEN"],
+                "Nome": ["Standard Resolution Formation Density", "Bulk density"],
+                "Unidade": "g/cm³"
+            },
+            "Gamma-Ray": {
+                "Sigla": ["GR"],
+                "Nome": ["Gamma Ray"],
+                "Unidade": "gAPI"
+            }
+        }
+    }
+
+    col1, col2 = st.columns([1, 2])
+
+    with col1:
+        with st.container(border=True):
+            cat = st.selectbox(
+                "Selecione a categoria:",
+                options=list(parameters.keys()),
+                key="info_syga_categoria"
+            )
+
+            perfil_selecionado = st.selectbox(
+                "Selecione um perfil:",
+                options=list(parameters[cat].keys()),
+                key="info_syga_perfil"
+            )
+
+    with col2:
+        with st.container(border=True):
+            dados = parameters[cat][perfil_selecionado]
+
+            if cat == "Curvas de geopressões":
+                op1 = "Nome"
+                op2 = "Definição"
+                titulo = "Curvas de Geopressões"
+            else:
+                op1 = "Sigla(s)"
+                op2 = "Nome(s)"
+                titulo = "Perfil"
+
+            siglas = ", ".join(dados["Sigla"])
+            nomes = ", ".join(dados["Nome"])
+
+            st.markdown(
+                f"""
+                ### ℹ️ {titulo} - **{perfil_selecionado}**
+
+                - **{op1}:** `{siglas}`
+                - **{op2}:** {nomes}
+                - **Unidade:** *{dados['Unidade']}*
+                """,
+                unsafe_allow_html=True
+            )
+
+    st.markdown("---")
+    st.info("💡 Dica: selecione um perfil na caixa à esquerda para visualizar os detalhes.")
+
+
+def sincronizar_estado_sapatas_antes_navegacao():
+    poco_atual = st.session_state.get(
+        "well_selected",
+        st.session_state.get("poco", "Poço"),
+    )
+    metodo_atual = st.session_state.get("metodo_kt", "Cima para Baixo")
+    _salvar_ultima_sapata_persistente(poco_atual, metodo_atual)
+
+    sincronizar_widgets_persistentes([
+        ("metodo_gradiente_fratura", "_w_metodo_gradiente_fratura"),
+        ("metodo_kt", "_w_metodo_kt"),
+        ("prc", "_w_prc"),
+        ("prs", "_w_prs"),
+        ("ms", "_w_ms"),
+        ("vk", "_w_vk"),
+        ("mskt", "_w_mskt"),
+        ("ef", "_w_ef"),
+        ("ash", "_w_ash"),
+        ("odrc", "_w_odrc"),
+        ("odrs", "_w_odrs"),
+        ("msf", "_w_msf"),
+        ("dk", "_w_dk"),
+        ("hk", "_w_hk"),
+        ("cmf", "_w_cmf"),
+        ("bha_escolhido", "_w_bha_escolhido"),
+        ("leg_sa", "_w_leg_sa"),
+        ("x_min_sa", "_w_x_min_sa"),
+        ("x_max_sa", "_w_x_max_sa"),
+        ("x_step_sa", "_w_x_step_sa"),
+        ("y_min_sa", "_w_y_min_sa"),
+        ("y_max_sa", "_w_y_max_sa"),
+        ("y_step_sa", "_w_y_step_sa"),
+    ])
+
+
+def sincronizar_estado_fluido_antes_navegacao():
+    sincronizar_widgets_persistentes([
+        ("leg_fp", "_w_leg_fp"),
+        ("curvas_fp_visiveis", "_w_curvas_fp_visiveis"),
+        ("mpf", "_w_mpf"),
+        ("x_min_fp", "_w_x_min_fp"),
+        ("x_max_fp", "_w_x_max_fp"),
+        ("x_step_fp", "_w_x_step_fp"),
+        ("y_min_fp", "_w_y_min_fp"),
+        ("y_max_fp", "_w_y_max_fp"),
+        ("y_step_fp", "_w_y_step_fp"),
+    ])
 
 
 def configurar_estado_inicial():
@@ -8771,37 +26157,29 @@ def configurar_estado_inicial():
         "submenu_sapatas": "Dados",
         "submenu_fluido": "Dados",
         "tree_menu_indice": 0,
-
         "read_step": 1,
         "traj_modo": "Planejada",
         "option": "Previsão de Geopressões",
-
         "tipo_poco": "Onshore",
         "datum": "RTKB",
         "_tipo_poco_anterior": "Onshore",
-
         "country_name": "Brasil",
         "user_name": "",
         "company_name": "",
         "field_name": "",
-
         "poco": "Não informado",
         "comments": "",
-
         "zona": 24,
         "hem": "Sul",
         "easting": 857718.96,
         "northing": 8933902.28,
         "raio": 0.1,
-
         "geo_auto_ok": False,
         "geo_auto_tentado": False,
-
         "main_xlsm": None,
         "main_xlsm_hash": None,
         "main_xlsm_import_key": None,
         "wb": None,
-
         "df1": pd.DataFrame(),
         "df2": pd.DataFrame(),
         "df_interp": pd.DataFrame(),
@@ -8810,19 +26188,15 @@ def configurar_estado_inicial():
         "df_eventos": pd.DataFrame(columns=["MD Inicial", "MD Final", "Evento"]),
         "sapatas_df": pd.DataFrame(),
         "fases_df": pd.DataFrame(),
-
         "lito_import_ok": False,
         "df_lito_excel": pd.DataFrame(),
         "pocos": {"Poço": {}},
         "well_selected": "Poço",
         "well_name": "Poço",
-
         "idg": "Não",
         "n_id": 1,
         "df_idade": pd.DataFrame(columns=["Topo (m)", "Base (m)", "Idade"]),
-
         "profundidade_maxima": None,
-
         "gard": ["Perfil de Densidade"],
         "gard_2": ["Miller"],
         "ex": "Desativada",
@@ -8842,30 +26216,39 @@ def configurar_estado_inicial():
         "ext_df": pd.DataFrame(),
         "df_sobrecarga": pd.DataFrame(),
         "fig_gs": None,
+        # ============================================================
+        # Relatório PDF
+        # ============================================================
+        "pdf_bytes": None,
+        "pdf_ready": False,
+        "pdf_params_hash": None,
+        "pdf_view_open": False,
+        "pdf_paginas_selecionadas": None,
+        "_pdf_paginas_selecionadas_anterior": None,
         "oes": pd.Series(dtype=float),
         "profs": pd.Series(dtype=float),
         "oesl": "G. de Sobrecarga",
-
         "expoente": 3.0,
         "anormal": 400.0,
         "gn": 8.5,
-
         "lft": "Calculado",
         "phi_constante": 30.0,
         "ucs": "Mechpro",
+        "ppg": 9.0,
+        "rw": 1.0,
+        "r": 1.0,
         "usar_direcoes_tensoes": False,
         "usar_relacao_tensoes": False,
-        "direcoes_tensoes_df": pd.DataFrame(columns=["Profundidade (m)", "Direção SH"]),
-        "relacao_tensoes_df": pd.DataFrame(columns=["Profundidade (m)", "SH% Sobrecarga", "Sh% Sobrecarga"]),
-
-
+        "direcoes_tensoes_df": pd.DataFrame({"Profundidade (m)": [0.0], "Direção SH": [90.0]}),
+        "relacao_tensoes_df": pd.DataFrame(
+            {"Profundidade (m)": [0.0], "SH% Sobrecarga": [0.80], "Sh% Sobrecarga": [0.78]}),
     }
 
     for chave, valor in defaults.items():
         if chave not in st.session_state:
             if isinstance(valor, pd.DataFrame):
                 st.session_state[chave] = valor.copy()
-            elif isinstance(valor, dict):
+            elif isinstance(valor, (dict, list)):
                 st.session_state[chave] = valor.copy()
             else:
                 st.session_state[chave] = valor
@@ -8891,7 +26274,23 @@ def texto_negrito(texto):
 
 def montar_sidebar():
     with st.sidebar:
-        st.title("Menu SYGA")
+        col_logo_1, col_logo_2, col_logo_3 = st.columns([0.13, 0.50, 0.15])
+
+        with col_logo_2:
+            st.image(img_logo_sidebar, use_container_width=True)
+
+        st.markdown(
+            """
+            <div style="
+                height: 1px;
+                background: rgba(49, 51, 63, 0.18);
+                margin: 0.75rem 0 1rem 0;
+            "></div>
+            """,
+            unsafe_allow_html=True
+        )
+
+        st.markdown("### Menu")
 
         items = [
             sac.TreeItem(texto_negrito("Entrada de Dados")),
@@ -8904,12 +26303,13 @@ def montar_sidebar():
             ]),
             sac.TreeItem(texto_negrito("Assentamento de Sapatas")),
             sac.TreeItem(texto_negrito("Fluido de Perfuração")),
+            sac.TreeItem(texto_negrito("Relatório Téc. de Poço")),
             sac.TreeItem(texto_negrito("Anotações")),
             sac.TreeItem(texto_negrito("Relatório")),
             sac.TreeItem(texto_negrito("Informações sobre o SYGA")),
         ]
 
-        if st.session_state.tree_menu_indice > 11:
+        if st.session_state.tree_menu_indice > 12:
             st.session_state.tree_menu_indice = 0
 
         item = sac.tree(
@@ -8960,9 +26360,10 @@ def montar_sidebar():
             ),
             7: ("Assentamento de Sapatas", {"submenu_sapatas": "Dados"}),
             8: ("Fluido de Perfuração", {"submenu_fluido": "Dados"}),
-            9: ("Anotações", {}),
-            10: ("Relatório", {}),
-            11: ("Informações sobre o SYGA", {}),
+            9: ("Relatório Téc. de Poço", {}),
+            10: ("Anotações", {}),
+            11: ("Relatório", {}),
+            12: ("Informações sobre o SYGA", {}),
         }
 
         if item in mapa:
@@ -8998,7 +26399,6 @@ def montar_sidebar():
                 }}
             </style>
             <div class="sidebar-footer">
-                <p>Poço: {poco_atual}</p>
                 <p>Developed by Adriel Oliveira - 2025</p>
             </div>
             """,
@@ -9016,6 +26416,7 @@ def renderizar_pagina():
         "Estabilidade de Poço": pagina_estabilidade,
         "Assentamento de Sapatas": pagina_sapatas,
         "Fluido de Perfuração": pagina_fluido,
+        "Relatório Téc. de Poço": pagina_relatorio_tecnico_poco,
         "Anotações": pagina_anotacoes,
         "Relatório": pagina_relatorio,
         "Informações sobre o SYGA": pagina_info,
@@ -9023,7 +26424,12 @@ def renderizar_pagina():
 
     pagina_atual = st.session_state.get("pagina", "Entrada de Dados")
 
-    if pagina_atual != "Entrada de Dados" and not arquivo_carregado():
+    paginas_sem_arquivo = [
+        "Entrada de Dados",
+        "Informações sobre o SYGA",
+    ]
+
+    if pagina_atual not in paginas_sem_arquivo and not arquivo_carregado():
         st.error('Por favor, insira um documento!', icon="🚨")
         return
 
@@ -9033,10 +26439,11 @@ def renderizar_pagina():
 def geo_page():
     st.title('Syngular Geopressure Analysis - SYGA')
 
+    sincronizar_estado_sapatas_antes_navegacao()
+    sincronizar_estado_fluido_antes_navegacao()
     configurar_estado_inicial()
     montar_sidebar()
     renderizar_pagina()
 
 
 geo_page()
-
