@@ -17279,15 +17279,84 @@ def _rtp_pdf_state_key(nome):
     return _rtp_widget_key(f"pdf_{nome}")
 
 
-def _rtp_fmt(valor, casas=2, sufixo=""):
-    if valor in (None, "", "Não informado"):
-        return "Não informado"
+def _pdf_valor_ausente(valor):
+    if valor is None:
+        return True
 
     try:
-        if pd.isna(valor):
-            return "Não informado"
+        resultado = pd.isna(valor)
+        if isinstance(resultado, (bool, np.bool_)) and bool(resultado):
+            return True
     except Exception:
         pass
+
+    if isinstance(valor, str):
+        return valor.strip().lower() in {
+            "",
+            "none",
+            "nan",
+            "nat",
+            "null",
+            "<na>",
+        }
+
+    return False
+
+
+def _pdf_desenhar_imagem_contida(
+        c,
+        imagem,
+        left,
+        bottom,
+        width,
+        height,
+        padding=0,
+):
+    """
+    Encaixa e centraliza uma imagem sem permitir que ela ultrapasse a area
+    reservada no PDF. O recorte explicito deixa o resultado independente das
+    diferencas de ReportLab/Pillow entre o ambiente local e o Streamlit Cloud.
+    """
+    largura_area = max(float(width) - 2 * float(padding), 0.0)
+    altura_area = max(float(height) - 2 * float(padding), 0.0)
+
+    if largura_area <= 0 or altura_area <= 0:
+        return
+
+    leitor = imagem if isinstance(imagem, ImageReader) else ImageReader(imagem)
+    largura_px, altura_px = leitor.getSize()
+
+    if largura_px <= 0 or altura_px <= 0:
+        raise ValueError("Imagem com dimensoes invalidas.")
+
+    escala = min(largura_area / largura_px, altura_area / altura_px)
+    largura_final = largura_px * escala
+    altura_final = altura_px * escala
+    x = float(left) + (float(width) - largura_final) / 2
+    y = float(bottom) + (float(height) - altura_final) / 2
+
+    c.saveState()
+    caminho = c.beginPath()
+    caminho.rect(float(left), float(bottom), float(width), float(height))
+    c.clipPath(caminho, stroke=0, fill=0)
+    c.drawImage(
+        leitor,
+        x,
+        y,
+        width=largura_final,
+        height=altura_final,
+        preserveAspectRatio=False,
+        mask="auto",
+    )
+    c.restoreState()
+
+
+def _rtp_fmt(valor, casas=2, sufixo=""):
+    if _pdf_valor_ausente(valor) or (
+            isinstance(valor, str)
+            and valor.strip().lower() == "não informado"
+    ):
+        return "Não informado"
 
     try:
         return f"{float(valor):.{casas}f}{sufixo}"
@@ -17954,18 +18023,12 @@ def _rtp_valor_celula(valor, padrao="-"):
     Normaliza valor para exibição em células do PDF.
     Células vazias, None e NaN viram '-'.
     """
-    if valor is None:
+    if _pdf_valor_ausente(valor):
         return padrao
-
-    try:
-        if pd.isna(valor):
-            return padrao
-    except Exception:
-        pass
 
     texto = str(valor).strip()
 
-    if texto == "":
+    if _pdf_valor_ausente(texto):
         return padrao
 
     return texto
@@ -19522,18 +19585,17 @@ def _rtp_desenhar_trajetoria_pdf(c, dados_auto, dados_poco, x, y_bottom, largura
             buffer_fig,
             format="png",
             dpi=240,
-            transparent=True,
+            transparent=False,
+            facecolor="white",
         )
         buffer_fig.seek(0)
-        c.drawImage(
+        _pdf_desenhar_imagem_contida(
+            c,
             ImageReader(buffer_fig),
             x_fig,
             y_fig,
-            width=largura_fig,
-            height=altura_fig,
-            preserveAspectRatio=True,
-            anchor="c",
-            mask="auto",
+            largura_fig,
+            altura_fig,
         )
     finally:
         plt.close(fig)
@@ -20025,18 +20087,17 @@ def _rtp_desenhar_geopressoes_pdf(c, dados_auto, dados_poco, x, y_bottom, largur
             buffer_fig,
             format="png",
             dpi=240,
-            transparent=True,
+            transparent=False,
+            facecolor="white",
         )
         buffer_fig.seek(0)
-        c.drawImage(
+        _pdf_desenhar_imagem_contida(
+            c,
             ImageReader(buffer_fig),
             x_fig,
             y_fig,
-            width=largura_fig,
-            height=altura_fig,
-            preserveAspectRatio=True,
-            anchor="c",
-            mask="auto",
+            largura_fig,
+            altura_fig,
         )
     finally:
         plt.close(fig)
@@ -20542,18 +20603,17 @@ def _rtp_desenhar_cronograma_pdf(c, dados_auto, dados_poco, x, y_bottom, largura
             buffer_fig,
             format="png",
             dpi=240,
-            transparent=True,
+            transparent=False,
+            facecolor="white",
         )
         buffer_fig.seek(0)
-        c.drawImage(
+        _pdf_desenhar_imagem_contida(
+            c,
             ImageReader(buffer_fig),
             x_fig,
             y_fig,
-            width=largura_fig,
-            height=altura_fig,
-            preserveAspectRatio=True,
-            anchor="c",
-            mask="auto",
+            largura_fig,
+            altura_fig,
         )
     finally:
         plt.close(fig)
@@ -24018,14 +24078,8 @@ def _rel_limpar_cache_pdf():
 
 
 def _rel_texto_seguro(texto):
-    if texto is None:
+    if _pdf_valor_ausente(texto):
         return "Não informado"
-
-    try:
-        if pd.isna(texto):
-            return "Não informado"
-    except Exception:
-        pass
 
     texto = str(texto)
 
@@ -24050,7 +24104,7 @@ def _rel_texto_seguro(texto):
 
 def _rel_fmt(valor, sufixo="", casas=2):
     try:
-        if valor is None or pd.isna(valor):
+        if _pdf_valor_ausente(valor):
             return "Não informado"
 
         if isinstance(valor, (int, float, np.integer, np.floating)):
@@ -24504,14 +24558,13 @@ def _rel_desenhar_figura(c, fig, left, right, top, bottom, titulo=None, dpi=105)
             c.setFont("Helvetica-Bold", 12)
             c.drawCentredString(left + available_width / 2, top + 6, _rel_texto_seguro(titulo))
 
-        c.drawImage(
+        _pdf_desenhar_imagem_contida(
+            c,
             img_reader,
-            x_pos,
-            y_pos,
-            width=img_width,
-            height=img_height,
-            preserveAspectRatio=True,
-            mask="auto"
+            left,
+            bottom,
+            available_width,
+            available_height,
         )
 
         return y_pos - 18
@@ -24818,14 +24871,13 @@ def _rel_desenhar_mapa_pdf_com_zoom(
 
     img = ImageReader(BytesIO(png_data))
 
-    c.drawImage(
+    _pdf_desenhar_imagem_contida(
+        c,
         img,
         left,
         bottom,
-        width=largura,
-        height=altura,
-        preserveAspectRatio=True,
-        mask="auto"
+        largura,
+        altura,
     )
 
 
@@ -24940,8 +24992,11 @@ def _rel_pagina_capa(c, width, height, logo_path, footer_y):
     c.setFont("Helvetica-Bold", 20)
     c.drawCentredString(width / 2, height - 320, titulo_relatorio)
 
-    well_name = f"{st.session_state.get('poco', st.session_state.get('well_name', 'Não informado'))}"
-    user_name = f"{st.session_state.get('user_name', 'Não informado')}"
+    well_name = st.session_state.get(
+        "poco",
+        st.session_state.get("well_name", "Não informado"),
+    )
+    user_name = st.session_state.get("user_name", "Não informado")
 
     c.setFont("Helvetica-Bold", 18)
     c.drawCentredString(width / 2, height - 365, _rel_texto_seguro(well_name))
