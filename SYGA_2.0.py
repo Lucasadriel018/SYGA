@@ -21552,7 +21552,7 @@ def pagina_relatorio_tecnico_poco():
 
                 pdf_viewer(
                     input=pdf_bytes,
-                    width=1000,
+                    width=650,
                     height=800,
                     pages_vertical_spacing=12,
                     key=_rtp_widget_key(f"pdf_viewer"),
@@ -25788,17 +25788,29 @@ def _rel_inserir_rtp_depois_da_capa(pdf_bytes):
         rtp_reader = PdfReader(BytesIO(rtp_bytes))
         writer = PdfWriter()
 
+        def adicionar_pagina_normalizada(page):
+            """
+            Mantem todas as caixas de visualizacao iguais ao MediaBox.
+            Alguns visualizadores web priorizam CropBox/TrimBox e podem
+            aparentar que a pagina e menor ou cortar imagens.
+            """
+            page.cropbox = page.mediabox
+            page.trimbox = page.mediabox
+            page.bleedbox = page.mediabox
+            page.artbox = page.mediabox
+            writer.add_page(page)
+
         # Página 1: capa do relatório final
         if len(rel_reader.pages) > 0:
-            writer.add_page(rel_reader.pages[0])
+            adicionar_pagina_normalizada(rel_reader.pages[0])
 
         # Página 2: Relatório Técnico de Poço
         for page in rtp_reader.pages:
-            writer.add_page(page)
+            adicionar_pagina_normalizada(page)
 
         # Demais páginas do relatório final
         for page in rel_reader.pages[1:]:
-            writer.add_page(page)
+            adicionar_pagina_normalizada(page)
 
         saida = BytesIO()
         writer.write(saida)
@@ -25818,9 +25830,11 @@ def _rel_inserir_rtp_depois_da_capa(pdf_bytes):
 def gerar_relatorio_pdf():
     pdf_buffer = io.BytesIO()
 
-    c = canvas.Canvas(pdf_buffer, pagesize=letter, pageCompression=1)
+    # Usa o mesmo formato fisico do RTP. Assim o PDF combinado contem apenas
+    # folhas A4: retrato no relatorio final e paisagem no RTP.
+    c = canvas.Canvas(pdf_buffer, pagesize=A4, pageCompression=1)
 
-    width, height = letter
+    width, height = A4
     footer_y = 20
 
     paginas_pdf_selecionadas = _rel_paginas_ordenadas_selecionadas()
@@ -26028,7 +26042,8 @@ def pagina_relatorio():
             if st.session_state.pdf_view_open and st.session_state.pdf_bytes is not None:
                 pdf_viewer(
                     input=st.session_state.pdf_bytes,
-                    width=700,
+                    width=650,
+                    height=840,
                     pages_vertical_spacing=12
                 )
             else:
