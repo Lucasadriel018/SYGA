@@ -17279,7 +17279,7 @@ def _rtp_pdf_state_key(nome):
 
 
 @st.cache_data(show_spinner=False, max_entries=4)
-def _renderizar_paginas_pdf(pdf_bytes, zoom=1.45):
+def _renderizar_paginas_pdf(pdf_bytes, zoom=1.20):
     """
     Converte as paginas do PDF em PNG no servidor.
     Isso evita bloqueios do Chrome a PDFs dentro de iframes do Streamlit.
@@ -17295,7 +17295,12 @@ def _renderizar_paginas_pdf(pdf_bytes, zoom=1.45):
             bitmap = pagina.render(scale=float(zoom))
             imagem = bitmap.to_pil().convert("RGB")
             buffer_pagina = BytesIO()
-            imagem.save(buffer_pagina, format="PNG", optimize=True)
+            imagem.save(
+                buffer_pagina,
+                format="PNG",
+                optimize=False,
+                compress_level=3,
+            )
             paginas_png.append(buffer_pagina.getvalue())
             bitmap.close()
             pagina.close()
@@ -18516,25 +18521,25 @@ RTP_PLANTA_LABEL_FONTSIZE = 9.8
 RTP_PLANTA_TICK_FONTSIZE = 9.2
 
 RTP_LITO_TICK_FONTSIZE = 8
-RTP_GEO_MARKERSIZE = 15.
+RTP_GEO_MARKERSIZE = 7.
 
 RTP_CRONOGRAMA_MARKER_SIZE = 350
 RTP_CRONOGRAMA_TEXT_FONTSIZE = 12.5
 RTP_CRONOGRAMA_EVENTO_TEXT_FONTSIZE = 15.
 RTP_CRONOGRAMA_DIAS_OPERACAO_FONTSIZE = 18.
 
-RTP_SAPATA_MARKER_SIZE = 300
-RTP_SAPATA_TEXT_FONTSIZE = 15.0
-RTP_RIG_ZOOM_TRAJETORIA = 0.22
-RTP_RIG_ZOOM_PLANTA = 0.13
+RTP_SAPATA_MARKER_SIZE = 250
+RTP_SAPATA_TEXT_FONTSIZE = 10.0
+RTP_RIG_ZOOM_TRAJETORIA = 0.14
+RTP_RIG_ZOOM_PLANTA = 0.10
 
-RTP_TRAJETORIA_LINEWIDTH_PLANEJADA = 7.
-RTP_TRAJETORIA_LINEWIDTH_EXECUTADA = 7.
-RTP_TRAJETORIA_LINEWIDTH_PADRAO = 7.
+RTP_TRAJETORIA_LINEWIDTH_PLANEJADA = 5.
+RTP_TRAJETORIA_LINEWIDTH_EXECUTADA = 5.
+RTP_TRAJETORIA_LINEWIDTH_PADRAO = 5.
 
-RTP_PLANTA_LINEWIDTH_PLANEJADA = 5.2
-RTP_PLANTA_LINEWIDTH_EXECUTADA = 5.2
-RTP_PLANTA_LINEWIDTH_PADRAO = 5.2
+RTP_PLANTA_LINEWIDTH_PLANEJADA = 4.
+RTP_PLANTA_LINEWIDTH_EXECUTADA = 4.
+RTP_PLANTA_LINEWIDTH_PADRAO = 4.
 
 RTP_CRONOGRAMA_LINEWIDTH_PLANEJADO = 6.
 RTP_CRONOGRAMA_LINEWIDTH_EXECUTADO = 6.
@@ -19409,7 +19414,7 @@ def _rtp_criar_figura_trajetoria(
             df_plot = df_plot.iloc[1:].reset_index(drop=True)
 
         return df_plot
-    dpi = 240
+    dpi = 180
     fig = plt.figure(
         figsize=(max(largura_px / dpi, 2.0), max(altura_px / dpi, 2.0)),
         dpi=dpi,
@@ -19619,8 +19624,8 @@ def _rtp_desenhar_trajetoria_pdf(c, dados_auto, dados_poco, x, y_bottom, largura
     fig = _rtp_criar_figura_trajetoria(
         dados_auto,
         dados_poco,
-        largura_px=max(int(largura_fig * 8), 1200),
-        altura_px=max(int(altura_fig * 8), 1200),
+        largura_px=max(int(largura_fig * 4), 720),
+        altura_px=max(int(altura_fig * 4), 720),
     )
 
     if fig is None:
@@ -19637,7 +19642,7 @@ def _rtp_desenhar_trajetoria_pdf(c, dados_auto, dados_poco, x, y_bottom, largura
         fig.savefig(
             buffer_fig,
             format="png",
-            dpi=240,
+            dpi=180,
             transparent=False,
             facecolor="white",
         )
@@ -19656,15 +19661,15 @@ def _rtp_desenhar_trajetoria_pdf(c, dados_auto, dados_poco, x, y_bottom, largura
 
 def _rtp_estilos_geopressoes_pdf():
     return {
-        "Sobrecarga": {"color": "#111111", "linestyle": "-", "linewidth": 5.},
-        "Pressão de poros": {"color": "#F57C00", "linestyle": "-", "linewidth": 5.},
-        "Fratura": {"color": "#8D3C1E", "linestyle": "-", "linewidth": 5.},
-        "Lama planejada": {"color": "#1B8E3E", "linestyle": "-", "linewidth": 5.},
-        "Lama utilizada": {"color": "#C2185B", "linestyle": "-", "linewidth": 5.},
-        "Max Inf": {"color": "#1565C0", "linestyle": "-", "linewidth": 5.},
-        "Min Sup": {"color": "#D71920", "linestyle": "-", "linewidth": 5.},
-        "Max Inferior": {"color": "#1565C0", "linestyle": "-", "linewidth": 5.},
-        "Min Superior": {"color": "#D71920", "linestyle": "-", "linewidth": 5.},
+        "Sobrecarga": {"color": "#111111", "linestyle": "-", "linewidth": 3.},
+        "Pressão de poros": {"color": "#F57C00", "linestyle": "-", "linewidth": 3.},
+        "Fratura": {"color": "#8D3C1E", "linestyle": "-", "linewidth": 3.},
+        "Lama planejada": {"color": "#1B8E3E", "linestyle": "-", "linewidth": 3.},
+        "Lama utilizada": {"color": "#C2185B", "linestyle": "-", "linewidth": 3.},
+        "Max Inf": {"color": "#1565C0", "linestyle": "-", "linewidth": 3.},
+        "Min Sup": {"color": "#D71920", "linestyle": "-", "linewidth": 3.},
+        "Max Inferior": {"color": "#1565C0", "linestyle": "-", "linewidth": 3.},
+        "Min Superior": {"color": "#D71920", "linestyle": "-", "linewidth": 3.},
         "Teste RFT": {
             "color": "#32CD32",
             "marker": "o",
@@ -19699,7 +19704,7 @@ def _rtp_estilos_geopressoes_pdf():
             "marker": "o",
             "markersize": RTP_GEO_MARKERSIZE,
             "markeredgecolor": "#000000",
-            "markeredgewidth": 1.0,
+            "markeredgewidth": 0.8,
         },
     }
 
@@ -20045,7 +20050,7 @@ def _rtp_criar_figura_geopressoes(
         profundidade_final,
     )
 
-    dpi = 240
+    dpi = 180
     fig = plt.figure(
         figsize=(max(largura_px / dpi, 2.0), max(altura_px / dpi, 2.0)),
         dpi=dpi,
@@ -20133,8 +20138,8 @@ def _rtp_desenhar_geopressoes_pdf(c, dados_auto, dados_poco, x, y_bottom, largur
     fig = _rtp_criar_figura_geopressoes(
         dados_auto,
         dados_poco,
-        largura_px=max(int(largura_fig * 8), 1200),
-        altura_px=max(int(altura_fig * 8), 1200),
+        largura_px=max(int(largura_fig * 4), 720),
+        altura_px=max(int(altura_fig * 4), 720),
     )
 
     if fig is None:
@@ -20151,7 +20156,7 @@ def _rtp_desenhar_geopressoes_pdf(c, dados_auto, dados_poco, x, y_bottom, largur
         fig.savefig(
             buffer_fig,
             format="png",
-            dpi=240,
+            dpi=180,
             transparent=False,
             facecolor="white",
         )
@@ -20266,7 +20271,7 @@ def _rtp_criar_figura_cronograma(
     if not tem_planejado and not tem_executado and df_problemas.empty:
         return None
 
-    dpi = 240
+    dpi = 180
     fig = plt.figure(
         figsize=(max(largura_px / dpi, 2.0), max(altura_px / dpi, 2.0)),
         dpi=dpi,
@@ -20649,8 +20654,8 @@ def _rtp_desenhar_cronograma_pdf(c, dados_auto, dados_poco, x, y_bottom, largura
     fig = _rtp_criar_figura_cronograma(
         dados_auto,
         dados_poco,
-        largura_px=max(int(largura_fig * 8), 1200),
-        altura_px=max(int(altura_fig * 8), 1200),
+        largura_px=max(int(largura_fig * 4), 720),
+        altura_px=max(int(altura_fig * 4), 720),
     )
 
     if fig is None:
@@ -20667,7 +20672,7 @@ def _rtp_desenhar_cronograma_pdf(c, dados_auto, dados_poco, x, y_bottom, largura
         fig.savefig(
             buffer_fig,
             format="png",
-            dpi=240,
+            dpi=180,
             transparent=False,
             facecolor="white",
         )
@@ -24642,7 +24647,7 @@ def _rel_desenhar_figura(c, fig, left, right, top, bottom, titulo=None, dpi=105)
 
 
 MAPA_RELATORIO_ZOOM = 7
-MAPA_RELATORIO_PNG_SCALE = 3
+MAPA_RELATORIO_PNG_SCALE = 2
 def _rel_paginas_ordenadas_selecionadas():
     paginas_disponiveis = obter_paginas_relatorio_disponiveis()
 
@@ -24902,6 +24907,64 @@ def _rel_criar_mapa_pdf_zoomado():
     return mapa_pdf
 
 
+def _rel_chave_cache_mapa_pdf():
+    """
+    Identifica tudo que altera visualmente o mapa do relatório.
+    """
+    pocos_adicionais = st.session_state.get("pocos_adicionais", [])
+    try:
+        pocos_adicionais_repr = repr(sorted(
+            (
+                str(item.get("nome", "")),
+                item.get("easting"),
+                item.get("northing"),
+            )
+            for item in pocos_adicionais
+            if isinstance(item, dict)
+        ))
+    except Exception:
+        pocos_adicionais_repr = repr(pocos_adicionais)
+
+    try:
+        yaml_mtime = os.path.getmtime("pocos.yaml")
+    except Exception:
+        yaml_mtime = None
+
+    parametros = (
+        st.session_state.get("easting"),
+        st.session_state.get("northing"),
+        st.session_state.get("zona"),
+        st.session_state.get("hem"),
+        st.session_state.get("raio"),
+        st.session_state.get("profundidade_maxima"),
+        MAPA_RELATORIO_ZOOM,
+        MAPA_RELATORIO_PNG_SCALE,
+        yaml_mtime,
+        pocos_adicionais_repr,
+    )
+    return hashlib.sha1(repr(parametros).encode("utf-8")).hexdigest()
+
+
+def _rel_obter_png_mapa_pdf(mapa_folium=None):
+    chave = _rel_chave_cache_mapa_pdf()
+    cache = st.session_state.setdefault("_rel_cache_png_mapa", {})
+
+    if chave in cache:
+        return cache[chave]
+
+    try:
+        mapa_pdf = _rel_criar_mapa_pdf_zoomado()
+        png_data = mapa_pdf._to_png(int(MAPA_RELATORIO_PNG_SCALE))
+    except Exception:
+        if mapa_folium is None:
+            raise ValueError("Mapa Folium não informado.")
+        png_data = mapa_folium._to_png(int(MAPA_RELATORIO_PNG_SCALE))
+
+    # Mantém somente o mapa mais recente para não acumular imagens grandes.
+    st.session_state["_rel_cache_png_mapa"] = {chave: png_data}
+    return png_data
+
+
 def _rel_desenhar_mapa_pdf_com_zoom(
         c,
         mapa_folium,
@@ -24925,15 +24988,7 @@ def _rel_desenhar_mapa_pdf_com_zoom(
     if largura <= 0 or altura <= 0:
         raise ValueError("Área inválida para desenhar o mapa.")
 
-    try:
-        mapa_pdf = _rel_criar_mapa_pdf_zoomado()
-        png_data = mapa_pdf._to_png(int(MAPA_RELATORIO_PNG_SCALE))
-
-    except Exception:
-        if mapa_folium is None:
-            raise ValueError("Mapa Folium não informado.")
-
-        png_data = mapa_folium._to_png(int(MAPA_RELATORIO_PNG_SCALE))
+    png_data = _rel_obter_png_mapa_pdf(mapa_folium)
 
     img = ImageReader(BytesIO(png_data))
 
@@ -25845,10 +25900,15 @@ def _rel_inserir_rtp_depois_da_capa(pdf_bytes):
 
         dados_auto, dados_poco = _rtp_preparar_dados_para_relatorio_final()
 
-        rtp_bytes = _rtp_gerar_pdf_bytes(
-            dados_auto=dados_auto,
-            dados_poco=dados_poco,
-        )
+        chave_rtp_bytes = _rtp_pdf_state_key("bytes")
+        rtp_bytes = st.session_state.get(chave_rtp_bytes)
+
+        if not rtp_bytes:
+            rtp_bytes = _rtp_gerar_pdf_bytes(
+                dados_auto=dados_auto,
+                dados_poco=dados_poco,
+            )
+            st.session_state[chave_rtp_bytes] = rtp_bytes
 
         rel_reader = PdfReader(BytesIO(pdf_bytes))
         rtp_reader = PdfReader(BytesIO(rtp_bytes))
@@ -26025,8 +26085,6 @@ def pagina_relatorio():
 
     report_name = f"{nome_base}.pdf"
 
-    # Sem coluna vazia à direita: a prévia passa a usar todo o espaço restante
-    # e cresce junto com a área principal quando o sidebar é minimizado.
     c1, col_config, col_preview, c4 = st.columns((0.1, 0.7, 1.0, 0.1), gap="small")
 
     with col_config:
@@ -26080,19 +26138,19 @@ def pagina_relatorio():
             if not paginas_escolhidas:
                 st.warning("Selecione pelo menos uma página para gerar o relatório.")
 
-            view = st.button(
-                "📑 Ver Relatório",
+            gerar = st.button(
+                "Gerar Relatório",
                 key="pdf_view_bt_v62",
                 use_container_width=True,
                 disabled=not st.session_state.pdf_paginas_selecionadas,
                 type="primary"
             )
 
-            if view:
+            if gerar:
                 with st.spinner("Gerando relatório..."):
                     st.session_state.pdf_bytes = gerar_relatorio_pdf()
                     st.session_state.pdf_ready = True
-                    st.session_state.pdf_view_open = True
+                    st.session_state.pdf_view_open = False
 
             if st.session_state.pdf_ready and st.session_state.pdf_bytes is not None:
                 st.download_button(
@@ -26104,6 +26162,16 @@ def pagina_relatorio():
                     type="primary",
                     key="download_relatorio_v62"
                 )
+                if st.button(
+                    "Exibir pré-visualização"
+                    if not st.session_state.pdf_view_open
+                    else "Ocultar pré-visualização",
+                    use_container_width=True,
+                    key="alternar_preview_relatorio_v63",
+                    type="primary"
+                ):
+                    st.session_state.pdf_view_open = not st.session_state.pdf_view_open
+                    st.rerun()
 
     with col_preview:
         with st.container(border=True):
